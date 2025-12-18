@@ -14,10 +14,17 @@ if (!supabaseServiceRoleKey) {
 }
 
 //This client is for server-only code
-export const supabaseAdmin = createClient<Database>(
-    supabaseUrl,
-    supabaseServiceRoleKey,
-    {
-        auth: { persistSession: false },        
+let client: ReturnType<typeof createClient<Database>> | null = null;
+
+export function createSupabaseServerClient (){
+    if (!client) {
+        client = createClient<Database>(
+            supabaseUrl as string,
+            supabaseServiceRoleKey as string,
+            {
+                auth: { persistSession: false },        
+            }
+        );
     }
-)
+    return client;
+}

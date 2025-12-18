@@ -13,7 +13,14 @@ if (!supabaseAnonKey) {
 }
 
 // This client uses the *public / publishable* key and is safe for browser use
-export const supabaseClient = createClient<Database>(
-    supabaseUrl,
-    supabaseAnonKey
-  );
+let client: ReturnType<typeof createClient<Database>> | null = null;
+
+export function createSupabaseBrowserClient() {
+    if (!client) {
+        client = createClient<Database>(
+            supabaseUrl as string,
+            supabaseAnonKey as string
+        );
+    }
+    return client;
+}
