@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "@/lib/supabaseAdminClient";
+import { supabaseAdmin } from "@/lib/supabase/server";
 
 
 async function main() {
