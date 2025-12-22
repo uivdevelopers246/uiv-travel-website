@@ -11,7 +11,7 @@ if (!supabaseUrl) {
 }
 
 if (!supabasePublishableKey) {
-    throw new Error("SUPABASE_SERVICE_ROLE_KEY environment variable is not set");
+    throw new Error("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY environment variable is not set");
 }
 
 //This client is for server-only code

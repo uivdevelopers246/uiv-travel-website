@@ -9,7 +9,7 @@ if (!supabaseUrl) {
 }
 
 if (!supabasePublishableKey) {
-    throw new Error("NEXT_PUBLIC_SUPABASE_ANON_KEY environment variable is not set");
+    throw new Error("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY environment variable is not set");
 }
 
 // This client uses the *public / publishable* key and is safe for browser use
