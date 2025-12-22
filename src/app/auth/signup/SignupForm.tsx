@@ -2,12 +2,12 @@
 
 import { FormEvent, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createSupabaseBrowserClient } from '@/lib/supabase/client'
+import { createClient } from '@/lib/supabase/client'
 import type { AuthFormState } from '../types'
 
 export function SignupForm() {
   const router = useRouter()
-  const supabase = createSupabaseBrowserClient()
+  const supabase = createClient()
 
   const [state, setState] = useState<AuthFormState>({
     email: '',
