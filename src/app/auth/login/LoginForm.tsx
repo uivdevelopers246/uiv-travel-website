@@ -20,7 +20,7 @@ export function LoginForm() {
 
   // Optional: allow redirect param (?redirect=/something)
   // We will update this later after creating a landing page  or as we add protected routes
-//  const redirectTo = searchParams.get('redirect') ?? '/me'
+ const redirectTo = searchParams.get('redirect') ?? '/'
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -58,11 +58,9 @@ export function LoginForm() {
         }))
         return
       }
-    // If we auto-login on signup, we can redirect straight to /me or landing page
+
     // Will need to update the UI on the landing page when the user is signed in to display their profile?
-    //   router.push('/me')
-    alert('Login successful!')
-    //   router.push(redirectTo)
+      router.push(redirectTo)
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : 'Something went wrong. Please try again.'
