@@ -34,8 +34,9 @@ export function SignupForm() {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        // If you later want email confirmations, you can add options here
-        // options: { emailRedirectTo: 'http://localhost:3000/auth/callback' }
+        options: { 
+          emailRedirectTo: `${window.location.origin}/auth/confirm?next=/`
+        }
       })
 
       if (error) {
