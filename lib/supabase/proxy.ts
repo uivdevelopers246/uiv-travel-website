@@ -51,13 +51,22 @@ export async function updateSession(request: NextRequest) {
 
   const user = data?.claims
 
-  if (
-    !user &&
-    !request.nextUrl.pathname.startsWith('/auth/login')
-  ) {
+  //Protected routes that require authentication
+  const protectedPaths: string [] = []
+  const isProtectedPath = protectedPaths.some(path => 
+    request.nextUrl.pathname.startsWith(path)
+  )
+  //Public paths that do not require protections/auth
+  const publicPaths = ['/auth/', '/api/']
+  const isPublicPath = publicPaths.some(path => (
+    request.nextUrl.pathname.startsWith(path)
+  ))
+  //Only protect if it's a protected path and not a public path
+  if (!user && isProtectedPath && !isPublicPath) {
     // no user, potentially respond by redirecting the user to the login page
     const url = request.nextUrl.clone()
     url.pathname = '/auth/login'
+    url.searchParams.set('redirect', request.nextUrl.pathname)
     return NextResponse.redirect(url)
   }
 
