@@ -8,7 +8,15 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const token_hash = searchParams.get('token_hash')
   const type = searchParams.get('type') as EmailOtpType | null
-  const next = searchParams.get('next') ?? '/'
+  let next = searchParams.get('next') ?? '/'
+
+    // If next is a full URL, extract just the path
+  try {
+    const nextUrl = new URL(next)
+    next = nextUrl.pathname + nextUrl.search
+  } catch {
+    // If it's not a valid URL, treat it as a path (already correct)
+  }
 
   if (token_hash && type) {
     const supabase = await createClient()
@@ -23,6 +31,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // redirect the user to an error page with some instructions
-  redirect('/auth/auth-code-error')
+  const url = new URL('/auth/login', request.url)
+  url.searchParams.set('error', 'invalid_confirmation_link')
+  redirect(url.toString())
 }
