@@ -29,13 +29,14 @@ export function SignupForm() {
 
     const email = state.email.trim()
     const password = state.password
-
+    const next = '/'
+    const emailRedirectTo = `${window.location.origin}/auth/confirm?next=${encodeURIComponent(next)}`
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: { 
-          emailRedirectTo: `${window.location.origin}/auth/confirm?next=/`
+          emailRedirectTo /*: `${window.location.origin}/auth/confirm?next=/`*/
         }
       })
 
