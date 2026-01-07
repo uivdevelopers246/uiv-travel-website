@@ -39,7 +39,9 @@ export function SignupForm() {
     const email = state.email.trim()
     const password = state.password
     const next = '/'
-    const emailRedirectTo = `${getBaseURL()}/auth/confirm?next=${encodeURIComponent(next)}`
+    // const emailRedirectTo = `${getBaseURL()}/auth/confirm?next=${encodeURIComponent(next)}`
+    const emailRedirectTo = getBaseURL()
+
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
