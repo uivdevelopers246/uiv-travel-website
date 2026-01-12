@@ -22,7 +22,7 @@ export default function Home() {
         {/* Hero Content */}
         <div className="relative z-10 text-center px-4 max-w-4xl mx-auto mt-19">
           <h1 className="text-6xl md:text-7xl lg:text-8xl font-bold mb-6" style={{ fontFamily: 'var(--font-playfair)' }}>
-            <span className="text-[#C1AA85]">Low Rates,</span>
+            <span className="text-[#FBCA1A]">Low Rates,</span>
             <br />
             <span className="text-white font-bold">High Tide</span>
           </h1>
