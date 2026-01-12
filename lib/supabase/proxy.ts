@@ -58,9 +58,9 @@ export async function updateSession(request: NextRequest) {
   )
   //Public paths that do not require protections/auth
   const publicPaths = ['/auth/', '/api/']
-  const isPublicPath = publicPaths.some(path => (
+  const isPublicPath = publicPaths.some(path => 
     request.nextUrl.pathname.startsWith(path)
-  ))
+  )
   //Only protect if it's a protected path and not a public path
   if (!user && isProtectedPath && !isPublicPath) {
     // no user, potentially respond by redirecting the user to the login page

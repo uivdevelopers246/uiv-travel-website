@@ -27,15 +27,27 @@ export function SignupForm() {
       message: null,
     }))
 
+    const getBaseURL = () => {
+      const url =
+        process.env.NEXT_PUBLIC_SITE_URL ??      // production only
+        process.env.NEXT_PUBLIC_VERCEL_URL ??    // set by Vercel (no protocol)
+        'http://localhost:3000'
+    
+      return url.startsWith('http') ? url : `https://${url}`
+    }
+
     const email = state.email.trim()
     const password = state.password
+    const next = '/'
+    // const emailRedirectTo = `${getBaseURL()}/auth/confirm?next=${encodeURIComponent(next)}`
+    const emailRedirectTo = getBaseURL()
 
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: { 
-          emailRedirectTo: `${window.location.origin}/auth/confirm?next=/`
+          emailRedirectTo /*: `${window.location.origin}/auth/confirm?next=/`*/
         }
       })
 
