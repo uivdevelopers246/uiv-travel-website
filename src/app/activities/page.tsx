@@ -20,7 +20,7 @@ export default function ActivitiesPage() {
         {/* Background Image */}
         <div className="absolute inset-0">
           <img 
-            src="/images/hero/BeachSunset.jpg" 
+            src="/images/hero/ScenicHill.JPG" 
             alt="Activities & Experiences" 
             className="w-full h-full object-cover brightness-90"
           />
