@@ -1,3 +1,7 @@
+alter table public.profiles enable row level security;
+-- optional (stricter)
+alter table public.profiles force row level security;
+
 -- Allow authenticated users to select only their own profile
 create policy "Users can view own profile"
 on public.profiles
