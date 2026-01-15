@@ -1,0 +1,40 @@
+import { type EmailOtpType } from '@supabase/supabase-js'
+import { type NextRequest } from 'next/server'
+
+import { createClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic'
+
+export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url)
+  const token_hash = searchParams.get('token_hash')
+  const type = searchParams.get('type') as EmailOtpType | null
+  let next = searchParams.get('next') ?? '/'
+
+    // If next is a full URL, extract just the path
+  try {
+    const nextUrl = new URL(next)
+    next = nextUrl.pathname + nextUrl.search
+  } catch {
+    // If it's not a valid URL, treat it as a path (already correct)
+  }
+
+  if (token_hash && type) {
+    const supabase = await createClient()
+
+    const { error } = await supabase.auth.verifyOtp({
+      type,
+      token_hash,
+    })
+    if (!error) {
+      // redirect user to specified redirect URL or root of app
+      redirect(next)
+    }
+  }
+
+  const url = new URL('/auth/login', request.url)
+  url.searchParams.set('error', 'invalid_confirmation_link')
+  redirect(url.toString())
+}
