@@ -4,28 +4,28 @@
 create table if not exists public.vendors (
     id uuid primary key default gen_random_uuid(),
     name text not null,
-    owner_user_id not null unique references auth.users(id) on delete cascade,
-    created_at timestampz not null default now(),
-    updated_at timestampz not null default now()
+    owner_user_id uuid not null unique references auth.users(id) on delete cascade,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
 );
---check why we use an id for the vendor table. but a user id for the admin table. seems inconsistent
+
 
 -- Site admins: Admins can manage all activities
 
 create table if not exists public.site_admins (
     user_id uuid primary key references auth.users(id) on delete cascade,
-    created_at timestampz not null default now()
-)
+    created_at timestamptz not null default now()
+);
 
 -- Activities
 
-create table if not exists public.activites (
-    id uuid primary key default gen_random_uuid,
-    vendor_id not null references public.vendors(id) on delete cascade,
+create table if not exists public.activities (
+    id uuid primary key default gen_random_uuid(),
+    vendor_id uuid not null references public.vendors(id) on delete cascade,
 
     title text not null,
     description text,
-    location text
+    location text,
     category text not null check (category in ('water-sports', 'wildlife', 'adventure', 'culture', 'nature')),
     duration_hours numeric check (duration_hours is null or duration_hours > 0),
     price_per_person numeric check  (price_per_person is null or price_per_person >= 0),
@@ -35,12 +35,10 @@ create table if not exists public.activites (
     is_featured boolean not null default false,
 
     status text not null default 'draft' check (status in ('draft', 'published', 'archived')),
-    created_at timestampz not null default now(),
-    updated_at timestampz not null default now()
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
 );
 
--- Also check how rating is part of the schema but we dont want the vendors to be able to set this (RLS)
--- check purpose of is_featured field
 
 -- updated_at trigger helper
 
@@ -58,7 +56,7 @@ $$;
 drop trigger if exists trg_vendors_set_updated_at on public.vendors;
 create trigger trg_vendors_set_updated_at
 before update on public.vendors
-for each row  execute function public.set_updated_at();
+for each row execute function public.set_updated_at();
 
 drop trigger if exists trg_activities_set_updated_at on public.activities;
 create trigger trg_activities_set_updated_at
@@ -66,7 +64,7 @@ before update on public.activities
 for each row execute function public.set_updated_at();
 
 -- Helper functions for RLS (stable = good for polcies)
-create or replace function public.is_site_admin();
+create or replace function public.is_site_admin()
 returns boolean
 language sql stable
 as $$
@@ -75,14 +73,14 @@ as $$
         where sa.user_id = auth.uid()
     );
 $$;
--- sa is an alias for site_admins?
+
 
 create or replace function public.is_vendor_owner(v_id uuid)
 returns boolean
 language sql stable
 as $$
     select exists (
-        select 1 from public.vendors v_id
+        select 1 from public.vendors v
         where v.id = v_id
             and v.owner_user_id = auth.uid()
     );
