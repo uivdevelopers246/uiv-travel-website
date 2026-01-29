@@ -45,6 +45,7 @@ create table if not exists public.activities (
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
+set search_path = pg_catalog, public
 as $$
 begin
     new.updated_at = now();
@@ -67,9 +68,11 @@ for each row execute function public.set_updated_at();
 create or replace function public.is_site_admin()
 returns boolean
 language sql stable
+set search_path = pg_catalog, public
 as $$
     select exists (
-        select 1 from public.site_admins sa
+        select 1 
+        from public.site_admins sa
         where sa.user_id = auth.uid()
     );
 $$;
@@ -78,10 +81,23 @@ $$;
 create or replace function public.is_vendor_owner(v_id uuid)
 returns boolean
 language sql stable
+set search_path = pg_catalog, public
 as $$
     select exists (
         select 1 from public.vendors v
         where v.id = v_id
             and v.owner_user_id = auth.uid()
     );
-$$
+$$;
+
+-- Creating indexes on the tables (Improves query performance and remove Supabase linter warning due to missing indexes)
+-- These indexes support efficient queries on vendor_id, status, and vendor_id + created_at.
+
+create index if not exists idx_activities_vendor_id
+  on public.activities (vendor_id);
+
+create index if not exists idx_activities_status
+  on public.activities (status);
+
+create index if not exists idx_activities_vendor_created_at
+  on public.activities (vendor_id, created_at desc);

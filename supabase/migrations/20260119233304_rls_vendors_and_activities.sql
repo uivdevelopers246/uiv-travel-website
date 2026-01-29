@@ -3,6 +3,7 @@ alter table public.vendors enable row level security;
 alter table public.activities enable row level security;
 alter table public.site_admins enable row level security;
 
+
 --------------------------------------------------------------------------------
 -- COLUMN-LEVEL PRIVILEGES (protect system-owned columns like rating)
 --------------------------------------------------------------------------------
