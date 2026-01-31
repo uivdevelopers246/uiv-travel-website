@@ -41,25 +41,26 @@ export type CreateActivityInput = {
 
 export async function createActivity(
     supabase: SupabaseClient<Database>,
-    input: CreateActivityInput) {
-    const { data, error } = await supabase
-        .from("activities")
-        .insert({
-            vendor_id: input.vendor_id,
-            title: input.title.trim(),
-            description: input.description,
-            location: input.location,
-            category: input.category,
-            duration_hours: input.duration_hours,
-            price_per_person: input.price_per_person,
-            max_capacity: input.max_capacity,
-            image_url: input.image_url,
-        })
-        .select("*") 
-        .single();
-        
-        if (error) throw new Error(error.message);
-        return data;
+    input: CreateActivityInput
+) {
+  const { data, error } = await supabase
+    .from("activities")
+    .insert({
+        vendor_id: input.vendor_id,
+        title: input.title.trim(),
+        description: input.description,
+        location: input.location,
+        category: input.category,
+        duration_hours: input.duration_hours,
+        price_per_person: input.price_per_person,
+        max_capacity: input.max_capacity,
+        image_url: input.image_url,
+    })
+    .select("*") 
+    .single();
+    
+    if (error) throw new Error(error.message);
+    return data;
 }
 
 

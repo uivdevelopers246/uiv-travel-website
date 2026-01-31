@@ -19,6 +19,7 @@ function makeMockSupabase() {
 }
 
 describe("activities service", () => {
+  //----------------CREATE------------------
     it("createActivity: inserts a new activity and returns the created row", async () => {
         const { supabase, query } = makeMockSupabase();
       
@@ -78,6 +79,31 @@ describe("activities service", () => {
         expect(created.vendor_id).toBe("v1");
     });
 
+    it("createActivity: throws when insert fails", async () => {
+      const { supabase, query } = makeMockSupabase();
+    
+      (query as any).insert = vi.fn().mockReturnThis();
+    
+      query.single.mockResolvedValueOnce({
+        data: null,
+        error: { message: "Insert failed" },
+      });
+    
+      await expect(
+        createActivity(supabase, {
+          vendor_id: "v1",
+          title: "Bad Activity",
+          category: "water-sports",
+        })
+      ).rejects.toThrow("Insert failed");
+    
+      expect(supabase.from).toHaveBeenCalledWith("activities");
+      expect((query as any).insert).toHaveBeenCalled();
+      expect(query.select).toHaveBeenCalled();
+      expect(query.single).toHaveBeenCalled();
+    });
+
+    //-----------------READ---------------
 
     it("listActivities: builds query with filters and returns data", async () => {
         const { supabase, query} = makeMockSupabase();
