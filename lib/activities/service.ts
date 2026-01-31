@@ -1,4 +1,6 @@
-import { browserClient } from "@/lib/supabase/client";
+// import { browserClient } from "@/lib/supabase/client";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/supabase/types/database";
 
 export type ActivityStatus = "draft" | "published" | "archived";
 export type ActivityCategory = "water-sports" | "wildlife" | "adventure" | "culture" | "nature";
@@ -37,8 +39,10 @@ export type CreateActivityInput = {
 
 //-----------CREATE Functions-----------
 
-export async function createActivity(input: CreateActivityInput) {
-    const { data, error } = await browserClient
+export async function createActivity(
+    supabase: SupabaseClient<Database>,
+    input: CreateActivityInput) {
+    const { data, error } = await supabase
         .from("activities")
         .insert({
             vendor_id: input.vendor_id,

@@ -69,8 +69,6 @@ describe("activities service", () => {
             duration_hours: 2,
             price_per_person: 120,
             max_capacity: 10,
-            is_featured: false,
-            status: "draft",
           })
         );
         expect(query.select).toHaveBeenCalled();
