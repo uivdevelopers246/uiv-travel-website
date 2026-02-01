@@ -12,9 +12,12 @@ if (!supabasePublishableKey) {
     throw new Error("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY environment variable is not set");
 }
 
-
-export const browserClient = createBrowserClient<Database>(
+export function createClient() {
+    return createBrowserClient<Database>(
         supabaseUrl! as string,
         supabasePublishableKey! as string,
-)
+    )
+}
+
+export const browserClient = createClient()
 

@@ -3,10 +3,13 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+import { getRoleFlags, getUserRole, type UserRole } from "@/lib/auth/roles";
 
 export function Header() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [role, setRole] = useState<UserRole>("guest");
   const pathname = usePathname();
 
   useEffect(() => {
@@ -22,6 +25,31 @@ export function Header() {
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    const supabase = createClient();
+    let active = true;
+
+    const loadRole = async () => {
+      const nextRole = await getUserRole(supabase);
+      if (active) {
+        setRole(nextRole);
+      }
+    };
+
+    void loadRole();
+
+    const { data } = supabase.auth.onAuthStateChange(() => {
+      void loadRole();
+    });
+
+    return () => {
+      active = false;
+      data.subscription.unsubscribe();
+    };
+  }, []);
+
+  const flags = getRoleFlags(role);
 
   return (
     <>
@@ -84,10 +112,10 @@ export function Header() {
               <span>My Trip</span>
             </Link>
             <Link 
-              href="/auth/login" 
+              href={flags.canAccessAccount ? "/account" : "/auth/login"}
               className="border border-gray-300 hover:bg-gray-100 text-gray-900 px-4 py-2 text-sm font-medium transition-colors"
             >
-              Sign In
+              {flags.canAccessAccount ? "Account" : "Sign In"}
             </Link>
             <Link 
               href="/bookings" 
@@ -176,10 +204,10 @@ export function Header() {
                 <span>My Trip</span>
               </Link>
               <Link 
-                href="/auth/login" 
+                href={flags.canAccessAccount ? "/account" : "/auth/login"}
                 className="block text-center border border-gray-300 hover:bg-gray-100 text-gray-900 px-4 py-3 text-base font-medium transition-colors"
               >
-                Sign In
+                {flags.canAccessAccount ? "Account" : "Sign In"}
               </Link>
               <Link 
                 href="/bookings" 
