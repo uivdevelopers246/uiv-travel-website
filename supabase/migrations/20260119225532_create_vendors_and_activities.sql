@@ -91,6 +91,30 @@ as $$
     );
 $$;
 
+create or replace function public.is_vendor_user()
+returns boolean
+language sql stable
+security definer
+set search_path = pg_catalog, public
+as $$
+    select exists (
+        select 1 from public.vendors v
+        where v.owner_user_id = auth.uid()
+    );
+$$;
+
+create or replace function public.vendor_id_for_user()
+returns uuid
+language sql stable
+security definer
+set search_path = pg_catalog, public
+as $$
+    select v.id
+    from public.vendors v
+    where v.owner_user_id = auth.uid()
+    limit 1;
+$$;
+
 -- Creating indexes on the tables (Improves query performance and remove Supabase linter warning due to missing indexes)
 -- These indexes support efficient queries on vendor_id, status, and vendor_id + created_at.
 

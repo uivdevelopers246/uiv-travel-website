@@ -36,6 +36,12 @@ drop policy if exists "Site admins can read self" on public.site_admins;
 -- profiles
 drop policy if exists "Site admins can view all profiles" on public.profiles;
 
+-- storage objects
+drop policy if exists "Activity images public read" on storage.objects;
+drop policy if exists "Activity images upload" on storage.objects;
+drop policy if exists "Activity images update" on storage.objects;
+drop policy if exists "Activity images delete" on storage.objects;
+
 -- -----------------------------------------------------------------------------
 -- ACTIVITIES policies (consolidated)
 -- -----------------------------------------------------------------------------
@@ -162,3 +168,75 @@ on public.profiles
 for select
 to authenticated
 using (public.is_site_admin());
+
+-- -----------------------------------------------------------------------------
+-- STORAGE policies (activity-images bucket)
+-- -----------------------------------------------------------------------------
+
+insert into storage.buckets (id, name, public)
+values ('activity-images', 'activity-images', true)
+on conflict (id) do update set public = true;
+
+create policy "Activity images public read"
+on storage.objects
+for select
+to anon, authenticated
+using (bucket_id = 'activity-images');
+
+create policy "Activity images upload"
+on storage.objects
+for insert
+to authenticated
+with check (
+  bucket_id = 'activity-images'
+  AND (
+    public.is_site_admin()
+    OR (
+      public.vendor_id_for_user() is not null
+      AND name like (public.vendor_id_for_user()::text || '/%')
+    )
+  )
+);
+
+create policy "Activity images update"
+on storage.objects
+for update
+to authenticated
+using (
+  bucket_id = 'activity-images'
+  AND (
+    public.is_site_admin()
+    OR (
+      public.vendor_id_for_user() is not null
+      AND name like (public.vendor_id_for_user()::text || '/%')
+    )
+    OR auth.uid() = owner
+  )
+)
+with check (
+  bucket_id = 'activity-images'
+  AND (
+    public.is_site_admin()
+    OR (
+      public.vendor_id_for_user() is not null
+      AND name like (public.vendor_id_for_user()::text || '/%')
+    )
+    OR auth.uid() = owner
+  )
+);
+
+create policy "Activity images delete"
+on storage.objects
+for delete
+to authenticated
+using (
+  bucket_id = 'activity-images'
+  AND (
+    public.is_site_admin()
+    OR (
+      public.vendor_id_for_user() is not null
+      AND name like (public.vendor_id_for_user()::text || '/%')
+    )
+    OR auth.uid() = owner
+  )
+);

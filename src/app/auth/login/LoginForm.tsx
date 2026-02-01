@@ -22,6 +22,17 @@ export function LoginForm() {
   // We will update this later after creating a landing page  or as we add protected routes
  const redirectTo = searchParams.get('redirect') ?? '/'
 
+  const toMessage = (value: unknown, fallback: string) => {
+    if (typeof value === 'string' && value.trim().length > 0) return value
+    if (value && typeof value === 'object') {
+      const maybeMessage = (value as { message?: unknown }).message
+      if (typeof maybeMessage === 'string' && maybeMessage.trim().length > 0) {
+        return maybeMessage
+      }
+    }
+    return fallback
+  }
+
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
 
@@ -45,7 +56,7 @@ export function LoginForm() {
         setState(prev => ({
           ...prev,
           loading: false,
-          error: error.message,
+          error: toMessage(error, 'Unable to sign in. Please try again.'),
         }))
         return
       }
@@ -62,8 +73,7 @@ export function LoginForm() {
     // Will need to update the UI on the landing page when the user is signed in to display their profile?
       router.push(redirectTo)
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'Something went wrong. Please try again.'
+      const message = toMessage(err, 'Something went wrong. Please try again.')
       setState(prev => ({
         ...prev,
         loading: false,
