@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { activityCategories } from "@/lib/activities/constants";
 
+type ActivityCategory = (typeof activityCategories)[number]["value"];
+
 type ActivityRow = {
   id: string;
   vendor_id: string;
@@ -34,7 +36,11 @@ export function ManageActivitiesClient({
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<{
+    vendor_id: string;
+    title: string;
+    category: ActivityCategory;
+  }>({
     vendor_id: defaultVendorId,
     title: "",
     category: activityCategories[0]?.value ?? "water-sports",
@@ -174,7 +180,10 @@ export function ManageActivitiesClient({
               <select
                 value={form.category}
                 onChange={event =>
-                  setForm(prev => ({ ...prev, category: event.target.value }))
+                  setForm(prev => ({
+                    ...prev,
+                    category: event.target.value as ActivityCategory,
+                  }))
                 }
                 className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
               >

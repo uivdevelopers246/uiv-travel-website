@@ -4,6 +4,8 @@ import { getUserRole } from "@/lib/auth/roles";
 import { Header } from "@/components/layout/header";
 import { ManageActivitiesClient } from "./ManageActivitiesClient";
 
+type ActivityStatus = "draft" | "published" | "archived";
+
 export default async function ManageActivitiesPage() {
   const supabase = await createClient();
   const role = await getUserRole(supabase);
@@ -51,6 +53,8 @@ export default async function ManageActivitiesPage() {
           timeZone: "UTC",
         }).format(new Date(value))
       : "--";
+  const normalizeStatus = (value: string | null): ActivityStatus =>
+    value === "published" || value === "archived" ? value : "draft";
 
   if (role === "admin") {
     const [{ data: activityRows }, { data: vendorRows }] = await Promise.all([
@@ -64,6 +68,7 @@ export default async function ManageActivitiesPage() {
     activities =
       activityRows?.map(activity => ({
         ...activity,
+        status: normalizeStatus(activity.status ?? null),
         created_at_display: formatDate(activity.created_at ?? null),
       })) ?? [];
     vendorOptions = vendorRows ?? [];
@@ -104,6 +109,7 @@ export default async function ManageActivitiesPage() {
     activities =
       activityRows?.map(activity => ({
         ...activity,
+        status: normalizeStatus(activity.status ?? null),
         created_at_display: formatDate(activity.created_at ?? null),
       })) ?? [];
     vendorNames = { [vendor.id]: vendor.name };
