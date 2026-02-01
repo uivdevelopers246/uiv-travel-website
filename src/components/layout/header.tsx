@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getRoleFlags, getUserRole, type UserRole } from "@/lib/auth/roles";
+import { SettingsFab } from "@/components/admin/SettingsFab";
 
 export function Header() {
   const [scrolled, setScrolled] = useState(false);
@@ -158,6 +159,7 @@ export function Header() {
         </div>
       </nav>
     </header>
+      {role === "admin" && pathname === "/" && <SettingsFab />}
 
       {/* Mobile Menu Drawer - Outside header for proper z-index stacking */}
       <div className={`fixed left-0 right-0 top-[60px] bottom-0 z-40 transform transition-transform duration-300 ease-in-out bg-gradient-to-br from-[#E8F1FA] via-[#C5E0F5] to-[#193059] min-[1250px]:hidden ${
