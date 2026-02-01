@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getUserRole } from "@/lib/auth/roles";
+import { ManageUsersClient } from "./ManageUsersClient";
 
 export default async function ManageUsersPage() {
   const supabase = await createClient();
@@ -21,20 +22,25 @@ export default async function ManageUsersPage() {
     );
   }
 
-  const [{ data: profiles, error: profilesError }, { data: vendors, error: vendorsError }] =
-    await Promise.all([
-      supabase
-        .from("profiles")
-        .select("id, display_name, created_at")
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("vendors")
-        .select("id, name, owner_user_id, created_at")
-        .order("created_at", { ascending: false }),
-    ]);
+  const [
+    { data: profiles, error: profilesError },
+    { data: vendors, error: vendorsError },
+    { data: admins, error: adminsError },
+  ] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("id, display_name, created_at")
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("vendors")
+      .select("id, name, owner_user_id, created_at")
+      .order("created_at", { ascending: false }),
+    supabase.from("site_admins").select("user_id"),
+  ]);
 
   const users = profiles ?? [];
   const vendorRows = vendors ?? [];
+  const adminIds = admins?.map(admin => admin.user_id) ?? [];
 
   return (
     <div className="min-h-screen bg-white px-6 pt-32 pb-20 text-[#193059]">
@@ -46,48 +52,29 @@ export default async function ManageUsersPage() {
           </p>
         </div>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold">Users</h2>
-            <span className="text-xs text-slate-500">{users.length} total</span>
-          </div>
-          {profilesError && (
-            <p className="mt-3 text-sm text-red-600">
-              Failed to load users: {profilesError.message}
-            </p>
-          )}
-          {!profilesError && users.length === 0 && (
-            <p className="mt-3 text-sm text-slate-600">No users found.</p>
-          )}
-          {users.length > 0 && (
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="text-xs uppercase text-slate-500">
-                  <tr>
-                    <th className="py-2 pr-4">Display name</th>
-                    <th className="py-2 pr-4">User id</th>
-                    <th className="py-2">Created</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map(user => (
-                    <tr key={user.id} className="border-t border-slate-100">
-                      <td className="py-3 pr-4 font-medium">
-                        {user.display_name ?? "—"}
-                      </td>
-                      <td className="py-3 pr-4 text-xs text-slate-500">{user.id}</td>
-                      <td className="py-3 text-xs text-slate-500">
-                        {user.created_at
-                          ? new Date(user.created_at).toLocaleString()
-                          : "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
+        {profilesError && (
+          <p className="text-sm text-red-600">
+            Failed to load users: {profilesError.message}
+          </p>
+        )}
+        {vendorsError && (
+          <p className="text-sm text-red-600">
+            Failed to load vendors: {vendorsError.message}
+          </p>
+        )}
+        {adminsError && (
+          <p className="text-sm text-red-600">
+            Failed to load admin roles: {adminsError.message}
+          </p>
+        )}
+
+        {!profilesError && !vendorsError && !adminsError && (
+          <ManageUsersClient
+            users={users}
+            vendors={vendorRows}
+            adminIds={adminIds}
+          />
+        )}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between">
