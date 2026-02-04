@@ -15,7 +15,6 @@ export async function POST(req: Request) {
     
     try {
         const created = await createActivity(supabase, {
-            vendor_id: body.vendor_id,
             title: body.title,
             description: body.description ?? null,
             location: body.location ?? null,
