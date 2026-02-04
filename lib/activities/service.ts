@@ -25,7 +25,6 @@ export type Activity = {
 };
 
 export type CreateActivityInput = {
-    vendor_id: string;
     title: string;
     description?:string | null;
     location?: string | null;
@@ -43,24 +42,41 @@ export async function createActivity(
     supabase: SupabaseClient<Database>,
     input: CreateActivityInput
 ) {
-  const { data, error } = await supabase
-    .from("activities")
-    .insert({
-        vendor_id: input.vendor_id,
-        title: input.title.trim(),
-        description: input.description,
-        location: input.location,
-        category: input.category,
-        duration_hours: input.duration_hours,
-        price_per_person: input.price_per_person,
-        max_capacity: input.max_capacity,
-        image_url: input.image_url,
-    })
-    .select("*") 
-    .single();
+
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) {
+        throw new Error("Unauthorized");
+    }
+
+    const { data: vendor, error: vendorError } = await supabase
+        .from("vendors")
+        .select("id")
+        .eq("owner_user_id", userData.user.id)
+        .maybeSingle();
     
-    if (error) throw new Error(error.message);
-    return data;
+    if (vendorError) throw new Error(vendorError.message);
+    if(!vendor) {
+        throw new Error("User is not associated with a vendor");
+    }
+    
+    const { data, error } = await supabase
+        .from("activities")
+        .insert({
+            vendor_id: vendor.id,
+            title: input.title.trim(),
+            description: input.description,
+            location: input.location,
+            category: input.category,
+            duration_hours: input.duration_hours,
+            price_per_person: input.price_per_person,
+            max_capacity: input.max_capacity,
+            image_url: input.image_url,
+        })
+        .select("*") 
+        .single();
+        
+        if (error) throw new Error(error.message);
+        return data;
 }
 
 
