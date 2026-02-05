@@ -35,6 +35,24 @@ export type CreateActivityInput = {
     image_url?: string | null;
 };
 
+/** Column names to select for public activity listings (no status, created_at, updated_at). */
+export const PUBLIC_ACTIVITY_SELECT = [
+    "id",
+    "vendor_id",
+    "title",
+    "description",
+    "location",
+    "category",
+    "duration_hours",
+    "price_per_person",
+    "max_capacity",
+    "rating",
+    "image_url",
+    "is_featured",
+] as const satisfies readonly (keyof Activity)[];
+
+/** Activity shape exposed to public API; derived from PUBLIC_ACTIVITY_SELECT. */
+export type PublicActivity = Pick<Activity, (typeof PUBLIC_ACTIVITY_SELECT)[number]>;
 
 //-----------CREATE Functions-----------
 
@@ -75,8 +93,26 @@ export async function createActivity(
         .select("*") 
         .single();
         
-        if (error) throw new Error(error.message);
-        return data;
+    if (error) throw new Error(error.message);
+    return data;
+}
+
+export async function listActivities(
+    supabase: SupabaseClient<Database>,
+    options?: { limit?: number; offset?: number }
+) {
+    const limit = options?.limit ?? 10;
+    const offset = options?.offset ?? 0;
+
+    const { data, error } = await supabase
+        .from("activities")
+        .select(PUBLIC_ACTIVITY_SELECT.join(","))
+        .eq("status", "published")
+        .order("created_at", { ascending: false })
+        .range(offset, offset + limit - 1);
+
+    if (error) throw new Error(error.message);
+    return (data ?? []) as unknown as PublicActivity[];
 }
 
 
@@ -84,25 +120,3 @@ export async function createActivity(
 
 
 
-
-
-// const baseSelect = [
-//     "id",
-//     "vendor_id",
-//     "title",
-//     "description",
-//     "location",
-//     "category",
-//     "duration_hours",
-//     "price_per_person",
-//     "max_capacity",
-//     "rating",
-//     "image_url",
-//     "is_featured",
-//     "status",
-//     "created_at",
-//     "updated_at",
-// ].join(",");
-
-
-  
