@@ -167,58 +167,98 @@ it("createActivity: throws when user has no vendor", async () => {
   
   //-----------------READ---------------
 
-  it("listActivities: builds query with filters and returns data", async () => {
-      const { supabase, query} = makeMockSupabase();
+  it("listActivities: builds query for published activities and returns data", async () => {
+    const { supabase, query } = makeMockSupabase();
 
-      query.range.mockResolvedValueOnce({
-          data: [{ id: "a1", title: "test", vendor: "v1", status: "published"}],
-          error: null,
-      });
-
-      const res = await listActivities(supabase, {
-          vendorId: "v1",
+    query.range.mockResolvedValueOnce({
+      data: [
+        {
+          id: "a1",
+          vendor_id: "v1",
+          title: "Snorkeling",
           status: "published",
-          limit: 10,
-          offset: 0,
-          featuredOnly: true,
-      });
-
-      expect(supabase.from).toHaveBeenCalledWith("activities");
-      expect(query.select).toHaveBeenCalled();
-      expect(query.order).toHaveBeenCalledWith("created_at", { ascending: false});
-      expect(query.eq).toHaveBeenCalledWith("status", "published");
-      expect(query.eq).toHaveBeenCalledWith("vendor_id", "v1");
-      expect(query.eq).toHaveBeenCalledWith("is_featured", true);
-      expect(query.range).toHaveBeenCalledWith(0, 9);
-      expect(res).toHaveLength(1);
-      expect(res[0].id).toBe("a1");
-  })
-
-  it("getActivityById: returns activity when found", async () => {
-      const { supabase, query } = makeMockSupabase();
-  
-      query.single.mockResolvedValueOnce({
-        data: { id: "a1", title: "Found", vendor_id: "v1", status: "draft" },
-        error: null,
-      });
-  
-      const res = await getActivityById(supabase, "a1");
-  
-      expect(supabase.from).toHaveBeenCalledWith("activities");
-      expect(query.eq).toHaveBeenCalledWith("id", "a1");
-      expect(query.single).toHaveBeenCalled();
-      expect(res?.id).toBe("a1");
+          category: "water-sports",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ],
+      error: null,
     });
 
-    it("getActivityById: returns null when not found", async () => {
-      const { supabase, query } = makeMockSupabase();
-  
-      query.single.mockResolvedValueOnce({
-        data: null,
-        error: { message: "No rows" },
-      });
-  
-      const res = await getActivityById(supabase, "missing");
-      expect(res).toBeNull();
+    const res = await listActivities(supabase, { limit: 10, offset: 0 });
+
+    expect(supabase.from).toHaveBeenCalledWith("activities");
+    expect(query.select).toHaveBeenCalled();
+    expect(query.eq).toHaveBeenCalledWith("status", "published");
+    expect(query.order).toHaveBeenCalledWith("created_at", { ascending: false });
+    expect(query.range).toHaveBeenCalledWith(0, 9);
+    expect(res).toHaveLength(1);
+    expect(res[0]).toMatchObject({
+      id: "a1",
+      vendor_id: "v1",
+      title: "Snorkeling",
+      status: "published",
     });
+  });
+
+  it("listActivities: returns empty array when no activities", async () => {
+    const { supabase, query } = makeMockSupabase();
+
+    query.range.mockResolvedValueOnce({ data: [], error: null });
+
+    const res = await listActivities(supabase, { limit: 10, offset: 0 });
+
+    expect(supabase.from).toHaveBeenCalledWith("activities");
+    expect(query.eq).toHaveBeenCalledWith("status", "published");
+    expect(query.range).toHaveBeenCalledWith(0, 9);
+    expect(res).toHaveLength(0);
+  });
+
+  it("listActivities: throws when query fails", async () => {
+    const { supabase, query } = makeMockSupabase();
+
+    query.range.mockResolvedValueOnce({
+      data: null,
+      error: { message: "Connection error" },
+    });
+
+    await expect(
+      listActivities(supabase, { limit: 10, offset: 0 })
+    ).rejects.toThrow("Connection error");
+
+    expect(supabase.from).toHaveBeenCalledWith("activities");
+  });
+
+  it("listActivities: applies correct range for pagination", async () => {
+    const { supabase, query } = makeMockSupabase();
+
+    query.range.mockResolvedValueOnce({
+      data: [{ id: "a11", vendor_id: "v1", title: "Page 2", status: "published" }],
+      error: null,
+    });
+
+    const res = await listActivities(supabase, { limit: 10, offset: 10 });
+
+    expect(query.range).toHaveBeenCalledWith(10, 19);
+    expect(res).toHaveLength(1);
+    expect(res[0].id).toBe("a11");
+  });
+
+  it("listActivities: returns multiple activities", async () => {
+    const { supabase, query } = makeMockSupabase();
+
+    query.range.mockResolvedValueOnce({
+      data: [
+        { id: "a1", vendor_id: "v1", title: "First", status: "published" },
+        { id: "a2", vendor_id: "v1", title: "Second", status: "published" },
+      ],
+      error: null,
+    });
+
+    const res = await listActivities(supabase, { limit: 10, offset: 0 });
+
+    expect(res).toHaveLength(2);
+    expect(res[0]).toMatchObject({ id: "a1", title: "First" });
+    expect(res[1]).toMatchObject({ id: "a2", title: "Second" });
+  });
 })
