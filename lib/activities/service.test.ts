@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createActivity, listActivities, getActivityById } from "./service";
+import { createActivity, listActivities, updateActivity, deleteActivity } from "./service";
 
 function makeMockSupabase() {
     const query: any = {
@@ -44,6 +44,34 @@ function makeMockSupabaseForCreateActivity() {
               error: null,
           }),
       },
+  };
+
+  return { supabase, activitiesQuery, vendorsQuery };
+}
+
+function makeMockSupabaseForUpdateDelete() {
+  const activitiesQuery: any = {
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    update: vi.fn().mockReturnThis(),
+    delete: vi.fn().mockReturnThis(),
+    single: vi.fn(),
+  };
+
+  const vendorsQuery: any = {
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    maybeSingle: vi.fn(),
+  };
+
+  const supabase: any = {
+    from: vi.fn((table: string) => (table === "vendors" ? vendorsQuery : activitiesQuery)),
+    auth: {
+      getUser: vi.fn().mockResolvedValue({
+        data: { user: { id: "user-1" } },
+        error: null,
+      }),
+    },
   };
 
   return { supabase, activitiesQuery, vendorsQuery };
@@ -261,4 +289,225 @@ it("createActivity: throws when user has no vendor", async () => {
     expect(res[0]).toMatchObject({ id: "a1", title: "First" });
     expect(res[1]).toMatchObject({ id: "a2", title: "Second" });
   });
+
+  //-----------------UPDATE---------------
+  it("updateActivity: updates an activity by id and returns the updated row", async () => {
+    const { supabase, activitiesQuery, vendorsQuery } = makeMockSupabaseForUpdateDelete();
+
+    vendorsQuery.maybeSingle.mockResolvedValueOnce({
+      data: { id: "v1" },
+      error: null,
+    });
+
+    activitiesQuery.single.mockResolvedValueOnce({
+      data: {
+        id: "a1",
+        vendor_id: "v1",
+        title: "Updated Title",
+        description: "Updated description",
+        location: "Bridgetown",
+        category: "water-sports",
+        duration_hours: 2,
+        price_per_person: 120,
+        max_capacity: 10,
+        rating: null,
+        image_url: null,
+        is_featured: false,
+        status: "draft",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      error: null,
+    });
+
+    const updated = await updateActivity(supabase, "a1", {
+      title: "Updated Title",
+      description: "Updated description",
+    });
+
+    expect(supabase.auth.getUser).toHaveBeenCalled();
+    expect(supabase.from).toHaveBeenCalledWith("vendors");
+    expect(supabase.from).toHaveBeenCalledWith("activities");
+    expect(activitiesQuery.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Updated Title",
+        description: "Updated description",
+      })
+    );
+    expect(activitiesQuery.eq).toHaveBeenCalledWith("id", "a1");
+    expect(updated.id).toBe("a1");
+    expect(updated.title).toBe("Updated Title");
+    expect(updated.description).toBe("Updated description");
+  });
+
+
+  it("updateActivity: throws when update fails", async () => {
+    const { supabase, activitiesQuery, vendorsQuery } = makeMockSupabaseForUpdateDelete();
+
+    vendorsQuery.maybeSingle.mockResolvedValueOnce({
+      data: { id: "v1" },
+      error: null,
+    });
+
+    activitiesQuery.single.mockResolvedValueOnce({
+      data: null,
+      error: { message: "Update failed" },
+    });
+
+    await expect(
+      updateActivity(supabase, "a1", { title: "New Title" })
+    ).rejects.toThrow("Update failed");
+
+    expect(supabase.from).toHaveBeenCalledWith("vendors");
+    expect(supabase.from).toHaveBeenCalledWith("activities");
+    expect(activitiesQuery.update).toHaveBeenCalled();
+  });
+
+
+  it("updateActivity: throws when user is not signed in", async () => {
+    const { supabase, vendorsQuery } = makeMockSupabaseForUpdateDelete();
+    supabase.auth.getUser.mockResolvedValueOnce({ data: { user: null }, error: null });
+
+    await expect(
+      updateActivity(supabase, "a1", { title: "New Title" })
+    ).rejects.toThrow("Unauthorized");
+  });
+
+  it("updateActivity: throws when user has no vendor", async () => {
+    const { supabase, vendorsQuery } = makeMockSupabaseForUpdateDelete();
+    vendorsQuery.maybeSingle.mockResolvedValueOnce({ data: null, error: null });
+
+    await expect(
+      updateActivity(supabase, "a1", { title: "New Title" })
+    ).rejects.toThrow("User is not associated with a vendor");
+
+    expect(supabase.from).toHaveBeenCalledWith("vendors");
+    expect(supabase.from).not.toHaveBeenCalledWith("activities");
+  });
+
+  it("updateActivity: throws when activity is not found", async () => {
+    const { supabase, activitiesQuery, vendorsQuery } = makeMockSupabaseForUpdateDelete();
+
+    vendorsQuery.maybeSingle.mockResolvedValueOnce({
+      data: { id: "v1" },
+      error: null,
+    });
+
+    activitiesQuery.single.mockResolvedValueOnce({
+      data: null,
+      error: { code: "PGRST116", message: "Row not found" },
+    });
+
+    await expect(
+      updateActivity(supabase, "nonexistent-id", { title: "New Title" })
+    ).rejects.toThrow("Row not found");
+
+    expect(activitiesQuery.update).toHaveBeenCalled();
+    expect(activitiesQuery.eq).toHaveBeenCalledWith("id", "nonexistent-id");
+  });
+
+  //-----------------DELETE---------------
+  it("deleteActivity: deletes an activity by id and returns the deleted row", async () => {
+    const { supabase, activitiesQuery, vendorsQuery } = makeMockSupabaseForUpdateDelete();
+  
+    vendorsQuery.maybeSingle.mockResolvedValueOnce({
+      data: { id: "v1" },
+      error: null,
+    });
+  
+    const deletedRow = {
+      id: "a1",
+      vendor_id: "v1",
+      title: "Snorkeling Tour",
+      description: null,
+      location: "Bridgetown",
+      category: "water-sports",
+      duration_hours: 2,
+      price_per_person: 120,
+      max_capacity: 10,
+      rating: null,
+      image_url: null,
+      is_featured: false,
+      status: "draft",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+  
+    activitiesQuery.single.mockResolvedValueOnce({
+      data: deletedRow,
+      error: null,
+    });
+  
+    const result = await deleteActivity(supabase, "a1");
+  
+    expect(supabase.auth.getUser).toHaveBeenCalled();
+    expect(supabase.from).toHaveBeenCalledWith("vendors");
+    expect(supabase.from).toHaveBeenCalledWith("activities");
+    expect(activitiesQuery.delete).toHaveBeenCalled();
+    expect(activitiesQuery.eq).toHaveBeenCalledWith("id", "a1");
+    expect(result).toEqual(deletedRow);
+    expect(result?.id).toBe("a1");
+  });
+
+  it("deleteActivity: throws when delete fails", async () => {
+    const { supabase, activitiesQuery, vendorsQuery } = makeMockSupabaseForUpdateDelete();
+
+    vendorsQuery.maybeSingle.mockResolvedValueOnce({
+      data: { id: "v1" },
+      error: null,
+    });
+
+    activitiesQuery.single.mockResolvedValueOnce({
+      data: null,
+      error: { message: "Delete failed" },
+    });
+
+    await expect(deleteActivity(supabase, "a1")).rejects.toThrow("Delete failed");
+
+    expect(supabase.from).toHaveBeenCalledWith("activities");
+    expect(activitiesQuery.delete).toHaveBeenCalled();
+  });
+
+  it("deleteActivity: throws when user is not signed in", async () => {
+    const { supabase } = makeMockSupabaseForUpdateDelete();
+    supabase.auth.getUser.mockResolvedValueOnce({ data: { user: null }, error: null });
+
+    await expect(deleteActivity(supabase, "a1")).rejects.toThrow("Unauthorized");
+
+    expect(supabase.auth.getUser).toHaveBeenCalled();
+    expect(supabase.from).not.toHaveBeenCalled();
+  });
+
+  it("deleteActivity: throws when user has no vendor", async () => {
+    const { supabase, vendorsQuery } = makeMockSupabaseForUpdateDelete();
+    vendorsQuery.maybeSingle.mockResolvedValueOnce({ data: null, error: null });
+
+    await expect(deleteActivity(supabase, "a1")).rejects.toThrow(
+      "User is not associated with a vendor"
+    );
+
+    expect(supabase.from).toHaveBeenCalledWith("vendors");
+    expect(supabase.from).not.toHaveBeenCalledWith("activities");
+  });
+
+  it("deleteActivity: throws when activity is not found", async () => {
+    const { supabase, activitiesQuery, vendorsQuery } = makeMockSupabaseForUpdateDelete();
+
+    vendorsQuery.maybeSingle.mockResolvedValueOnce({
+      data: { id: "v1" },
+      error: null,
+    });
+
+    activitiesQuery.single.mockResolvedValueOnce({
+      data: null,
+      error: { code: "PGRST116", message: "Row not found" },
+    });
+
+    await expect(deleteActivity(supabase, "nonexistent-id")).rejects.toThrow("Row not found");
+
+    expect(activitiesQuery.delete).toHaveBeenCalled();
+    expect(activitiesQuery.eq).toHaveBeenCalledWith("id", "nonexistent-id");
+  });
+  
+
 })
