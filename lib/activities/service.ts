@@ -160,6 +160,35 @@ export async function updateActivity(
     return data;
 }
 
+export async function deleteActivity(
+    supabase: SupabaseClient<Database>,
+    activityId: string
+) {
+    const { data: userData } = await supabase.auth.getUser();
+
+    if (!userData.user) throw new Error("Unauthorized");
+
+    const { data: vendor, error: vendorError } = await supabase
+        .from("vendors")
+        .select("id")
+        .eq("owner_user_id", userData.user.id)
+        .maybeSingle();
+
+    if (vendorError) throw new Error(vendorError.message);
+    if (!vendor) throw new Error("User is not associated with a vendor");
+
+    const { data, error } = await supabase
+        .from("activities")
+        .delete()
+        .eq("id", activityId)
+        .eq("vendor_id", vendor.id)
+        .select("*")
+        .single();
+
+    if (error) throw new Error(error.message);
+    return data;
+}
+
 
 
 
