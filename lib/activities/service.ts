@@ -35,6 +35,10 @@ export type CreateActivityInput = {
     image_url?: string | null;
 };
 
+export type UpdateActivityInput = Partial<
+  Pick<Activity, "title" | "description" | "location" | "category" | "duration_hours" | "price_per_person" | "max_capacity" | "image_url" | "status">
+>;
+
 /** Column names to select for public activity listings (no status, created_at, updated_at). */
 export const PUBLIC_ACTIVITY_SELECT = [
     "id",
@@ -115,6 +119,46 @@ export async function listActivities(
     return (data ?? []) as unknown as PublicActivity[];
 }
 
+export async function updateActivity(
+    supabase: SupabaseClient<Database>,
+    activityId: string,
+    input: UpdateActivityInput,
+) {
+    const { data: userData } = await supabase.auth.getUser();
+
+    if (!userData.user) throw new Error("Unauthorized");
+
+    const { data: vendor, error: vendorError } = await supabase
+        .from("vendors")
+        .select("id")
+        .eq("owner_user_id", userData.user.id)
+        .maybeSingle();
+    
+    if (vendorError) throw new Error(vendorError.message);
+    if (!vendor) throw new Error("User is not associated with a vendor");
+
+    const payload: Record<string, unknown> = {};
+    if (input.title !== undefined) payload.title = input.title.trim();
+    if (input.description !== undefined) payload.description = input.description;
+    if (input.location !== undefined) payload.location = input.location;
+    if (input.category !== undefined) payload.category = input.category;
+    if (input.duration_hours !== undefined) payload.duration_hours = input.duration_hours;
+    if (input.price_per_person !== undefined) payload.price_per_person = input.price_per_person;
+    if (input.max_capacity !== undefined) payload.max_capacity = input.max_capacity;
+    if (input.image_url !== undefined) payload.image_url = input.image_url;
+    if (input.status !== undefined) payload.status = input.status;
+
+    const { data, error } = await supabase
+    .from("activities")
+    .update(payload)
+    .eq("id", activityId)
+    .eq("vendor_id", vendor.id)
+    .select("*")
+    .single();
+
+    if (error) throw new Error(error.message);
+    return data;
+}
 
 
 
