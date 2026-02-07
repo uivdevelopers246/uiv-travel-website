@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getUserRole } from "@/lib/auth/roles";
+import { deleteActivity } from "@/lib/activities/service";
 
 export async function PATCH(
   req: Request,
@@ -55,4 +56,41 @@ export async function PATCH(
   }
 
   return NextResponse.json(data);
+}
+
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const resolvedParams = await params;
+  const id = resolvedParams?.id;
+  const isUuid = typeof id === "string" && /^[0-9a-fA-F-]{36}$/.test(id);
+  if (!isUuid) {
+    return NextResponse.json({ error: "Invalid activity id." }, { status: 400 });
+  }
+
+  const supabase = await createClient();
+  const role = await getUserRole(supabase);
+
+  if (role === "guest") {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (role !== "admin" && role !== "vendor") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  try {
+    const deleted = await deleteActivity(supabase, id);
+    return NextResponse.json(deleted, { status: 200 });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Failed to delete activity";
+    if (message === "Unauthorized" || message === "User is not associated with a vendor") {
+      return NextResponse.json({ error: message }, { status: 403 });
+    }
+    if (message === "Row not found" || message.includes("PGRST116")) {
+      return NextResponse.json({ error: "Activity not found" }, { status: 404 });
+    }
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
 }
