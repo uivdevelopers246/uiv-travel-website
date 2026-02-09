@@ -1,7 +1,32 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getUserRole } from "@/lib/auth/roles";
-import { deleteActivity } from "@/lib/activities/service";
+import { getActivityById, deleteActivity } from "@/lib/activities/service";
+
+
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const resolvedParams = await params;
+  const id = resolvedParams?.id;
+  const isUuid = typeof id === "string" && /^[0-9a-fA-F-]{36}$/.test(id);
+  if (!isUuid) {
+    return NextResponse.json({ error: "Invalid activity id." }, { status: 400 });
+  }
+
+  const supabase = await createClient();
+  try {
+    const activity = await getActivityById(supabase, id);
+    if (activity === null) {
+      return NextResponse.json({ error: "Activity not found" }, { status: 404 });
+    }
+    return NextResponse.json(activity);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Failed to fetch activity";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
 
 export async function PATCH(
   req: Request,

@@ -119,6 +119,21 @@ export async function listActivities(
     return (data ?? []) as unknown as PublicActivity[];
 }
 
+export async function getActivityById(
+    supabase: SupabaseClient<Database>,
+    id: string
+  ): Promise<PublicActivity | null> {
+    const { data, error } = await supabase
+      .from("activities")
+      .select(PUBLIC_ACTIVITY_SELECT.join(","))
+      .eq("id", id)
+      .eq("status", "published")
+      .maybeSingle();
+  
+    if (error) throw new Error(error.message);
+    return (data ?? null) as PublicActivity | null;
+}
+
 export async function updateActivity(
     supabase: SupabaseClient<Database>,
     activityId: string,

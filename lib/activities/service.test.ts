@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createActivity, listActivities, updateActivity, deleteActivity } from "./service";
+import { createActivity, listActivities, updateActivity, deleteActivity, getActivityById } from "./service";
 
 function makeMockSupabase() {
     const query: any = {
@@ -308,7 +308,7 @@ it("createActivity: throws when user has no vendor", async () => {
       is_featured: true,
     };
 
-    query.single.mockResolvedValueOnce({
+    query.maybeSingle.mockResolvedValueOnce({
       data: mockActivity,
       error: null,
     });
@@ -319,7 +319,7 @@ it("createActivity: throws when user has no vendor", async () => {
     expect(query.select).toHaveBeenCalled();
     expect(query.eq).toHaveBeenCalledWith("id", "a1");
     expect(query.eq).toHaveBeenCalledWith("status", "published");
-    expect(query.single).toHaveBeenCalled();
+    expect(query.maybeSingle).toHaveBeenCalled();
     expect(result).toMatchObject(mockActivity);
     expect(result?.id).toBe("a1");
     expect(result?.title).toBe("Snorkeling Tour");
@@ -328,9 +328,9 @@ it("createActivity: throws when user has no vendor", async () => {
   it("getActivityById: returns null when activity not found", async () => {
     const { supabase, query } = makeMockSupabase();
 
-    query.single.mockResolvedValueOnce({
+    query.maybeSingle.mockResolvedValueOnce({
       data: null,
-      error: { code: "PGRST116", message: "Row not found" },
+      error: null,
     });
 
     const result = await getActivityById(supabase, "nonexistent-id");
@@ -344,7 +344,7 @@ it("createActivity: throws when user has no vendor", async () => {
   it("getActivityById: throws when query fails", async () => {
     const { supabase, query } = makeMockSupabase();
 
-    query.single.mockResolvedValueOnce({
+    query.maybeSingle.mockResolvedValueOnce({
       data: null,
       error: { message: "Connection error" },
     });
@@ -359,7 +359,7 @@ it("createActivity: throws when user has no vendor", async () => {
   it("getActivityById: only returns published activities", async () => {
     const { supabase, query } = makeMockSupabase();
 
-    query.single.mockResolvedValueOnce({
+    query.maybeSingle.mockResolvedValueOnce({
       data: {
         id: "a1",
         vendor_id: "v1",
