@@ -125,22 +125,42 @@ begin
 
   v_vendor_id := public.seed_user('vendor1@uiv.com', 'Random1234');
   insert into public.vendors (name, owner_user_id)
-  values ('Vendor 1', v_vendor_id)
+  values ('Cool Comfortz Frozen Delights', v_vendor_id)
   on conflict (owner_user_id) do nothing;
 
   v_vendor_id := public.seed_user('vendor2@uiv.com', 'Random1234');
   insert into public.vendors (name, owner_user_id)
-  values ('Vendor 2', v_vendor_id)
+  values ('ECO Lifestyle & Lodge T/A Sattva Barbados SRL', v_vendor_id)
   on conflict (owner_user_id) do nothing;
 
   v_vendor_id := public.seed_user('vendor3@uiv.com', 'Random1234');
   insert into public.vendors (name, owner_user_id)
-  values ('Vendor 3', v_vendor_id)
+  values ('Cain & Son Tours', v_vendor_id)
   on conflict (owner_user_id) do nothing;
+
+  v_vendor_id := public.seed_user('vendor4@uiv.com', 'Random1234');
+  insert into public.vendors (name, owner_user_id)
+  values ('TennisWithTyler', v_vendor_id)
+  on conflict (owner_user_id) do nothing;
+
+  v_vendor_id := public.seed_user('vendor5@uiv.com', 'Random1234');
+  insert into public.vendors (name, owner_user_id)
+  values ('CocoJetski', v_vendor_id)
+  on conflict (owner_user_id) do nothing;
+  
 
   perform public.seed_user('user1@uiv.com', 'Random1234');
   perform public.seed_user('user2@uiv.com', 'Random1234');
   perform public.seed_user('user3@uiv.com', 'Random1234');
 end $$;
+
+-- Seed activities (from vendor intake)
+insert into public.activities (vendor_id, title, description, location, category, duration_hours, price_per_person, max_capacity, image_url)
+select v.id, a.title, a.description, a.location, a.category, a.duration_hours, a.price_per_person, a.max_capacity, a.image_url
+from (values
+  ('Cool Comfortz Frozen Delights', 'The Barbados Fruit-to-Scoop Culinary Experience', 'Culinary and Cultural | Hands-on Workshop', '63 Oxnards Heights, St. James', 'culture'::text, 3, 80, 6, null::text),
+  ('Cain & Son Tours', 'Cain & Son Tours', 'Transportation services', 'Bonnetts Road, Brittons Hill, St. Michael ', 'adventure'::text, 2, 50, 10, null::text)
+) as a(vendor_name, title, description, location, category, duration_hours, price_per_person, max_capacity, image_url)
+join public.vendors v on v.name = a.vendor_name;
 
 drop function public.seed_user(text, text);
