@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createActivity, listActivities, updateActivity, deleteActivity } from "./service";
+import { createActivity, listActivities, updateActivity, deleteActivity, getActivityById } from "./service";
 
 function makeMockSupabase() {
     const query: any = {
@@ -289,6 +289,92 @@ it("createActivity: throws when user has no vendor", async () => {
     expect(res[0]).toMatchObject({ id: "a1", title: "First" });
     expect(res[1]).toMatchObject({ id: "a2", title: "Second" });
   });
+
+  it("getActivityById: returns activity when found", async () => {
+    const { supabase, query } = makeMockSupabase();
+
+    const mockActivity = {
+      id: "a1",
+      vendor_id: "v1",
+      title: "Snorkeling Tour",
+      description: "Amazing underwater experience",
+      location: "Bridgetown",
+      category: "water-sports",
+      duration_hours: 2,
+      price_per_person: 120,
+      max_capacity: 10,
+      rating: 4.5,
+      image_url: "https://example.com/image.jpg",
+      is_featured: true,
+    };
+
+    query.maybeSingle.mockResolvedValueOnce({
+      data: mockActivity,
+      error: null,
+    });
+
+    const result = await getActivityById(supabase, "a1");
+
+    expect(supabase.from).toHaveBeenCalledWith("activities");
+    expect(query.select).toHaveBeenCalled();
+    expect(query.eq).toHaveBeenCalledWith("id", "a1");
+    expect(query.eq).toHaveBeenCalledWith("status", "published");
+    expect(query.maybeSingle).toHaveBeenCalled();
+    expect(result).toMatchObject(mockActivity);
+    expect(result?.id).toBe("a1");
+    expect(result?.title).toBe("Snorkeling Tour");
+  });
+
+  it("getActivityById: returns null when activity not found", async () => {
+    const { supabase, query } = makeMockSupabase();
+
+    query.maybeSingle.mockResolvedValueOnce({
+      data: null,
+      error: null,
+    });
+
+    const result = await getActivityById(supabase, "nonexistent-id");
+
+    expect(supabase.from).toHaveBeenCalledWith("activities");
+    expect(query.eq).toHaveBeenCalledWith("id", "nonexistent-id");
+    expect(query.eq).toHaveBeenCalledWith("status", "published");
+    expect(result).toBeNull();
+  });
+
+  it("getActivityById: throws when query fails", async () => {
+    const { supabase, query } = makeMockSupabase();
+
+    query.maybeSingle.mockResolvedValueOnce({
+      data: null,
+      error: { message: "Connection error" },
+    });
+
+    await expect(
+      getActivityById(supabase, "a1")
+    ).rejects.toThrow("Connection error");
+
+    expect(supabase.from).toHaveBeenCalledWith("activities");
+  });
+
+  it("getActivityById: only returns published activities", async () => {
+    const { supabase, query } = makeMockSupabase();
+
+    query.maybeSingle.mockResolvedValueOnce({
+      data: {
+        id: "a1",
+        vendor_id: "v1",
+        title: "Published Activity",
+        status: "published",
+        category: "water-sports",
+      },
+      error: null,
+    });
+
+    await getActivityById(supabase, "a1");
+
+    expect(query.eq).toHaveBeenCalledWith("status", "published");
+  });
+
 
   //-----------------UPDATE---------------
   it("updateActivity: updates an activity by id and returns the updated row", async () => {

@@ -88,9 +88,9 @@ export function SignupForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="space-y-2">
-        <label className="block text-sm font-medium text-neutral-200" htmlFor="email">
+    <form onSubmit={handleSubmit} className="space-y-5" style={{ fontFamily: 'var(--font-source-sans)' }}>
+      <div className="space-y-1.5">
+        <label className="block text-sm font-semibold text-[#193059]" htmlFor="email">
           Email
         </label>
         <input
@@ -99,13 +99,14 @@ export function SignupForm() {
           autoComplete="email"
           value={state.email}
           onChange={e => setState(prev => ({ ...prev, email: e.target.value }))}
-          className="w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="w-full rounded-lg border border-[#407FC2]/30 bg-white px-4 py-2.5 text-sm text-[#193059] placeholder:text-[#193059]/40 focus:outline-none focus:ring-2 focus:ring-[#407FC2]/50 focus:border-[#407FC2] transition-colors"
+          placeholder="you@example.com"
           required
         />
       </div>
 
-      <div className="space-y-2">
-        <label className="block text-sm font-medium text-neutral-200" htmlFor="password">
+      <div className="space-y-1.5">
+        <label className="block text-sm font-semibold text-[#193059]" htmlFor="password">
           Password
         </label>
         <input
@@ -114,19 +115,20 @@ export function SignupForm() {
           autoComplete="new-password"
           value={state.password}
           onChange={e => setState(prev => ({ ...prev, password: e.target.value }))}
-          className="w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="w-full rounded-lg border border-[#407FC2]/30 bg-white px-4 py-2.5 text-sm text-[#193059] placeholder:text-[#193059]/40 focus:outline-none focus:ring-2 focus:ring-[#407FC2]/50 focus:border-[#407FC2] transition-colors"
+          placeholder="••••••••"
           required
         />
       </div>
 
       {state.error && (
-        <p className="text-sm text-red-400">
+        <p className="text-sm text-red-600">
           {state.error}
         </p>
       )}
 
       {state.message && (
-        <p className="text-sm text-emerald-400">
+        <p className="text-sm text-emerald-600">
           {state.message}
         </p>
       )}
@@ -134,14 +136,23 @@ export function SignupForm() {
       <button
         type="submit"
         disabled={state.loading}
-        className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed"
+        className="w-full rounded-lg bg-[#FBCA1A] px-4 py-2.5 text-sm font-bold text-[#193059] shadow-md hover:bg-[#f5c000] hover:shadow-lg active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-200"
       >
-        {state.loading ? 'Creating account…' : 'Sign up'}
+        {state.loading ? 'Creating account…' : 'Create Account'}
       </button>
 
-      <p className="text-xs text-neutral-400">
+      <div className="relative my-2">
+        <div className="absolute inset-0 flex items-center">
+          <div className="w-full border-t border-[#407FC2]/15" />
+        </div>
+        <div className="relative flex justify-center text-xs">
+          <span className="bg-white/80 px-3 text-[#193059]/50">or</span>
+        </div>
+      </div>
+
+      <p className="text-sm text-center text-[#193059]/70">
         Already have an account?{' '}
-        <a href="/auth/login" className="text-indigo-400 hover:underline">
+        <a href="/auth/login" className="font-semibold text-[#407FC2] hover:text-[#193059] hover:underline transition-colors">
           Log in
         </a>
       </p>

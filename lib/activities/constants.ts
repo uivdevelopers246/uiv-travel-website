@@ -13,3 +13,4 @@ export const durationFilters = [
   { value: "5-6", label: "5-6 hours" },
   { value: "full-day", label: "Full Day" },
 ] as const;
+
