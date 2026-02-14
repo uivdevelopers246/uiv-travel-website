@@ -31,6 +31,16 @@ drop policy if exists "Vendors delete (admins only)" on public.vendors;
 drop policy if exists "Only site admins can read site_admins" on public.site_admins;
 drop policy if exists "Only site admins can manage site_admins" on public.site_admins;
 drop policy if exists "Site admins table access" on public.site_admins;
+drop policy if exists "Site admins can read self" on public.site_admins;
+
+-- profiles
+drop policy if exists "Site admins can view all profiles" on public.profiles;
+
+-- storage objects
+drop policy if exists "Activity images public read" on storage.objects;
+drop policy if exists "Activity images upload" on storage.objects;
+drop policy if exists "Activity images update" on storage.objects;
+drop policy if exists "Activity images delete" on storage.objects;
 
 -- -----------------------------------------------------------------------------
 -- ACTIVITIES policies (consolidated)
@@ -109,13 +119,15 @@ using (
   OR public.is_site_admin()
 );
 
--- If you want vendors to be able to create their own vendor row from the UI,
--- you can loosen this later. For now: admins only manage vendors.
+-- Allow owner to create their own vendor row; admins can create any vendor.
 create policy "Vendors insert (admins only)"
 on public.vendors
 for insert
 to authenticated
-with check (public.is_site_admin());
+with check (
+  owner_user_id = (select auth.uid())
+  OR public.is_site_admin()
+);
 
 create policy "Vendors update (admins only)"
 on public.vendors
@@ -134,9 +146,97 @@ using (public.is_site_admin());
 -- SITE_ADMINS policies (single policy)
 -- -----------------------------------------------------------------------------
 
+create policy "Site admins can read self"
+on public.site_admins
+for select
+to authenticated
+using (user_id = auth.uid());
+
 create policy "Site admins table access"
 on public.site_admins
 for all
 to authenticated
 using (public.is_site_admin())
 with check (public.is_site_admin());
+
+-- -----------------------------------------------------------------------------
+-- PROFILES policies (admin access)
+-- -----------------------------------------------------------------------------
+
+create policy "Site admins can view all profiles"
+on public.profiles
+for select
+to authenticated
+using (public.is_site_admin());
+
+-- -----------------------------------------------------------------------------
+-- STORAGE policies (activity-images bucket)
+-- -----------------------------------------------------------------------------
+
+insert into storage.buckets (id, name, public)
+values ('activity-images', 'activity-images', true)
+on conflict (id) do update set public = true;
+
+create policy "Activity images public read"
+on storage.objects
+for select
+to anon, authenticated
+using (bucket_id = 'activity-images');
+
+create policy "Activity images upload"
+on storage.objects
+for insert
+to authenticated
+with check (
+  bucket_id = 'activity-images'
+  AND (
+    public.is_site_admin()
+    OR (
+      public.vendor_id_for_user() is not null
+      AND name like (public.vendor_id_for_user()::text || '/%')
+    )
+  )
+);
+
+create policy "Activity images update"
+on storage.objects
+for update
+to authenticated
+using (
+  bucket_id = 'activity-images'
+  AND (
+    public.is_site_admin()
+    OR (
+      public.vendor_id_for_user() is not null
+      AND name like (public.vendor_id_for_user()::text || '/%')
+    )
+    OR auth.uid() = owner
+  )
+)
+with check (
+  bucket_id = 'activity-images'
+  AND (
+    public.is_site_admin()
+    OR (
+      public.vendor_id_for_user() is not null
+      AND name like (public.vendor_id_for_user()::text || '/%')
+    )
+    OR auth.uid() = owner
+  )
+);
+
+create policy "Activity images delete"
+on storage.objects
+for delete
+to authenticated
+using (
+  bucket_id = 'activity-images'
+  AND (
+    public.is_site_admin()
+    OR (
+      public.vendor_id_for_user() is not null
+      AND name like (public.vendor_id_for_user()::text || '/%')
+    )
+    OR auth.uid() = owner
+  )
+);
