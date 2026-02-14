@@ -1,0 +1,24 @@
+[
+  {
+    "vendor_name": "Cool Comfortz Frozen Delights",
+    "title": "The Barbados Fruit-to-Scoop Culinary Experience",
+    "description": "Culinary and Cultural | Hands-on Workshop",
+    "location": "63 Oxnards Heights, St. James",
+    "category": "culture",
+    "duration_hours": 3,
+    "price_per_person": 80,
+    "max_capacity": 6,
+    "image_url": null
+  },
+  {
+    "vendor_name": "Cain & Son Tours",
+    "title": "Cain & Son Tours",
+    "description": "Transportation services",
+    "location": "Bonnetts Road, Brittons Hill, St. Michael ",
+    "category": "adventure",
+    "duration_hours": 2,
+    "price_per_person": 50,
+    "max_capacity": 10,
+    "image_url": null
+  }
+]
