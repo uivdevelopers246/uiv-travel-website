@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getUserRole } from "@/lib/auth/roles";
-import { getActivityById, deleteActivity } from "@/lib/activities/service";
+import { getActivityById, deleteActivity, updateActivity } from "@/lib/activities/service";
 
 
 export async function GET(
@@ -69,18 +69,19 @@ export async function PATCH(
     return NextResponse.json({ error: "No updates provided" }, { status: 400 });
   }
 
-  const { data, error } = await supabase
-    .from("activities")
-    .update(updates)
-    .eq("id", id)
-    .select("id")
-    .single();
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 400 });
+  try {
+    const data = await updateActivity(supabase, id, updates);
+    return NextResponse.json({ id: data.id });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Failed to update activity";
+    if (message === "Unauthorized" || message === "User is not associated with a vendor") {
+      return NextResponse.json({ error: message }, { status: 403 });
+    }
+    if (message.includes("PGRST116")) {
+      return NextResponse.json({ error: "Activity not found or access denied" }, { status: 404 });
+    }
+    return NextResponse.json({ error: message }, { status: 400 });
   }
-
-  return NextResponse.json(data);
 }
 
 export async function DELETE(

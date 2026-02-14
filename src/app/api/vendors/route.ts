@@ -20,6 +20,13 @@ export async function POST(req: Request) {
     );
   }
 
+  if (name.length > 255) {
+    return NextResponse.json(
+      { error: "Vendor name is too long (max 255 characters)" },
+      { status: 400 },
+    );
+  }
+
   try {
     const existing = await getVendorByOwner(supabase, userData.user.id);
     if (existing) {
@@ -32,8 +39,8 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json(created, { status: 201 });
-  } catch (error: any) {
-    const message = error?.message ?? "Failed to create vendor";
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Failed to create vendor";
     const status = message.includes("duplicate key") ? 409 : 400;
     return NextResponse.json({ error: message }, { status });
   }
