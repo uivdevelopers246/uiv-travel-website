@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getUserRole } from "@/lib/auth/roles";
+import { updateActivity } from "@/lib/activities/service";
 
 const allowedStatuses = new Set(["draft", "published"]);
 
@@ -24,16 +25,24 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
 
-  const { data, error } = await supabase
-    .from("activities")
-    .update({ status })
-    .eq("id", id)
-    .select("id, status")
-    .single();
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 400 });
+  // Validate UUID format
+  const isUuid = /^[0-9a-fA-F-]{36}$/.test(id);
+  if (!isUuid) {
+    return NextResponse.json({ error: "Invalid activity id" }, { status: 400 });
   }
 
-  return NextResponse.json(data);
+  try {
+    // Use updateActivity service which validates vendor ownership
+    const data = await updateActivity(supabase, id, { status: status as "draft" | "published" });
+    return NextResponse.json({ id: data.id, status: data.status });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Failed to update status";
+    if (message === "Unauthorized" || message === "User is not associated with a vendor") {
+      return NextResponse.json({ error: message }, { status: 403 });
+    }
+    if (message.includes("PGRST116")) {
+      return NextResponse.json({ error: "Activity not found or access denied" }, { status: 404 });
+    }
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
 }

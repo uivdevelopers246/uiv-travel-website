@@ -109,8 +109,9 @@ export function ManageActivitiesClient({
       setForm(prev => ({ ...prev, title: "" }));
       setShowCreate(false);
       router.refresh();
-    } catch (error: any) {
-      setMessage(error?.message ?? "Failed to create activity.");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Failed to create activity";
+      setMessage(message);
     } finally {
       setCreating(false);
     }

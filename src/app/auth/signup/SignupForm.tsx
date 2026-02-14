@@ -38,8 +38,6 @@ export function SignupForm() {
 
     const email = state.email.trim()
     const password = state.password
-    const next = '/'
-    // const emailRedirectTo = `${getBaseURL()}/auth/confirm?next=${encodeURIComponent(next)}`
     const emailRedirectTo = getBaseURL()
 
     try {
@@ -47,7 +45,7 @@ export function SignupForm() {
         email,
         password,
         options: { 
-          emailRedirectTo /*: `${window.location.origin}/auth/confirm?next=/`*/
+          emailRedirectTo
         }
       })
 
@@ -72,10 +70,14 @@ export function SignupForm() {
         return
       }
 
-    // If we auto-login on signup, we can redirect straight to /me or landing page
-    // Will need to update the UI on the landing page when the user is signed in to display their profile?
-    //   router.push('/me')
-    alert('Signup successful!')
+      // If we auto-login on signup, redirect to home page
+      setState(prev => ({
+        ...prev,
+        loading: false,
+        error: null,
+        message: 'Signup successful! Redirecting...',
+      }))
+      router.push('/')
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : 'Something went wrong. Please try again.'

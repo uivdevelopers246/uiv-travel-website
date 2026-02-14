@@ -19,8 +19,11 @@ export function LoginForm() {
   })
 
   // Optional: allow redirect param (?redirect=/something)
-  // We will update this later after creating a landing page  or as we add protected routes
- const redirectTo = searchParams.get('redirect') ?? '/'
+  // Validate redirect is a safe relative path to prevent open redirect attacks
+  const redirectParam = searchParams.get('redirect') ?? '/'
+  const redirectTo = redirectParam.startsWith('/') && !redirectParam.startsWith('//') 
+    ? redirectParam 
+    : '/'
 
   const toMessage = (value: unknown, fallback: string) => {
     if (typeof value === 'string' && value.trim().length > 0) return value

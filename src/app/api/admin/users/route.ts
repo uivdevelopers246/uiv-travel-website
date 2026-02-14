@@ -55,6 +55,12 @@ export async function POST(req: Request) {
             { status: 400 },
           );
         }
+        if (vendorName.length > 255) {
+          return NextResponse.json(
+            { error: "Vendor name is too long (max 255 characters)" },
+            { status: 400 },
+          );
+        }
         const { error } = await supabase
           .from("vendors")
           .insert({ owner_user_id: userId, name: vendorName });
@@ -74,9 +80,10 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ ok: true });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Request failed";
     return NextResponse.json(
-      { error: error?.message ?? "Request failed" },
+      { error: message },
       { status: 400 },
     );
   }
