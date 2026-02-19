@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/supabase/types/database";
+import { geocodeAddress } from "@/lib/geocode/service";
+import type { GeocodeResult } from "@/lib/geocode/service";
 
 export type ActivityStatus = "draft" | "published" | "archived";
 export type ActivityCategory = "water-sports" | "wildlife" | "adventure" | "culture" | "nature";
@@ -37,6 +39,18 @@ export type CreateActivityInput = {
 export type UpdateActivityInput = Partial<
   Pick<Activity, "title" | "description" | "location" | "category" | "duration_hours" | "price_per_person" | "max_capacity" | "image_url" | "status">
 >;
+
+// ---- Geocoding + RPC types/helpers ----
+
+
+export type SetActivityGeocodeArgs = {
+    p_activity_id: string; // uuid
+    p_lng: number | null;
+    p_lat: number | null;
+    p_quality: string | null;
+    p_label: string | null;
+    p_feature_id: string | null;
+};
 
 /** Column names to select for public activity listings (no status, created_at, updated_at). */
 export const PUBLIC_ACTIVITY_SELECT = [
@@ -203,7 +217,43 @@ export async function deleteActivity(
     return data;
 }
 
-
-
-
+//---------- Geocoding Helpers     -------------
+                         
+async function upsertActivityGeocode(
+    supabase: SupabaseClient<Database>,
+    activityId: string,
+    location: string | null
+  ) {
+    const clearArgs: SetActivityGeocodeArgs = {
+      p_activity_id: activityId,
+      p_lng: null,
+      p_lat: null,
+      p_quality: null,
+      p_label: null,
+      p_feature_id: null,
+    };
+  
+    if (!location || !location.trim()) {
+      const { error } = await supabase.rpc("set_activity_geocode", clearArgs);
+      if (error) throw new Error(error.message);
+      return;
+    }
+  
+    const geo = await geocodeAddress(location);
+  
+    const args = geo
+      ? {
+          p_activity_id: activityId,
+          p_lng: geo.lng,
+          p_lat: geo.lat,
+          p_quality: geo.quality,
+          p_label: geo.label,
+          p_feature_id: geo.featureId,
+        }
+      : clearArgs;
+  
+    const { error } = await supabase.rpc("set_activity_geocode", args);
+    if (error) throw new Error(error.message);
+  }
+  
 
