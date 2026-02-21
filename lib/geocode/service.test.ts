@@ -39,6 +39,7 @@ function makeMockFetchThrows() {
 // --- Tests ---
 
 describe("geocodeAddress", () => {
+
   it("throws when address is missing/empty", async () => {
     const fetchFn = makeMockFetchOk(makeMapboxResponse([]));
 
@@ -160,7 +161,7 @@ describe("geocodeAddress", () => {
           place_name: "St. Michael, Barbados",
           id: "region.1",
         },
-      ])
+      ]) 
     );
 
     const res = await geocodeAddress(

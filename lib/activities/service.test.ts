@@ -1,6 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { createActivity, listActivities, updateActivity, deleteActivity, getActivityById } from "./service";
 
+vi.mock("@/lib/geocode/service", () => ({
+  geocodeAddress: vi.fn().mockResolvedValue(null),
+}));
+
 function makeMockSupabase() {
     const query: any = {
         select: vi.fn().mockReturnThis(),
@@ -44,6 +48,7 @@ function makeMockSupabaseForCreateActivity() {
               error: null,
           }),
       },
+      rpc: vi.fn().mockResolvedValue({ data: null, error: null}),
   };
 
   return { supabase, activitiesQuery, vendorsQuery };
@@ -72,6 +77,7 @@ function makeMockSupabaseForUpdateDelete() {
         error: null,
       }),
     },
+    rpc: vi.fn().mockResolvedValue({ data: null, error: null}),
   };
 
   return { supabase, activitiesQuery, vendorsQuery };
@@ -87,7 +93,7 @@ describe("activities service", () => {
       error: null,
     });
     
-    activitiesQuery.single.mockResolvedValueOnce({
+    const createdRow = {
       data: {
         id: "a1",
         vendor_id: "v1",
@@ -106,7 +112,8 @@ describe("activities service", () => {
         updated_at: new Date().toISOString(),
       },
       error: null,
-    });
+    };
+    activitiesQuery.single.mockResolvedValueOnce(createdRow).mockResolvedValueOnce(createdRow);
     
     const created = await createActivity(supabase, {
       title: "Snorkeling Tour",
@@ -385,7 +392,7 @@ it("createActivity: throws when user has no vendor", async () => {
       error: null,
     });
 
-    activitiesQuery.single.mockResolvedValueOnce({
+    const updateRow = {
       data: {
         id: "a1",
         vendor_id: "v1",
@@ -403,8 +410,11 @@ it("createActivity: throws when user has no vendor", async () => {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       },
-      error: null,
-    });
+    }
+
+
+    // We now call this twice because updateActivity makes two calls now. One before and after the geocoding
+    activitiesQuery.single.mockResolvedValueOnce(updateRow).mockResolvedValueOnce(updateRow);
 
     const updated = await updateActivity(supabase, "a1", {
       title: "Updated Title",
