@@ -67,18 +67,8 @@ export function Header() {
             }`}>
               HOME
             </Link>
-            <Link href="/accommodations" className={`text-sm font-medium hover:text-[#407FC2] hover:underline hover:decoration-[#407FC2] hover:underline-offset-8 transition-colors ${
-              pathname === "/accommodations" ? "text-[#407FC2] underline decoration-[#407FC2] underline-offset-8" : ""
-            }`}>
-              ACCOMMODATIONS
-            </Link>
-            <Link href="/activities" className={`text-sm font-medium hover:text-[#407FC2] hover:underline hover:decoration-[#407FC2] hover:underline-offset-8 transition-colors ${
-              pathname === "/activities" ? "text-[#407FC2] underline decoration-[#407FC2] underline-offset-8" : ""
-            }`}>
-              ACTIVITIES
-            </Link>
             <Link href="/vacation-planning" className={`text-sm font-medium hover:text-[#407FC2] hover:underline hover:decoration-[#407FC2] hover:underline-offset-8 transition-colors ${
-              pathname === "/vacation-planning" ? "text-[#407FC2] underline decoration-[#407FC2] underline-offset-8" : ""
+              pathname === "/vacation-planning" || pathname === "/accommodations" || pathname === "/activities" ? "text-[#407FC2] underline decoration-[#407FC2] underline-offset-8" : ""
             }`}>
               VACATION PLANNING
             </Link>
@@ -99,11 +89,6 @@ export function Header() {
               pathname === "/community" ? "text-[#407FC2] underline decoration-[#407FC2] underline-offset-8" : ""
             }`}>
               OUR COMMUNITY
-            </Link>
-            <Link href="/contact" className={`text-sm font-medium hover:text-[#407FC2] hover:underline hover:decoration-[#407FC2] hover:underline-offset-8 transition-colors ${
-              pathname === "/contact" ? "text-[#407FC2] underline decoration-[#407FC2] underline-offset-8" : ""
-            }`}>
-              CONTACT
             </Link>
             <Link 
               href="/my-trip" 
@@ -171,30 +156,25 @@ export function Header() {
             }`}>
               HOME
             </Link>
-            <Link href="/accommodations" className={`text-base font-medium py-4 transition-colors border-b-2 border-white/60 mx-3 ${
-              pathname === "/accommodations" ? "text-[#407FC2] underline decoration-[#407FC2] underline-offset-4" : "hover:text-[#407FC2] hover:underline hover:decoration-[#407FC2] hover:underline-offset-4"
-            }`}>
-              ACCOMMODATIONS
-            </Link>
-            <Link href="/activities" className={`text-base font-medium py-4 transition-colors border-b-2 border-white/60 mx-3 ${
-              pathname === "/activities" ? "text-[#407FC2] underline decoration-[#407FC2] underline-offset-4" : "hover:text-[#407FC2] hover:underline hover:decoration-[#407FC2] hover:underline-offset-4"
-            }`}>
-              ACTIVITIES
-            </Link>
             <Link href="/vacation-planning" className={`text-base font-medium py-4 transition-colors border-b-2 border-white/60 mx-3 ${
               pathname === "/vacation-planning" ? "text-[#407FC2] underline decoration-[#407FC2] underline-offset-4" : "hover:text-[#407FC2] hover:underline hover:decoration-[#407FC2] hover:underline-offset-4"
             }`}>
               VACATION PLANNING
             </Link>
+            <Link href="/accommodations" className={`text-base font-medium py-4 transition-colors border-b-2 border-white/60 mx-3 pl-6 ${
+              pathname === "/accommodations" ? "text-[#407FC2] underline decoration-[#407FC2] underline-offset-4" : "hover:text-[#407FC2] hover:underline hover:decoration-[#407FC2] hover:underline-offset-4"
+            }`}>
+              — Accommodations
+            </Link>
+            <Link href="/activities" className={`text-base font-medium py-4 transition-colors border-b-2 border-white/60 mx-3 pl-6 ${
+              pathname === "/activities" ? "text-[#407FC2] underline decoration-[#407FC2] underline-offset-4" : "hover:text-[#407FC2] hover:underline hover:decoration-[#407FC2] hover:underline-offset-4"
+            }`}>
+              — Activities
+            </Link>
             <Link href="/community" className={`text-base font-medium py-4 transition-colors border-b-2 border-white/60 mx-3 ${
               pathname === "/community" ? "text-[#407FC2] underline decoration-[#407FC2] underline-offset-4" : "hover:text-[#407FC2] hover:underline hover:decoration-[#407FC2] hover:underline-offset-4"
             }`}>
               OUR COMMUNITY
-            </Link>
-            <Link href="/contact" className={`text-base font-medium py-4 transition-colors mx-3 ${
-              pathname === "/contact" ? "text-[#407FC2] underline decoration-[#407FC2] underline-offset-4" : "hover:text-[#407FC2] hover:underline hover:decoration-[#407FC2] hover:underline-offset-4"
-            }`}>
-              CONTACT
             </Link>
             
             <div className="pt-4 border-t-2 border-white/60 mx-3 space-y-3">

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Playfair_Display, Source_Sans_3 } from "next/font/google";
 import "./globals.css";
+import { Footer } from "@/components/layout/footer";
 
 const playfairDisplay = Playfair_Display({
   variable: "--font-playfair",
@@ -31,6 +32,7 @@ export default function RootLayout({
         style={{ fontFamily: 'var(--font-source-sans)' }}
       >
         {children}
+        <Footer />
       </body>
     </html>
   );
