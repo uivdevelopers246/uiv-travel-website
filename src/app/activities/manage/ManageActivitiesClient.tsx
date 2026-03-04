@@ -107,7 +107,15 @@ export function ManageActivitiesClient({
     if (imageFile) {
       try {
         const supabase = createClient();
-        const fileExt = imageFile.name.split(".").pop()?.toLowerCase() || "jpg";
+        const fileExt = imageFile.name.split(".").pop()?.toLowerCase() || "";
+        const allowedExtensions = ["jpg", "jpeg", "png", "gif", "webp"];
+        
+        if (!allowedExtensions.includes(fileExt)) {
+          setMessage("Only image files are allowed (jpg, jpeg, png, gif, webp).");
+          setCreating(false);
+          return;
+        }
+        
         const fileName = `${crypto.randomUUID()}.${fileExt}`;
         const objectPath = `${vendorId}/${fileName}`;
 

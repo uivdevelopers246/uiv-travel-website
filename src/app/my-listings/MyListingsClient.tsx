@@ -52,7 +52,7 @@ export function MyListingsClient() {
         const { data: vendorData } = await supabase
           .from("vendors")
           .select("id")
-          .eq("owner_id", userData.user.id)
+          .eq("owner_user_id", userData.user.id)
           .single();
 
         if (vendorData && active) {
