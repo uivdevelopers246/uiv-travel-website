@@ -91,11 +91,11 @@ export function Header() {
               OUR COMMUNITY
             </Link>
             <Link 
-              href="/my-trip" 
+              href={role === "vendor" || role === "admin" ? "/my-listings" : "/my-trip"} 
               className="border border-gray-300 hover:bg-gray-100 text-gray-900 px-4 py-2 text-sm font-medium transition-colors flex items-center gap-2"
             >
               <img src="/images/icons/AccountIcon.png" alt="Account" className="w-4 h-4" />
-              <span>My Trip</span>
+              <span>{role === "vendor" || role === "admin" ? "My Listings" : "My Trip"}</span>
             </Link>
             <Link 
               href={flags.canAccessAccount ? "/account" : "/auth/login"}
@@ -179,11 +179,11 @@ export function Header() {
             
             <div className="pt-4 border-t-2 border-white/60 mx-3 space-y-3">
               <Link 
-                href="/my-trip" 
+                href={role === "vendor" || role === "admin" ? "/my-listings" : "/my-trip"} 
                 className="flex items-center gap-2 py-2 text-base font-medium hover:text-[#407FC2] transition-colors"
               >
                 <img src="/images/icons/AccountIcon.png" alt="Account" className="w-5 h-5" />
-                <span>My Trip</span>
+                <span>{role === "vendor" || role === "admin" ? "My Listings" : "My Trip"}</span>
               </Link>
               <Link 
                 href={flags.canAccessAccount ? "/account" : "/auth/login"}

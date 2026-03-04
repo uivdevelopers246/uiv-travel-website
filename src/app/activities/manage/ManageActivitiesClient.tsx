@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import { activityCategories } from "@/lib/activities/constants";
 
 type ActivityCategory = (typeof activityCategories)[number]["value"];
@@ -36,14 +37,27 @@ export function ManageActivitiesClient({
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const [form, setForm] = useState<{
     vendor_id: string;
     title: string;
+    description: string;
+    location: string;
     category: ActivityCategory;
+    duration_hours: string;
+    price_per_person: string;
+    max_capacity: string;
+    image_url: string;
   }>({
     vendor_id: defaultVendorId,
     title: "",
+    description: "",
+    location: "",
     category: activityCategories[0]?.value ?? "water-sports",
+    duration_hours: "",
+    price_per_person: "",
+    max_capacity: "",
+    image_url: "",
   });
 
   const fallbackVendorId = vendors[0]?.id ?? "";
@@ -74,23 +88,66 @@ export function ManageActivitiesClient({
     setCreating(true);
     setMessage(null);
 
-    const payload = {
-      vendor_id: form.vendor_id || fallbackVendorId,
-      title: form.title.trim(),
-      category: form.category,
-    };
+    const vendorId = form.vendor_id || fallbackVendorId;
 
-    if (!payload.vendor_id) {
+    if (!vendorId) {
       setMessage("Select a vendor first.");
       setCreating(false);
       return;
     }
 
-    if (!payload.title) {
+    if (!form.title.trim()) {
       setMessage("Title is required.");
       setCreating(false);
       return;
     }
+
+    let imageUrl = form.image_url.trim() || null;
+
+    if (imageFile) {
+      try {
+        const supabase = createClient();
+        const fileExt = imageFile.name.split(".").pop()?.toLowerCase() || "jpg";
+        const fileName = `${crypto.randomUUID()}.${fileExt}`;
+        const objectPath = `${vendorId}/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("activity-images")
+          .upload(objectPath, imageFile, {
+            cacheControl: "3600",
+            upsert: false,
+            contentType: imageFile.type || "image/jpeg",
+          });
+
+        if (uploadError) {
+          setMessage(uploadError.message);
+          setCreating(false);
+          return;
+        }
+
+        const { data } = supabase.storage
+          .from("activity-images")
+          .getPublicUrl(objectPath);
+
+        imageUrl = data.publicUrl;
+      } catch (error: any) {
+        setMessage(error?.message ?? "Image upload failed.");
+        setCreating(false);
+        return;
+      }
+    }
+
+    const payload = {
+      vendor_id: vendorId,
+      title: form.title.trim(),
+      description: form.description.trim() || null,
+      location: form.location.trim() || null,
+      category: form.category,
+      duration_hours: form.duration_hours ? Number(form.duration_hours) : null,
+      price_per_person: form.price_per_person ? Number(form.price_per_person) : null,
+      max_capacity: form.max_capacity ? Number(form.max_capacity) : null,
+      image_url: imageUrl,
+    };
 
     try {
       const res = await fetch("/api/activities", {
@@ -106,7 +163,18 @@ export function ManageActivitiesClient({
         return;
       }
 
-      setForm(prev => ({ ...prev, title: "" }));
+      setForm({
+        vendor_id: defaultVendorId,
+        title: "",
+        description: "",
+        location: "",
+        category: activityCategories[0]?.value ?? "water-sports",
+        duration_hours: "",
+        price_per_person: "",
+        max_capacity: "",
+        image_url: "",
+      });
+      setImageFile(null);
       setShowCreate(false);
       router.refresh();
     } catch (error: unknown) {
@@ -137,11 +205,13 @@ export function ManageActivitiesClient({
       </div>
 
       {showCreate && (
-        <form onSubmit={createDraft} className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-          <div className="grid gap-4 md:grid-cols-3">
+        <form onSubmit={createDraft} className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-6">
+          <h3 className="text-lg font-semibold text-slate-900 mb-4">Create new activity</h3>
+          
+          <div className="space-y-5">
             {canSelectVendor && (
               <div>
-                <label className="block text-xs font-semibold text-slate-600">
+                <label className="block text-sm font-medium text-slate-700">
                   Vendor
                 </label>
                 <select
@@ -160,61 +230,153 @@ export function ManageActivitiesClient({
               </div>
             )}
 
-            <div className={canSelectVendor ? "" : "md:col-span-2"}>
-              <label className="block text-xs font-semibold text-slate-600">
-                Title
-              </label>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Title</label>
               <input
                 value={form.title}
                 onChange={event =>
                   setForm(prev => ({ ...prev, title: event.target.value }))
                 }
                 className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
-                placeholder="New activity"
+                placeholder="Enter activity title"
+                required
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-600">
-                Category
+              <label className="block text-sm font-medium text-slate-700">
+                Description
               </label>
-              <select
-                value={form.category}
+              <textarea
+                value={form.description}
                 onChange={event =>
-                  setForm(prev => ({
-                    ...prev,
-                    category: event.target.value as ActivityCategory,
-                  }))
+                  setForm(prev => ({ ...prev, description: event.target.value }))
+                }
+                className="mt-2 min-h-[120px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+                placeholder="Describe the activity..."
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700">
+                Location
+              </label>
+              <input
+                value={form.location}
+                onChange={event =>
+                  setForm(prev => ({ ...prev, location: event.target.value }))
                 }
                 className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
-              >
-                {activityCategories.map(category => (
-                  <option key={category.value} value={category.value}>
-                    {category.label}
-                  </option>
-                ))}
-              </select>
+                placeholder="e.g. Bridgetown, Barbados"
+              />
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-slate-700">
+                  Category
+                </label>
+                <select
+                  value={form.category}
+                  onChange={event =>
+                    setForm(prev => ({
+                      ...prev,
+                      category: event.target.value as ActivityCategory,
+                    }))
+                  }
+                  className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+                >
+                  {activityCategories.map(category => (
+                    <option key={category.value} value={category.value}>
+                      {category.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">
+                  Duration (hours)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={form.duration_hours}
+                  onChange={event =>
+                    setForm(prev => ({ ...prev, duration_hours: event.target.value }))
+                  }
+                  className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+                  placeholder="e.g. 2"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-slate-700">
+                  Price per person
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.price_per_person}
+                  onChange={event =>
+                    setForm(prev => ({ ...prev, price_per_person: event.target.value }))
+                  }
+                  className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+                  placeholder="e.g. 50.00"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">
+                  Max capacity
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={form.max_capacity}
+                  onChange={event =>
+                    setForm(prev => ({ ...prev, max_capacity: event.target.value }))
+                  }
+                  className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+                  placeholder="e.g. 20"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700">
+                Activity image
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={event => setImageFile(event.target.files?.[0] ?? null)}
+                className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+              />
             </div>
           </div>
 
           {message && (
-            <p className="mt-3 text-xs text-rose-600">{message}</p>
+            <p className="mt-4 text-sm text-rose-600">{message}</p>
           )}
 
-          <div className="mt-4 flex items-center justify-end gap-2">
+          <div className="mt-6 flex items-center justify-end gap-2">
             <button
               type="button"
               onClick={() => setShowCreate(false)}
-              className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-white"
+              className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-white"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={creating}
-              className="rounded-full bg-[#193059] px-4 py-2 text-xs font-semibold text-white transition hover:bg-[#407FC2] disabled:opacity-60"
+              className="rounded-full bg-[#193059] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#407FC2] disabled:opacity-60"
             >
-              {creating ? "Creating..." : "Create draft"}
+              {creating ? "Creating..." : "Create activity"}
             </button>
           </div>
         </form>

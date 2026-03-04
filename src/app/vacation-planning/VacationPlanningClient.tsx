@@ -92,7 +92,7 @@ export function VacationPlanningClient() {
                   className="text-3xl md:text-4xl font-bold text-[#193059] mb-4"
                   style={{ fontFamily: 'var(--font-playfair)' }}
                 >
-                  Activities & Experiences
+                  Activities
                 </h2>
                 <p 
                   className="text-lg text-gray-600 mb-8 max-w-2xl mx-auto"
