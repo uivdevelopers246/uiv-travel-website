@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getUserRole } from "@/lib/auth/roles";
-import { getActivityById, deleteActivity, updateActivity } from "@/lib/activities/service";
+import { getActivityById, deleteActivity, updateActivity, hasValidCoordinates } from "@/lib/activities/service";
 
 
 export async function GET(
@@ -64,6 +64,22 @@ export async function PATCH(
   if (typeof body?.max_capacity !== "undefined")
     updates.max_capacity = body.max_capacity ?? null;
   if (typeof body?.image_url !== "undefined") updates.image_url = body.image_url ?? null;
+
+  const latPresent = body?.latitude !== undefined;
+  const lngPresent = body?.longitude !== undefined;
+
+  if (latPresent || lngPresent) {
+    updates.latitude = null;
+    updates.longitude = null;
+  } else if (hasValidCoordinates(body?.latitude, body?.longitude)) {
+    updates.latitude = body.latitude;
+    updates.longitude = body.longitude;
+  } else {
+    return NextResponse.json(
+      { error: "Provide both latitude and longitude as numbers in range (-90–90, -180–180), or both null to clear."},
+      { status: 400 }
+    );
+  }
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No updates provided" }, { status: 400 });

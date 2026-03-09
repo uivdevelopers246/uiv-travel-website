@@ -60,7 +60,7 @@ export const PUBLIC_ACTIVITY_SELECT = [
     "is_featured",
 ] as const satisfies readonly (keyof Activity)[];
 
-function hasValidCoordinates( lat: number | null | undefined, lng: number | null | undefined): boolean {
+export function hasValidCoordinates( lat: number | null | undefined, lng: number | null | undefined): boolean {
     return (
         typeof lat === "number" &&
         typeof lng === "number" &&

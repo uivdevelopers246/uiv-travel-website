@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createActivity, listActivities, type ActivityCategory } from "@/lib/activities/service";
+import { createActivity, listActivities, hasValidCoordinates, type ActivityCategory } from "@/lib/activities/service";
 import { createClient } from "@/lib/supabase/server";
 
 const validCategories = new Set<ActivityCategory>([
@@ -49,9 +49,27 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "Max capacity must be between 1 and 1000" }, { status: 400 });
         }
     }
+
+    const hasLat = body.latitude !== undefined;
+    const hasLng = body.longitude !== undefined;
+    if ( hasLat || hasLng ) {
+        if ( !hasLat || !hasLng ) {
+            return NextResponse.json(
+                { error: "Provide both latitude and longitude, or omit both"},
+                { status: 400}
+            );
+        }
+        if (!hasValidCoordinates(body.latitude, body.longitude)) {
+            return NextResponse.json(
+                { error: "Latitude must be between -90 and 90, longitude between -180 and 180." },
+                { status: 400 }
+            );
+        }
+
+    }
     
     try {
-        const created = await createActivity(supabase, {
+        const createPayload = {
             title,
             description: body.description ?? null,
             location: body.location ?? null,
@@ -60,7 +78,13 @@ export async function POST(req: Request) {
             price_per_person: body.price_per_person ?? null,
             max_capacity: body.max_capacity ?? null,
             image_url: body.image_url ?? null,
-        });
+        } as Parameters<typeof createActivity>[1];
+        if (body.latitude !== undefined && body.longitude !== undefined && hasValidCoordinates(body.latitude, body.longitude)) {
+            createPayload.latitude = body.latitude;
+            createPayload.longitude = body.longitude;
+        }
+        const created = await createActivity(supabase, createPayload);
+        
 
         return NextResponse.json(created, { status: 201})
     } catch (error: unknown) {
