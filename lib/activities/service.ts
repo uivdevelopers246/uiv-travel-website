@@ -1,7 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/supabase/types/database";
-import { geocodeAddress } from "@/lib/geocode/service";
-import type { GeocodeResult } from "@/lib/geocode/service";
+
 
 export type ActivityStatus = "draft" | "published" | "archived";
 export type ActivityCategory = "water-sports" | "wildlife" | "adventure" | "culture" | "nature";
@@ -29,6 +28,8 @@ export type CreateActivityInput = {
     title: string;
     description?:string | null;
     location?: string | null;
+    latitude?: number | null;
+    longitude?: number | null;
     category: ActivityCategory;
     duration_hours?: number | null;
     price_per_person?: number | null;
@@ -38,10 +39,10 @@ export type CreateActivityInput = {
 
 export type UpdateActivityInput = Partial<
   Pick<Activity, "title" | "description" | "location" | "category" | "duration_hours" | "price_per_person" | "max_capacity" | "image_url" | "status">
->;
-
-// ---- Geocoding + RPC types/helpers ----
-
+> & {
+    longitude?: number | null;
+    latitude?: number | null;
+};
 
 /** Column names to select for public activity listings (no status, created_at, updated_at). */
 export const PUBLIC_ACTIVITY_SELECT = [
@@ -58,6 +59,17 @@ export const PUBLIC_ACTIVITY_SELECT = [
     "image_url",
     "is_featured",
 ] as const satisfies readonly (keyof Activity)[];
+
+function hasValidCoordinates( lat: number | null | undefined, lng: number | null | undefined): boolean {
+    return (
+        typeof lat === "number" &&
+        typeof lng === "number" &&
+        lat >= -90 &&
+        lat <= 90 &&
+        lng >= -180 &&
+        lng < 180
+    );
+}
 
 /** Activity shape exposed to public API; derived from PUBLIC_ACTIVITY_SELECT. */
 export type PublicActivity = Pick<Activity, (typeof PUBLIC_ACTIVITY_SELECT)[number]>;
@@ -103,11 +115,16 @@ export async function createActivity(
         
     if (error) throw new Error(error.message);
 
-    await upsertActivityGeocode(supabase, data.id, input.location ?? null);
-    
-    const activityId = data.id;
-    if (input.location !== undefined) await upsertActivityGeocode(supabase, activityId, input.location ?? null);
+    if (hasValidCoordinates(input.latitude, input.latitude)) {
+        const { error: rpcError } = await supabase.rpc("set_activity_location_point", {
+            p_activity_id: data.id,
+            p_lng: input.longitude as number,
+            p_lat: input.latitude as number,
+        });
 
+        if (rpcError) throw new Error(rpcError.message);
+    }
+ 
     const { data: activity, error: refetchError } = await supabase
         .from("activities")
         .select("*")
@@ -188,9 +205,25 @@ export async function updateActivity(
     .single();
 
     if (error) throw new Error(error.message);
-    await upsertActivityGeocode(supabase, data.id, input.location ?? null);
-    
-    if (input.location !== undefined) await upsertActivityGeocode(supabase, activityId, input.location ?? null);
+   
+    const latPresent = input.latitude !== undefined;
+    const lngPresent = input.longitude !== undefined;
+
+    if (latPresent || lngPresent) {
+        const { error: rpcError} = await supabase.rpc("set_activity_location_point", {
+            p_activity_id: data.id,
+        })
+        if (rpcError) throw new Error(rpcError.message);
+    } else if (hasValidCoordinates( input.latitude, input.longitude )) {
+        const { error: rpcError } = await supabase.rpc("set_activity_location_point", {
+            p_activity_id: data.id,
+            p_lng: input.longitude as number,
+            p_lat: input.latitude as number,
+        });
+        if (rpcError) throw new Error(rpcError.message);
+    } else {
+        throw new Error("Provide both latitude and longitude, or both null to clear the location point.")
+    }
 
     const { data: activity, error: refetchError } = await supabase
         .from("activities")
