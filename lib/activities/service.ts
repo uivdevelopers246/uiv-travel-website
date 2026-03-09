@@ -208,21 +208,29 @@ export async function updateActivity(
    
     const latPresent = input.latitude !== undefined;
     const lngPresent = input.longitude !== undefined;
+    const coordsProvided = latPresent || lngPresent;
 
-    if (latPresent || lngPresent) {
-        const { error: rpcError} = await supabase.rpc("set_activity_location_point", {
-            p_activity_id: data.id,
-        })
-        if (rpcError) throw new Error(rpcError.message);
-    } else if (hasValidCoordinates( input.latitude, input.longitude )) {
-        const { error: rpcError } = await supabase.rpc("set_activity_location_point", {
-            p_activity_id: data.id,
-            p_lng: input.longitude as number,
-            p_lat: input.latitude as number,
-        });
-        if (rpcError) throw new Error(rpcError.message);
-    } else {
-        throw new Error("Provide both latitude and longitude, or both null to clear the location point.")
+    if (coordsProvided) {
+        if (input.latitude === null && input.longitude === null) {
+            // Both explicitly null → clear location_point.
+            const { error: rpcError } = await supabase.rpc("set_activity_location_point", {
+                p_activity_id: data.id,
+            });
+            if (rpcError) throw new Error(rpcError.message);
+        } else if (hasValidCoordinates(input.latitude, input.longitude)) {
+            // Both provided and valid numbers → set location_point.
+            const { error: rpcError } = await supabase.rpc("set_activity_location_point", {
+                p_activity_id: data.id,
+                p_lng: input.longitude as number,
+                p_lat: input.latitude as number,
+            });
+            if (rpcError) throw new Error(rpcError.message);
+        } else {
+            // Mixed or invalid coordinates.
+            throw new Error(
+                "Provide both latitude and longitude, or both null to clear the location point."
+            );
+        }
     }
 
     const { data: activity, error: refetchError } = await supabase
