@@ -263,51 +263,5 @@ export async function deleteActivity(
     return data;
 }
 
-//---------- Geocoding Helpers     -------------
-/**
- * -----UPSERTACTIVITYGEOCODE-----
- * The three branches in this fuction check for the three conditions of our geocoding rpc.
- * 1 - If no location is provided, we clear(default) the geocode data for this activity.
- * 2 - If the geocode service(Mapbox) does not find anything for our input location (does not
- * exist or is not specific enough) the geocode information is cleared (default).
- * 3 - If the geo object returned from the rpc call is truthy, we set the activity's location and geocode details
- * RESOLUTION - On success, error  is null or undefined and the createActivity or updateActivity function proceed.
- * On failure/error (rls blocks the update, network issue, or the function throws) error is set and that message is
- * returned to the calling function
- */                        
-async function upsertActivityGeocode(
-    supabase: SupabaseClient<Database>,
-    activityId: string,
-    location: string | null
-  ) {
-
-    if (!location || !location.trim()) {
-        const { error } = await supabase.rpc("set_activity_geocode", {
-            p_activity_id: activityId,
-        });
-        if (error) throw new Error(error.message);
-        return;
-    }
-  
-    const geo = await geocodeAddress(location);
-
-    if (!geo) {
-      const { error } = await supabase.rpc("set_activity_geocode", {
-        p_activity_id: activityId,
-      });
-      if (error) throw new Error(error.message);
-      return;
-    }
-
-    const { error } = await supabase.rpc("set_activity_geocode", {
-        p_activity_id: activityId,
-        p_lng: geo.lng,
-        p_lat: geo.lat,
-        p_quality: geo.quality,
-        p_label: geo.label,
-        p_feature_id: geo.featureId,
-    });
-    if (error) throw new Error(error.message);
-  }
   
 
