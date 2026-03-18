@@ -109,13 +109,13 @@ export function ManageActivitiesClient({
         const supabase = createClient();
         const fileExt = imageFile.name.split(".").pop()?.toLowerCase() || "";
         const allowedExtensions = ["jpg", "jpeg", "png", "gif", "webp"];
-        
+
         if (!allowedExtensions.includes(fileExt)) {
           setMessage("Only image files are allowed (jpg, jpeg, png, gif, webp).");
           setCreating(false);
           return;
         }
-        
+
         const fileName = `${crypto.randomUUID()}.${fileExt}`;
         const objectPath = `${vendorId}/${fileName}`;
 
@@ -215,7 +215,7 @@ export function ManageActivitiesClient({
       {showCreate && (
         <form onSubmit={createDraft} className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-6">
           <h3 className="text-lg font-semibold text-slate-900 mb-4">Create new activity</h3>
-          
+
           <div className="space-y-5">
             {canSelectVendor && (
               <div>
@@ -444,7 +444,7 @@ export function ManageActivitiesClient({
                           Publish
                         </button>
                         <a
-                          href={`/activities/manage/${activity.id}`}
+                          href={`/my-listings/manage/${activity.id}`}
                           className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
                         >
                           Edit

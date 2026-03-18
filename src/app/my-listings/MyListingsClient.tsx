@@ -2,8 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getUserRole, type UserRole } from "@/lib/auth/roles";
+import { activityCategories } from "@/lib/activities/constants";
+
+type ActivityCategory = (typeof activityCategories)[number]["value"];
 
 type Activity = {
   id: string;
@@ -15,6 +19,7 @@ type Activity = {
   price_per_person: number | null;
   image_url: string | null;
   created_at: string;
+  vendor_id: string;
 };
 
 type Accommodation = {
@@ -29,58 +34,97 @@ type Accommodation = {
 };
 
 export function MyListingsClient() {
+  const router = useRouter();
   const [role, setRole] = useState<UserRole>("guest");
   const [activeTab, setActiveTab] = useState<"activities" | "accommodations">("activities");
   const [activities, setActivities] = useState<Activity[]>([]);
   const [accommodations, setAccommodations] = useState<Accommodation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [vendorId, setVendorId] = useState<string | null>(null);
+  
+  // Create form state
+  const [showCreate, setShowCreate] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [form, setForm] = useState<{
+    title: string;
+    description: string;
+    location: string;
+    category: ActivityCategory;
+    duration_hours: string;
+    price_per_person: string;
+    max_capacity: string;
+    image_url: string;
+  }>({
+    title: "",
+    description: "",
+    location: "",
+    category: activityCategories[0]?.value ?? "water-sports",
+    duration_hours: "",
+    price_per_person: "",
+    max_capacity: "",
+    image_url: "",
+  });
+
+  const loadData = async () => {
+    const supabase = createClient();
+    const nextRole = await getUserRole(supabase);
+    setRole(nextRole);
+
+    if (nextRole === "admin") {
+      // Admin sees all activities across all vendors
+      const [{ data: activitiesData }, { data: vendorData }] = await Promise.all([
+        supabase
+          .from("activities")
+          .select("id, title, description, location, category, status, price_per_person, image_url, created_at, vendor_id")
+          .order("created_at", { ascending: false }),
+        supabase.from("vendors").select("id").limit(1).maybeSingle(),
+      ]);
+
+      setActivities(activitiesData ?? []);
+      // Set a default vendor ID for creating new activities (admin can use any vendor)
+      if (vendorData) {
+        setVendorId(vendorData.id);
+      }
+    } else if (nextRole === "vendor") {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) return;
+
+      const { data: vendorData } = await supabase
+        .from("vendors")
+        .select("id")
+        .eq("owner_user_id", userData.user.id)
+        .single();
+
+      if (vendorData) {
+        setVendorId(vendorData.id);
+        const { data: activitiesData } = await supabase
+          .from("activities")
+          .select("id, title, description, location, category, status, price_per_person, image_url, created_at, vendor_id")
+          .eq("vendor_id", vendorData.id)
+          .order("created_at", { ascending: false });
+
+        setActivities(activitiesData ?? []);
+      }
+    }
+
+    setLoading(false);
+  };
 
   useEffect(() => {
     const supabase = createClient();
     let active = true;
 
-    const loadData = async () => {
-      const nextRole = await getUserRole(supabase);
-      if (!active) return;
-      setRole(nextRole);
-
-      if (nextRole === "vendor" || nextRole === "admin") {
-        // Get user's vendor ID
-        const { data: userData } = await supabase.auth.getUser();
-        if (!userData.user || !active) return;
-
-        const { data: vendorData } = await supabase
-          .from("vendors")
-          .select("id")
-          .eq("owner_user_id", userData.user.id)
-          .single();
-
-        if (vendorData && active) {
-          // Fetch activities for this vendor
-          const { data: activitiesData } = await supabase
-            .from("activities")
-            .select("id, title, description, location, category, status, price_per_person, image_url, created_at")
-            .eq("vendor_id", vendorData.id)
-            .order("created_at", { ascending: false });
-
-          if (active) {
-            setActivities(activitiesData ?? []);
-          }
-
-          // Accommodations table might not exist yet, so we'll handle that gracefully
-          // setAccommodations([]);
-        }
-      }
-
-      if (active) {
-        setLoading(false);
-      }
+    const init = async () => {
+      await loadData();
     };
 
-    void loadData();
+    void init();
 
     const { data } = supabase.auth.onAuthStateChange(() => {
-      void loadData();
+      if (active) void loadData();
     });
 
     return () => {
@@ -88,6 +132,134 @@ export function MyListingsClient() {
       data.subscription.unsubscribe();
     };
   }, []);
+
+  const updateStatus = async (id: string, status: "draft" | "published") => {
+    setPendingId(id);
+    try {
+      const res = await fetch("/api/activities/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, status }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data?.error ?? "Failed to update status.");
+        return;
+      }
+
+      await loadData();
+    } finally {
+      setPendingId(null);
+    }
+  };
+
+  const createDraft = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setCreating(true);
+    setMessage(null);
+
+    if (!vendorId) {
+      setMessage("Vendor ID not found.");
+      setCreating(false);
+      return;
+    }
+
+    if (!form.title.trim()) {
+      setMessage("Title is required.");
+      setCreating(false);
+      return;
+    }
+
+    let imageUrl = form.image_url.trim() || null;
+
+    if (imageFile) {
+      try {
+        const supabase = createClient();
+        const fileExt = imageFile.name.split(".").pop()?.toLowerCase() || "";
+        const allowedExtensions = ["jpg", "jpeg", "png", "gif", "webp"];
+
+        if (!allowedExtensions.includes(fileExt)) {
+          setMessage("Only image files are allowed (jpg, jpeg, png, gif, webp).");
+          setCreating(false);
+          return;
+        }
+
+        const fileName = `${crypto.randomUUID()}.${fileExt}`;
+        const objectPath = `${vendorId}/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("activity-images")
+          .upload(objectPath, imageFile, {
+            cacheControl: "3600",
+            upsert: false,
+            contentType: imageFile.type || "image/jpeg",
+          });
+
+        if (uploadError) {
+          setMessage(uploadError.message);
+          setCreating(false);
+          return;
+        }
+
+        const { data } = supabase.storage
+          .from("activity-images")
+          .getPublicUrl(objectPath);
+
+        imageUrl = data.publicUrl;
+      } catch (error: any) {
+        setMessage(error?.message ?? "Image upload failed.");
+        setCreating(false);
+        return;
+      }
+    }
+
+    const payload = {
+      vendor_id: vendorId,
+      title: form.title.trim(),
+      description: form.description.trim() || null,
+      location: form.location.trim() || null,
+      category: form.category,
+      duration_hours: form.duration_hours ? Number(form.duration_hours) : null,
+      price_per_person: form.price_per_person ? Number(form.price_per_person) : null,
+      max_capacity: form.max_capacity ? Number(form.max_capacity) : null,
+      image_url: imageUrl,
+    };
+
+    try {
+      const res = await fetch("/api/activities", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMessage(data?.error ?? "Failed to create activity.");
+        setCreating(false);
+        return;
+      }
+
+      setForm({
+        title: "",
+        description: "",
+        location: "",
+        category: activityCategories[0]?.value ?? "water-sports",
+        duration_hours: "",
+        price_per_person: "",
+        max_capacity: "",
+        image_url: "",
+      });
+      setImageFile(null);
+      setShowCreate(false);
+      await loadData();
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Failed to create activity";
+      setMessage(msg);
+    } finally {
+      setCreating(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -165,18 +337,144 @@ export function MyListingsClient() {
           <div>
             {/* Add New Button */}
             <div className="mb-6">
-              <Link
-                href="/activities/manage"
+              <button
+                onClick={() => setShowCreate(prev => !prev)}
                 className="inline-flex items-center gap-2 px-4 py-2 bg-[#FBCA1A] hover:bg-[#f5c000] text-[#193059] font-semibold rounded-lg transition-colors"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
-                Add New Activity
-              </Link>
+                {showCreate ? "Cancel" : "Add New Activity"}
+              </button>
             </div>
 
-            {activities.length === 0 ? (
+            {/* Create Form */}
+            {showCreate && (
+              <form onSubmit={createDraft} className="mb-8 bg-white rounded-lg shadow-sm p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Create New Activity</h3>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+                    <input
+                      value={form.title}
+                      onChange={e => setForm(prev => ({ ...prev, title: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#407FC2] focus:border-transparent"
+                      placeholder="Enter activity title"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                    <textarea
+                      value={form.description}
+                      onChange={e => setForm(prev => ({ ...prev, description: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#407FC2] focus:border-transparent min-h-[100px]"
+                      placeholder="Describe the activity..."
+                    />
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
+                      <input
+                        value={form.location}
+                        onChange={e => setForm(prev => ({ ...prev, location: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#407FC2] focus:border-transparent"
+                        placeholder="e.g. Bridgetown, Barbados"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                      <select
+                        value={form.category}
+                        onChange={e => setForm(prev => ({ ...prev, category: e.target.value as ActivityCategory }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#407FC2] focus:border-transparent"
+                      >
+                        {activityCategories.map(category => (
+                          <option key={category.value} value={category.value}>
+                            {category.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Duration (hours)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={form.duration_hours}
+                        onChange={e => setForm(prev => ({ ...prev, duration_hours: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#407FC2] focus:border-transparent"
+                        placeholder="e.g. 2"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Price per person ($)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={form.price_per_person}
+                        onChange={e => setForm(prev => ({ ...prev, price_per_person: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#407FC2] focus:border-transparent"
+                        placeholder="e.g. 50.00"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Max capacity</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={form.max_capacity}
+                        onChange={e => setForm(prev => ({ ...prev, max_capacity: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#407FC2] focus:border-transparent"
+                        placeholder="e.g. 20"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Activity Image</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={e => setImageFile(e.target.files?.[0] ?? null)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#407FC2] focus:border-transparent"
+                    />
+                  </div>
+                </div>
+
+                {message && (
+                  <p className="mt-4 text-sm text-rose-600">{message}</p>
+                )}
+
+                <div className="mt-6 flex items-center gap-3">
+                  <button
+                    type="submit"
+                    disabled={creating}
+                    className="px-6 py-2 bg-gradient-to-r from-[#407FC2] to-[#193059] hover:from-[#193059] hover:to-[#407FC2] text-white font-semibold rounded-lg transition-all duration-300 disabled:opacity-60"
+                  >
+                    {creating ? "Creating..." : "Create Activity"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowCreate(false)}
+                    className="px-6 py-2 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {activities.length === 0 && !showCreate ? (
               <div className="bg-white rounded-lg shadow-sm p-12 text-center">
                 <div className="mb-4">
                   <svg className="w-16 h-16 mx-auto text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -185,14 +483,14 @@ export function MyListingsClient() {
                 </div>
                 <h3 className="text-xl font-semibold text-gray-900 mb-2">No Activities Yet</h3>
                 <p className="text-gray-600 mb-6">Start by adding your first activity listing.</p>
-                <Link
-                  href="/activities/manage"
+                <button
+                  onClick={() => setShowCreate(true)}
                   className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-[#407FC2] to-[#193059] hover:from-[#193059] hover:to-[#407FC2] text-white font-semibold rounded-lg transition-all duration-300"
                 >
                   Create Your First Activity
-                </Link>
+                </button>
               </div>
-            ) : (
+            ) : activities.length > 0 && (
               <div className="grid gap-4">
                 {activities.map((activity) => (
                   <div
@@ -227,9 +525,27 @@ export function MyListingsClient() {
                     </div>
 
                     {/* Actions */}
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {activity.status !== "published" && (
+                        <button
+                          onClick={() => updateStatus(activity.id, "published")}
+                          disabled={pendingId === activity.id}
+                          className="px-3 py-2 text-sm font-medium text-emerald-700 border border-emerald-300 rounded-lg hover:bg-emerald-50 transition-colors disabled:opacity-60"
+                        >
+                          Publish
+                        </button>
+                      )}
+                      {activity.status === "published" && (
+                        <button
+                          onClick={() => updateStatus(activity.id, "draft")}
+                          disabled={pendingId === activity.id}
+                          className="px-3 py-2 text-sm font-medium text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-50 transition-colors disabled:opacity-60"
+                        >
+                          Unpublish
+                        </button>
+                      )}
                       <Link
-                        href={`/activities/manage/${activity.id}`}
+                        href={`/my-listings/manage/${activity.id}`}
                         className="px-4 py-2 text-sm font-medium text-[#407FC2] border border-[#407FC2] rounded-lg hover:bg-[#407FC2] hover:text-white transition-colors"
                       >
                         Edit

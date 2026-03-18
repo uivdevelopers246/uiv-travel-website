@@ -11,7 +11,7 @@ export default async function ManageActivitiesPage() {
   const role = await getUserRole(supabase);
 
   if (role === "guest") {
-    redirect("/auth/login?redirect=/activities/manage");
+    redirect("/auth/login?redirect=/my-listings/manage");
   }
 
   if (role !== "admin" && role !== "vendor") {

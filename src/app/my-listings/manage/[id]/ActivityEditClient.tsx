@@ -132,7 +132,7 @@ export function ActivityEditClient({ activityId, vendorId, initial }: Props) {
             </p>
           </div>
           <a
-            href="/activities/manage"
+            href="/my-listings/manage"
             className="text-sm font-semibold text-[#193059] underline-offset-4 hover:underline"
           >
             Back to manage
