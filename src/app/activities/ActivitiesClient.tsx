@@ -1,8 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
-import { getUserRole, type UserRole } from "@/lib/auth/roles";
+import { useMemo, useState } from "react";
 import { activityCategories, durationFilters } from "@/lib/activities/constants";
 
 type Activity = {
@@ -29,30 +27,6 @@ export function ActivitiesClient({ activities }: Props) {
     duration: "all",
     maxGroupSize: 25,
   });
-  const [role, setRole] = useState<UserRole>("guest");
-
-  useEffect(() => {
-    const supabase = createClient();
-    let active = true;
-
-    const loadRole = async () => {
-      const nextRole = await getUserRole(supabase);
-      if (active) {
-        setRole(nextRole);
-      }
-    };
-
-    void loadRole();
-
-    const { data } = supabase.auth.onAuthStateChange(() => {
-      void loadRole();
-    });
-
-    return () => {
-      active = false;
-      data.subscription.unsubscribe();
-    };
-  }, []);
 
   const filtered = useMemo(() => {
     return activities.filter(activity => {
@@ -94,7 +68,7 @@ export function ActivitiesClient({ activities }: Props) {
         <div className="absolute inset-0">
           <img 
             src="/images/hero/ScenicHill.JPG" 
-            alt="Activities & Experiences" 
+            alt="Activities" 
             className="w-full h-full object-cover brightness-90"
           />
         </div>
@@ -106,7 +80,7 @@ export function ActivitiesClient({ activities }: Props) {
             className="text-5xl md:text-6xl lg:text-7xl font-bold mb-6 text-white"
             style={{ fontFamily: 'var(--font-playfair)' }}
           >
-            Activities & Experiences
+            Activities
           </h1>
           
           <p 
@@ -129,26 +103,13 @@ export function ActivitiesClient({ activities }: Props) {
       {/* Filter Section */}
       <section className="bg-gray-50 py-12">
         <div className="container mx-auto px-4 max-w-7xl">
-          <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+          <div className="mb-8">
             <h2 
               className="text-3xl font-bold text-gray-900"
               style={{ fontFamily: 'var(--font-playfair)' }}
             >
               Filter Activities
             </h2>
-            {(role === "admin" || role === "vendor") && (
-              <a
-                href="/activities/manage"
-                className="group inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-900 shadow-sm transition hover:border-[#407FC2] hover:text-[#407FC2]"
-                style={{ fontFamily: 'var(--font-source-sans)' }}
-                aria-label="Manage activities"
-              >
-                <span className="flex h-7 w-7 items-center justify-center rounded-full border border-gray-300 text-base leading-none transition group-hover:border-[#407FC2]">
-                  +
-                </span>
-                <span className="hidden sm:inline">Manage activities</span>
-              </a>
-            )}
           </div>
           
           <div className="bg-white p-8 rounded-lg shadow-sm">
@@ -332,7 +293,7 @@ export function ActivitiesClient({ activities }: Props) {
                         <span>{activity.duration_hours} hrs</span>
                       )}
                       {activity.price_per_person != null && (
-                        <span>${activity.price_per_person.toFixed(0)}+</span>
+                        <span>${activity.price_per_person.toFixed(0)}</span>
                       )}
                     </div>
                   </div>

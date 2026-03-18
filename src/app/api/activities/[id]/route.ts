@@ -86,7 +86,8 @@ export async function PATCH(
   }
 
   try {
-    const data = await updateActivity(supabase, id, updates);
+    const isAdmin = role === "admin";
+    const data = await updateActivity(supabase, id, updates, { isAdmin });
     return NextResponse.json({ id: data.id });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to update activity";
