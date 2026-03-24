@@ -1,0 +1,197 @@
+M0 — Bootstrap, CI/CD, environments
+
+Goals: one-repo, preview deploys on every PR, seeded database.
+Tasks
+
+Create Next.js app (App Router), TypeScript, ESLint/Prettier, Turborepo optional.
+
+Wire Vercel project: prod + preview; env groups (local/dev/prod).
+
+Supabase project: enable PostGIS, create schemas, seed script.
+
+Add .env management, secret mapping (Vercel env vars ↔ Supabase).
+
+Basic /api/health route & landing page.
+Deliverables: live preview links on PRs; npm run db:migrate && db:seed.
+Exit: main deploys green; DB + app spin up locally in <5 min.
+
+Time: full-time 2–3 days | 2 devs part-time 1 week.
+
+M1 — Auth & users (RLS foundations)
+
+Goals: secure sign-in, basic profiles, row-level security scaffolding.
+Tasks
+
+Supabase Auth (email/password + magic link if you want).
+
+Tables: users, profiles (public minimal view), RLS policies.
+
+Next.js auth context + route guards; /me page edit profile.
+
+Audit fields (created_at, updated_at, by whom) via triggers.
+Deliverables: login/signup works; protected pages; profile edit.
+Exit: RLS prevents cross-tenant reads; E2E auth test passes.
+
+Time: full-time 3–4 days | 2 devs part-time 1–1.5 weeks.
+
+M2 — Activities catalog (CRUD + uploads)
+
+Goals: operators can create activities with images & metadata.
+Tasks
+
+Tables: activities(id, title, price_cents, category, tags[], geom, starts_at/ends_at, status, provider_id).
+
+Supabase Storage buckets + signed URLs; image upload flow.
+
+Admin UI (protected) for create/update/list; public list API.
+
+Indexes: GIST on geom, price/category.
+Deliverables: admin CRUD with images; public list/grid.
+Exit: CRUD e2e tests; seed data shows on public list.
+
+Time: full-time 1 week | 2 devs part-time 2 weeks.
+
+M3 — Map view & “near me” search
+
+Goals: island map with clustered markers + popups.
+Tasks
+
+MapLibre GL + MapTiler/Mapbox tiles; clustering & popups.
+
+API route /api/activities/near?lat&lng&radius_km&max_price.
+
+Optional geocode proxy /api/geo/forward?q= (cache in DB or memory).
+
+Mobile-friendly map/list sync.
+Deliverables: Barbados map; click marker → card with CTA.
+Exit: p95 <150ms for typical near-me queries on seed data.
+
+Time: full-time 3–4 days | 2 devs part-time ~1 week.
+
+M4 — Booking core (hold → confirm, no payment)
+
+Goals: correct, idempotent booking pipeline w/ no oversells.
+Tasks
+
+Tables: timeslots, bookings, unique constraint to prevent double-sell.
+
+Routes: POST /api/bookings/hold (ttl hold), POST /api/bookings/confirm.
+
+Idempotency keys; short transactions; server actions or route handlers.
+
+Cleanup job (cron) for expired holds.
+Deliverables: full flow to confirm a booking (free).
+Exit: concurrency tests pass (parallel holds resolve correctly).
+
+Time: full-time 1 week | 2 devs part-time 2 weeks.
+
+M5 — Payments & webhook orchestration
+
+Goals: charge, verify, and finalize bookings.
+Tasks
+
+Stripe Checkout/PaymentIntents, server-side session creation.
+
+Webhook route (raw body verify) → upsert payment, finalize booking.
+
+Outbox pattern or simple status machine to ensure exactly-once.
+
+Refund/cancel basics; success/cancel pages.
+Deliverables: paid, confirmed booking end-to-end.
+Exit: replay-safe webhook; E2E test from “select → pay → confirm”.
+
+Time: full-time 1 week | 2 devs part-time 2 weeks.
+
+M6 — Notifications & comms
+
+Goals: transactional emails (confirmation, reminders).
+Tasks
+
+Resend (or SMTP) template(s) for confirmation/receipt/reminders.
+
+Cron for reminder sends; bounce/complaint logging (basic).
+
+User email preferences (simple on/off).
+Deliverables: branded confirmation mail; reminder 24h before.
+Exit: emails observed in sandbox; retry & failure paths logged.
+
+Time: full-time 2–3 days | 2 devs part-time ~1 week.
+
+M7 — AI itinerary (v1 tool)
+
+Goals: natural language → structured search → itinerary list.
+Tasks
+
+Define a server “tool”: findActivities({ place, radiusKm, maxPrice, categories }) using PostGIS.
+
+Geocode if place specified; clamp inputs; cache hot results.
+
+Simple itinerary composer (time windows, spacing); optional LLM polish.
+Deliverables: “Suggest 5 activities under $200 near Holetown” returns map+list.
+Exit: deterministic tool calls; guardrails; telemetry.
+
+Time: full-time 3–4 days | 2 devs part-time ~1 week.
+
+M8 — Observability, polish, & launch
+
+Goals: be supportable and ready for pilot.
+Tasks
+
+Vercel Analytics + request logging; slow SQL log; basic dashboards.
+
+3–5 alerts (error rate, webhook failures, payment mismatches).
+
+Legal pages (ToS/Privacy), cookie banner if needed.
+
+Hardening pass: RLS review, input validation (Zod), rate limits on hot routes.
+Deliverables: pilot-ready app at production URL.
+Exit: smoke tests green; runbook + “how to reset dev” doc committed.
+
+Time: full-time 3–5 days | 2 devs part-time ~1–1.5 weeks.
+
+Roll-up timeline
+Option A — 1 dev, full-time
+
+M0–M3: ~3 weeks
+
+M4–M6: ~3 weeks
+
+M7–M8: ~1.5–2 weeks
+Total: ~7.5–8.5 weeks to MVP launch.
+
+Option B — 2 devs, part-time (each ~1.5–2h on weekdays)
+
+M0–M3: ~4 weeks
+
+M4–M6: ~4–5 weeks
+
+M7–M8: ~2–3 weeks
+Total: ~10–12 weeks to MVP launch.
+
+With two part-time devs, the coordination overhead offsets some parallel gains; expect ~20–30% faster than a single part-time dev, not 2×.
+
+Smart parallelization (two-dev split)
+
+Dev A (backend/platform): M0 infra, M1 RLS, M2 schema, M4 bookings, M5 webhook, M6 cron, M7 tool API.
+
+Dev B (frontend/product): M1 auth UI, M2 admin UI + uploads, M3 map, M4 checkout UI, M5 success/cancel, M6 emails, M7 itinerary UI.
+
+Pairing moments:
+
+M4 (bookings) and M5 (webhooks) — do design + tests together.
+
+Stretch goals (post-MVP, only if time)
+
+Provider portal (calendar/slots/pricing).
+
+Search polish (facets, text search via pg_trgm or Algolia).
+
+Multi-currency & tax handling.
+
+Real-time availability updates (Supabase Realtime).
+
+If you want, I can turn this into:
+
+a GitHub Projects board (columns by milestone, with tasks & exit criteria), and
+
+a starter repo scaffold (Next.js app, Supabase SQL migrations, MapLibre page, Stripe webhook route, and the /api/activities/near endpoint).
