@@ -67,18 +67,21 @@ export async function PATCH(
 
   const latPresent = body?.latitude !== undefined;
   const lngPresent = body?.longitude !== undefined;
+  const coordPairError =
+    "Provide both latitude and longitude as numbers in range (-90–90, -180–180), or both null to clear.";
 
-  if (latPresent || lngPresent) {
-    updates.latitude = null;
-    updates.longitude = null;
-  } else if (hasValidCoordinates(body?.latitude, body?.longitude)) {
-    updates.latitude = body.latitude;
-    updates.longitude = body.longitude;
-  } else {
-    return NextResponse.json(
-      { error: "Provide both latitude and longitude as numbers in range (-90–90, -180–180), or both null to clear."},
-      { status: 400 }
-    );
+  if (latPresent && lngPresent) {
+    if (body.latitude === null && body.longitude === null) {
+      updates.latitude = null;
+      updates.longitude = null;
+    } else if (hasValidCoordinates(body.latitude, body.longitude)) {
+      updates.latitude = body.latitude;
+      updates.longitude = body.longitude;
+    } else {
+      return NextResponse.json({ error: coordPairError }, { status: 400 });
+    }
+  } else if (latPresent || lngPresent) {
+    return NextResponse.json({ error: coordPairError }, { status: 400 });
   }
 
   if (Object.keys(updates).length === 0) {
