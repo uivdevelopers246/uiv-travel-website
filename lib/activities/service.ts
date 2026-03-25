@@ -115,7 +115,7 @@ export async function createActivity(
         
     if (error) throw new Error(error.message);
 
-    if (hasValidCoordinates(input.latitude, input.latitude)) {
+    if (hasValidCoordinates(input.latitude, input.longitude)) {
         const { error: rpcError } = await supabase.rpc("set_activity_location_point", {
             p_activity_id: data.id,
             p_lng: input.longitude as number,
@@ -167,6 +167,41 @@ export async function getActivityById(
     return (data ?? null) as PublicActivity | null;
 }
 
+async function applyActivityLocationPoint(
+    supabase: SupabaseClient<Database>,
+    activityId: string,
+    input: Pick<UpdateActivityInput, "latitude" | "longitude">,
+) {
+    const latPresent = input.latitude !== undefined;
+    const lngPresent = input.longitude !== undefined;
+
+    if (!latPresent && !lngPresent) return;
+
+    if (latPresent !== lngPresent) {
+        throw new Error(
+            "Provide both latitude and longitude, or both null to clear the location point.",
+        );
+    }
+
+    if (input.latitude === null && input.longitude === null) {
+        const { error: rpcError } = await supabase.rpc("set_activity_location_point", {
+            p_activity_id: activityId,
+        });
+        if (rpcError) throw new Error(rpcError.message);
+    } else if (hasValidCoordinates(input.latitude, input.longitude)) {
+        const { error: rpcError } = await supabase.rpc("set_activity_location_point", {
+            p_activity_id: activityId,
+            p_lng: input.longitude as number,
+            p_lat: input.latitude as number,
+        });
+        if (rpcError) throw new Error(rpcError.message);
+    } else {
+        throw new Error(
+            "Provide both latitude and longitude, or both null to clear the location point.",
+        );
+    }
+}
+
 export async function updateActivity(
     supabase: SupabaseClient<Database>,
     activityId: string,
@@ -198,7 +233,16 @@ export async function updateActivity(
             .single();
 
         if (error) throw new Error(error.message);
-        return data;
+
+        await applyActivityLocationPoint(supabase, data.id, input);
+
+        const { data: activity, error: refetchError } = await supabase
+            .from("activities")
+            .select("*")
+            .eq("id", data.id)
+            .single();
+        if (refetchError) throw new Error(refetchError.message);
+        return activity;
     }
 
     // Non-admins must own the vendor associated with the activity
@@ -220,33 +264,8 @@ export async function updateActivity(
         .single();
 
     if (error) throw new Error(error.message);
-   
-    const latPresent = input.latitude !== undefined;
-    const lngPresent = input.longitude !== undefined;
-    const coordsProvided = latPresent || lngPresent;
 
-    if (coordsProvided) {
-        if (input.latitude === null && input.longitude === null) {
-            // Both explicitly null → clear location_point.
-            const { error: rpcError } = await supabase.rpc("set_activity_location_point", {
-                p_activity_id: data.id,
-            });
-            if (rpcError) throw new Error(rpcError.message);
-        } else if (hasValidCoordinates(input.latitude, input.longitude)) {
-            // Both provided and valid numbers → set location_point.
-            const { error: rpcError } = await supabase.rpc("set_activity_location_point", {
-                p_activity_id: data.id,
-                p_lng: input.longitude as number,
-                p_lat: input.latitude as number,
-            });
-            if (rpcError) throw new Error(rpcError.message);
-        } else {
-            // Mixed or invalid coordinates.
-            throw new Error(
-                "Provide both latitude and longitude, or both null to clear the location point."
-            );
-        }
-    }
+    await applyActivityLocationPoint(supabase, data.id, input);
 
     const { data: activity, error: refetchError } = await supabase
         .from("activities")
