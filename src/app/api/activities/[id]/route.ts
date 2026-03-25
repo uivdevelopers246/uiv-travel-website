@@ -50,20 +50,68 @@ export async function PATCH(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const body = await req.json();
-  const updates: Record<string, any> = {};
+  let body: Record<string, unknown>;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
-  if (typeof body?.title === "string") updates.title = body.title;
-  if (typeof body?.description !== "undefined") updates.description = body.description ?? null;
-  if (typeof body?.location !== "undefined") updates.location = body.location ?? null;
-  if (typeof body?.category === "string") updates.category = body.category;
-  if (typeof body?.duration_hours !== "undefined")
-    updates.duration_hours = body.duration_hours ?? null;
-  if (typeof body?.price_per_person !== "undefined")
-    updates.price_per_person = body.price_per_person ?? null;
-  if (typeof body?.max_capacity !== "undefined")
-    updates.max_capacity = body.max_capacity ?? null;
-  if (typeof body?.image_url !== "undefined") updates.image_url = body.image_url ?? null;
+  const updates: Record<string, unknown> = {};
+
+  if (typeof body?.title === "string") {
+    const trimmed = body.title.trim();
+    if (!trimmed) {
+      return NextResponse.json({ error: "Title cannot be empty" }, { status: 400 });
+    }
+    if (trimmed.length > 255) {
+      return NextResponse.json({ error: "Title is too long (max 255 characters)" }, { status: 400 });
+    }
+    updates.title = trimmed;
+  }
+  if (typeof body?.description !== "undefined") {
+    updates.description = typeof body.description === "string" ? body.description.trim() || null : null;
+  }
+  if (typeof body?.location !== "undefined") {
+    updates.location = typeof body.location === "string" ? body.location.trim() || null : null;
+  }
+  if (typeof body?.category === "string") {
+    const trimmed = body.category.trim();
+    if (!trimmed) {
+      return NextResponse.json({ error: "Category cannot be empty" }, { status: 400 });
+    }
+    updates.category = trimmed;
+  }
+  if (typeof body?.duration_hours !== "undefined") {
+    if (body.duration_hours === null) {
+      updates.duration_hours = null;
+    } else if (typeof body.duration_hours === "number" && !Number.isNaN(body.duration_hours) && body.duration_hours >= 0) {
+      updates.duration_hours = body.duration_hours;
+    } else {
+      return NextResponse.json({ error: "duration_hours must be a non-negative number or null" }, { status: 400 });
+    }
+  }
+  if (typeof body?.price_per_person !== "undefined") {
+    if (body.price_per_person === null) {
+      updates.price_per_person = null;
+    } else if (typeof body.price_per_person === "number" && !Number.isNaN(body.price_per_person) && body.price_per_person >= 0) {
+      updates.price_per_person = body.price_per_person;
+    } else {
+      return NextResponse.json({ error: "price_per_person must be a non-negative number or null" }, { status: 400 });
+    }
+  }
+  if (typeof body?.max_capacity !== "undefined") {
+    if (body.max_capacity === null) {
+      updates.max_capacity = null;
+    } else if (typeof body.max_capacity === "number" && Number.isInteger(body.max_capacity) && body.max_capacity >= 1) {
+      updates.max_capacity = body.max_capacity;
+    } else {
+      return NextResponse.json({ error: "max_capacity must be a positive integer or null" }, { status: 400 });
+    }
+  }
+  if (typeof body?.image_url !== "undefined") {
+    updates.image_url = typeof body.image_url === "string" ? body.image_url.trim() || null : null;
+  }
 
   const latPresent = body?.latitude !== undefined;
   const lngPresent = body?.longitude !== undefined;
@@ -71,12 +119,14 @@ export async function PATCH(
     "Provide both latitude and longitude as numbers in range (-90–90, -180–180), or both null to clear.";
 
   if (latPresent && lngPresent) {
-    if (body.latitude === null && body.longitude === null) {
+    const lat = body.latitude as number | null;
+    const lng = body.longitude as number | null;
+    if (lat === null && lng === null) {
       updates.latitude = null;
       updates.longitude = null;
-    } else if (hasValidCoordinates(body.latitude, body.longitude)) {
-      updates.latitude = body.latitude;
-      updates.longitude = body.longitude;
+    } else if (hasValidCoordinates(lat, lng)) {
+      updates.latitude = lat;
+      updates.longitude = lng;
     } else {
       return NextResponse.json({ error: coordPairError }, { status: 400 });
     }
@@ -127,7 +177,7 @@ export async function DELETE(
   }
 
   try {
-    const deleted = await deleteActivity(supabase, id);
+    const deleted = await deleteActivity(supabase, id, { isAdmin: role === "admin" });
     return NextResponse.json(deleted, { status: 200 });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to delete activity";

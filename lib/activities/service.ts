@@ -278,11 +278,25 @@ export async function updateActivity(
 
 export async function deleteActivity(
     supabase: SupabaseClient<Database>,
-    activityId: string
+    activityId: string,
+    options?: { isAdmin?: boolean }
 ) {
     const { data: userData } = await supabase.auth.getUser();
 
     if (!userData.user) throw new Error("Unauthorized");
+
+    // Admins can delete any activity without vendor ownership check
+    if (options?.isAdmin) {
+        const { data, error } = await supabase
+            .from("activities")
+            .delete()
+            .eq("id", activityId)
+            .select("*")
+            .single();
+
+        if (error) throw new Error(error.message);
+        return data;
+    }
 
     const { data: vendor, error: vendorError } = await supabase
         .from("vendors")

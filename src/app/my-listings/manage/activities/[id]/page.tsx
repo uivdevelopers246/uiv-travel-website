@@ -32,7 +32,7 @@ export default async function ManageActivityEditPage({ params }: PageProps) {
   const role = await getUserRole(supabase);
 
   if (role === "guest") {
-    redirect(`/auth/login?redirect=/my-listings/manage/${resolvedParams.id}`);
+    redirect(`/auth/login?redirect=/my-listings/manage/activities/${resolvedParams.id}`);
   }
 
   if (role !== "admin" && role !== "vendor") {

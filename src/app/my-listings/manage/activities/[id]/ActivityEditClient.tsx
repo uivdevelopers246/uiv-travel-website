@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { activityCategories } from "@/lib/activities/constants";
+import { validateImageFile } from "@/lib/utils/image";
 
 type Props = {
   activityId: string;
@@ -48,9 +49,17 @@ export function ActivityEditClient({ activityId, vendorId, initial }: Props) {
     let imageUrl = form.image_url.trim() || null;
 
     if (imageFile) {
+      // Validate file using shared utility
+      const validationError = validateImageFile(imageFile);
+      if (validationError) {
+        setMessage(validationError);
+        setSaving(false);
+        return;
+      }
+
       try {
         const supabase = createClient();
-        const fileExt = imageFile.name.split(".").pop()?.toLowerCase() || "jpg";
+        const fileExt = imageFile.name.split(".").pop()?.toLowerCase() || "";
         const fileName = `${crypto.randomUUID()}.${fileExt}`;
         const objectPath = `${vendorId}/${fileName}`;
 
@@ -73,8 +82,9 @@ export function ActivityEditClient({ activityId, vendorId, initial }: Props) {
           .getPublicUrl(objectPath);
 
         imageUrl = data.publicUrl;
-      } catch (error: any) {
-        setMessage(error?.message ?? "Image upload failed.");
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : "Image upload failed.";
+        setMessage(msg);
         setSaving(false);
         return;
       }
@@ -114,8 +124,9 @@ export function ActivityEditClient({ activityId, vendorId, initial }: Props) {
       setMessage("Changes saved.");
       setImageFile(null);
       router.refresh();
-    } catch (error: any) {
-      setMessage(error?.message ?? "Failed to update activity.");
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Failed to update activity.";
+      setMessage(msg);
     } finally {
       setSaving(false);
     }
@@ -132,10 +143,10 @@ export function ActivityEditClient({ activityId, vendorId, initial }: Props) {
             </p>
           </div>
           <a
-            href="/my-listings/manage"
+            href="/my-listings"
             className="text-sm font-semibold text-[#193059] underline-offset-4 hover:underline"
           >
-            Back to manage
+            ← Back to My Listings
           </a>
         </div>
 
