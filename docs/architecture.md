@@ -1,14 +1,14 @@
 ## System Overview
 
-UIV Travel is a Barbados-focused travel site where **vendors** list **activities** (water sports, wildlife, adventure, culture, nature). **Public** users browse published activities; **admins** manage users and vendors. The app is a single Next.js application using the App Router, with Supabase for auth, Postgres (with PostGIS), and storage. Activity locations are set from user-provided coordinates (e.g. device geolocation or map pin) via a Postgres RPC; no map UI is present in the repo yet.
+UIV Travel is a Barbados-focused travel site where **vendors** list **activities** (water sports, wildlife, adventure, culture, nature) and **accommodations** (lodging listings). **Public** users browse published activities and accommodations; **admins** manage users and vendors. The app is a single Next.js application using the App Router, with Supabase for auth, Postgres (with PostGIS), and storage. Activity and accommodation map pins use user-provided coordinates via Postgres RPCs (`set_activity_location_point`, `set_accommodation_location_point`); no map UI is present in the repo yet.
 
 ## Tech Stack
 
 - **Runtime:** Node.js (Next.js 16)
 - **Framework:** Next.js 16 (App Router only; no Pages Router)
 - **Backend / BaaS:** Supabase
-  - Auth (email OTP), Postgres, Row Level Security (RLS), Storage (`activity-images` bucket)
-  - PostGIS extension enabled for `activities.location_point`
+  - Auth (email OTP), Postgres, Row Level Security (RLS), Storage (`activity-images`, `accommodation-images` buckets)
+  - PostGIS extension enabled for `activities.location_point` and `accommodations.location_point`
 - **Styling:** Tailwind CSS v4, Google Fonts (Playfair Display, Source Sans 3)
 - **Testing:** Vitest
 - **Database tooling:** Supabase CLI (`supabase db push`, `supabase db reset`), seed script `scripts/seed.ts`
@@ -28,9 +28,6 @@ UIV Travel is a Barbados-focused travel site where **vendors** list **activities
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`            | Anon key for browser and server Supabase clients (required) |
 | `NEXT_PUBLIC_SITE_URL` / `NEXT_PUBLIC_VERCEL_URL` | Signup redirect URL (production)                            |
 
-
-Proxy module references `NEXT_PUBLIC_SUPABASE_ANON_KEY` in an error message; the code actually uses `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`. TODO / Verify intended name.
-
 ## Request/Response Flows
 
 - **Public user browsing activities**
@@ -40,31 +37,41 @@ Proxy module references `NEXT_PUBLIC_SUPABASE_ANON_KEY` in an error message; the
   4. RLS allows anonymous/authenticated read for rows where `status = 'published'` (or vendor/admin visibility).
   5. Server renders `ActivitiesClient` with the fetched list; client handles filters and role (for “Manage activities” link).
   6. Optional: client calls `GET /api/activities` (e.g. for limit/offset); same server `createClient()` and `listActivities()` from `@/lib/activities/service`; response JSON list of public activities.
+- **Public user browsing accommodations (e.g. vacation planning)**
+  1. Pages such as `/vacation-planning` query `accommodations` with `status = 'published'`, joining `vendors(name)` where needed.
+  2. RLS allows anon/authenticated read for published rows; vendors and admins see drafts for their listings.
 - **Vendor creating/updating an activity**
   1. Vendor is authenticated; they open `/activities/manage` or `/activities/manage/[id]`.
   2. Server component uses `createClient()` and `getUserRole()`; redirects guest to login; allows only admin/vendor into manage pages.
   3. **Create:** Client submits to `POST /api/activities`. Route uses server `createClient()`, validates body (including optional `latitude`/`longitude`), then `createActivity(supabase, input)`. Service resolves vendor, inserts into `activities`, and if valid coordinates are provided calls `set_activity_location_point` RPC to set the map pin. Text `location` is stored for display only.
   4. **Update:** Client submits to `PATCH /api/activities/[id]`. Route uses `getUserRole()` and `updateActivity(supabase, id, updates)`. Service checks vendor ownership and updates allowed columns. If `latitude`/`longitude` are provided (or both null to clear), the service calls `set_activity_location_point` RPC. No geocoding is used.
   5. RLS on `activities` restricts INSERT/UPDATE to the owning vendor or site admin; column grants restrict writable columns (e.g. no direct write to `rating` or `location_point`).
+- **Vendor creating/updating an accommodation**
+  1. Vendor or admin opens manage UI under `/my-listings/manage/accommodations` (list and `/[id]` edit).
+  2. **Create:** `POST /api/accommodations` → `createAccommodation` in `@/lib/accommodations/service`; optional coordinates call `set_accommodation_location_point`.
+  3. **Update:** `PATCH /api/accommodations/[id]` → `updateAccommodation`; coordinates or nulls call the same RPC. `location_point` is not written directly.
+  4. Images use bucket `accommodation-images` with vendor-scoped paths (`{vendor_id}/...`), mirroring activities.
+- **Vendor profile (business intake fields)**
+  1. Vendors can update profile columns on their own `vendors` row (name, contact, incorporation fields, etc.) via `PATCH /api/vendors/me` (see `lib/vendors/service.ts`). Column grants and RLS restrict which columns apply; admins retain full vendor management.
 
 ## Auth & Authorization Model (High-level)
 
-- **Auth:** Supabase Auth. Email OTP (magic link / OTP). Signup uses `signInWithOtp`; confirmation is handled by `GET /auth/confirm` (verifies `token_hash` and `type`, then redirects). No middleware file named `middleware.ts` exists; session-refresh logic lives in `lib/supabase/proxy.ts` (`updateSession`). Root `proxy.ts` delegates to it but is not the file Next.js invokes as middleware. TODO / Verify: rename to `middleware.ts` or wire middleware if session refresh should run on every request.
+- **Auth:** Supabase Auth. Email OTP (magic link / OTP). Signup uses `signInWithOtp`; confirmation is handled by `GET /auth/confirm` (verifies `token_hash` and `type`, then redirects). **Next.js 16** uses root **`proxy.ts`** (export `proxy`) instead of `middleware.ts` for the same role: it calls `updateSession` from `lib/supabase/proxy.ts` so Supabase cookies/session refresh run on matched routes. The `config.matcher` in `proxy.ts` defines which paths run through this layer.
 - **Roles (application-level):** Derived in app and API via `getUserRole(supabase)` from `@/lib/auth/roles`: **guest** (no user), **user** (authenticated, no vendor/admin), **vendor** (has row in `vendors`), **admin** (has row in `site_admins`). Used for route protection (e.g. manage pages, admin users) and API authorization (e.g. PATCH/DELETE activity, POST status, admin-only `/api/admin/users`).
 - **Protected routes:** Server components (e.g. `/activities/manage`, `/activities/manage/[id]`, `/admin/users`) call `getUserRole()` and redirect or render “Access denied” for guest / non-vendor or non-admin as appropriate. API routes return 401/403 when role is insufficient.
 
 ## Data Layer (High-level)
 
-- **Supabase Postgres:** Main schema in `public`. Tables: `profiles` (1:1 with `auth.users`), `vendors` (owner_user_id → auth.users), `site_admins` (user_id → auth.users), `activities` (vendor_id → vendors). Activities have text `location` (display only) and optional `location_point` (PostGIS geometry 4326) set from user-provided coordinates. Migrations include `set_activity_location_point` RPC and drop of former geocode columns.
-- **RLS:** Enabled on `profiles`, `vendors`, `activities`, `site_admins`. Policies: public can select published activities; vendor can CRUD own activities; admins can manage all activities and vendors; vendors see own vendor row; site_admins table restricted to admins. Column-level grants on `activities` limit which columns authenticated users can insert/update (e.g. no `rating`, no direct write to `location_point`).
-- **RPC:** `set_activity_location_point(p_activity_id, p_lng?, p_lat?)` sets or clears `location_point` (via `st_setsrid(st_makepoint(...), 4326)`). Granted to `authenticated` only. Used from the activities service when creating or updating an activity with coordinates.
-- **Storage:** Bucket `activity-images` (public read). RLS: upload/update/delete scoped to vendor path `{vendor_id}/*` or site admin. Client uploads in ActivityEditClient then uses public URL for `image_url`.
+- **Supabase Postgres:** Main schema in `public`. Tables: `profiles` (1:1 with `auth.users`), `vendors` (owner + optional business profile columns), `site_admins` (user_id → auth.users), `activities` and **`accommodations`** (both `vendor_id → vendors`). Activities have text `location` (display) and optional `location_point`. Accommodations have address/parish fields and optional `location_point`. Location geometry is set only via RPCs, not direct column writes from the app.
+- **RLS:** Enabled on `profiles`, `vendors`, `activities`, `accommodations`, `site_admins`. Policies mirror the activities model for accommodations (published public read; vendor/admin for own rows). **Vendors:** owners can read/insert/update their row (subject to column grants); admins retain elevated policies from consolidated migrations. Column-level grants on `activities` and `accommodations` limit inserts/updates (e.g. no `rating` on activities; no `location_point` or `is_featured` on accommodations for authenticated direct writes).
+- **RPCs:** `set_activity_location_point` and `set_accommodation_location_point` set or clear PostGIS points (`st_setsrid(st_makepoint(...), 4326)`). Granted to `authenticated` only; underlying UPDATE still enforced by RLS.
+- **Storage:** Buckets `activity-images` and `accommodation-images` (public read). RLS: paths under `{vendor_id}/%` for the owning vendor or site admin. Clients upload then store the public URL on the row (`image_url`).
 
 ## Geospatial / Maps Architecture
 
-- **Location data:** Activity location is stored as text `location` (for display) and optional `location_point` (PostGIS Point, WGS84). Coordinates are provided by the user when creating or updating an activity (e.g. device geolocation or future map pin). The API validates latitude/longitude and the service calls the RPC `set_activity_location_point` to set or clear the point. No geocoding (address to coordinates) is used.
-- **Persistence:** The RPC `set_activity_location_point(p_activity_id, p_lng?, p_lat?)` sets or clears `location_point`. GIST index on `location_point` supports future spatial queries.
-- **Map UI:** No map component or map page in the repo yet. Activities list and manage UIs do not render a map. Coordinate-based flow supports future "map pins" and "near me" use.
+- **Location data:** Activities use text `location` plus optional `location_point`. Accommodations use address/parish text fields plus optional `location_point`. Coordinates are user-provided on create/update; services call `set_activity_location_point` or `set_accommodation_location_point`. No server-side geocoding from addresses is implemented in-repo.
+- **Persistence:** Same RPC pattern for both entities; GIST indexes on each table’s `location_point` support future spatial queries.
+- **Map UI:** No map component or dedicated map page yet. Manage flows can still capture coordinates for future map display.
 
 ## Background Jobs / Webhooks
 
@@ -88,26 +95,24 @@ None yet. No workers, no webhook handlers, no cron in repo.
 - **Decision: Role derived in application layer (not only RLS)**
   - Why: Route and API authorization need clear “admin” vs “vendor” vs “user”; RLS enforces row-level access.
   - Implications: `getUserRole(supabase)` queries `site_admins` and `vendors`; used in both server components and API routes.
-- **Decision: location_point updated only via RPC (`set_activity_location_point`)**
-  - Why: Single place for PostGIS geometry and SRID; column is not in the UPDATE grant for authenticated users, so the app uses an RPC to set/clear the point from user-provided coordinates.
-  - Implications: App does not write `location_point` directly; create/update activity flows call the RPC when latitude/longitude are provided (or both null to clear).
+- **Decision: location_point updated only via RPCs (`set_activity_location_point`, `set_accommodation_location_point`)**
+  - Why: Single place for PostGIS geometry and SRID; columns are not in the normal UPDATE grants for authenticated users.
+  - Implications: Create/update flows in `lib/activities/service.ts` and `lib/accommodations/service.ts` call the appropriate RPC when coordinates are provided or cleared.
 - **Decision: Public activity list uses server component + direct Supabase query**
   - Why: Simple, good for SEO and first paint; list is not yet real-time.
   - Implications: `/activities` page does not call `/api/activities` for initial load; API used for programmatic or future client-side pagination.
-- **Decision: Vendor-scoped storage paths (`activity-images` bucket)**
+- **Decision: Vendor-scoped storage paths (`activity-images`, `accommodation-images`)**
   - Why: RLS policies key off `vendor_id_for_user()` and path prefix `{vendor_id}/%`.
-  - Implications: Uploads in ActivityEditClient use `vendorId` in path; admins can manage any.
+  - Implications: Upload components use `vendorId` in the object path; admins can manage any.
 - **Decision: No Map UI in initial scope**
   - Why: DB schema and coordinate flow support future maps; UI deferred.
   - Implications: Create/update accept optional coordinates; map components can be added later.
-- **Decision: Middleware/session refresh in `lib/supabase/proxy`**
-  - Why: Centralize Supabase cookie refresh for session continuity.
-  - Implications: Root file is `proxy.ts`, not `middleware.ts`; Next.js may not run it as middleware — verify and rename or add `middleware.ts` if refresh is required on every request.
+- **Decision: Session refresh via Next.js 16 `proxy.ts` + `lib/supabase/proxy`**
+  - Why: Next.js 16 replaces `middleware.ts` with `proxy.ts` for the network boundary; Supabase SSR still needs per-request cookie refresh (`getClaims()` after `createServerClient`).
+  - Implications: Keep `proxy.ts` matcher in sync with routes that need refreshed sessions; implementation lives in `updateSession`.
 
 ## Known Gaps / TODOs
 
-- **Middleware filename:** Session refresh lives in `proxy.ts`; Next.js expects `middleware.ts`. Verify whether middleware runs and rename or add `middleware.ts` if needed.
-- **Env key naming:** Proxy error message references `NEXT_PUBLIC_SUPABASE_ANON_KEY`; code uses `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — align naming and docs.
-- **Protected paths:** `protectedPaths` in proxy is empty; only public paths and redirect logic are defined. If more routes need auth redirect, add them to protected list.
+- **Protected paths:** `protectedPaths` in `lib/supabase/proxy.ts` is empty; auth redirects for anonymous users are not applied globally—server components and API routes enforce access per route. Add paths here if you want proxy-level redirects to login.
 - **ADR link:** Key decisions above can be expanded into ADRs as needed.
 
