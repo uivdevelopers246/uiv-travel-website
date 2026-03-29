@@ -1,8 +1,13 @@
-import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getUserRole } from "@/lib/auth/roles";
 import { Header } from "@/components/layout/header";
-import { AccommodationEditClient } from "./AccommodationEditClient";
+import { AccommodationFormClient } from "./AccommodationFormClient";
+import type { AccommodationImage } from "@/lib/accommodations/types";
+import { ManageListingStatePage } from "../../_shared/ManageListingStatePage";
+import {
+  getCurrentVendorIdForManage,
+  isValidUuid,
+  requireManageListingAccess,
+} from "../../_shared/server";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -10,75 +15,83 @@ type PageProps = {
 
 export default async function ManageAccommodationEditPage({ params }: PageProps) {
   const resolvedParams = await params;
-  const isUuid =
-    typeof resolvedParams.id === "string" &&
-    /^[0-9a-fA-F-]{36}$/.test(resolvedParams.id);
-  if (!isUuid) {
+  if (!isValidUuid(resolvedParams.id)) {
     return (
-      <>
-        <Header />
-        <div className="min-h-screen bg-white px-6 pt-32 pb-16 text-[#193059]">
-          <div className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-            <h1 className="text-2xl font-semibold">Invalid accommodation</h1>
-            <p className="mt-2 text-sm text-slate-600">
-              The accommodation link is invalid.
-            </p>
-          </div>
-        </div>
-      </>
+      <ManageListingStatePage
+        title="Invalid accommodation"
+        message="The accommodation link is invalid."
+      />
     );
   }
+
   const supabase = await createClient();
-  const role = await getUserRole(supabase);
+  const redirectTo = `/my-listings/manage/accommodations/${resolvedParams.id}`;
+  const role = await requireManageListingAccess(supabase, redirectTo);
 
-  if (role === "guest") {
-    redirect(`/auth/login?redirect=/my-listings/manage/accommodations/${resolvedParams.id}`);
-  }
-
-  if (role !== "admin" && role !== "vendor") {
+  if (!role) {
     return (
-      <>
-        <Header />
-        <div className="min-h-screen bg-white px-6 pt-32 pb-16 text-[#193059]">
-          <div className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-            <h1 className="text-2xl font-semibold">Access denied</h1>
-            <p className="mt-2 text-sm text-slate-600">
-              You need admin or vendor access to edit accommodations.
-            </p>
-          </div>
-        </div>
-      </>
+      <ManageListingStatePage
+        title="Access denied"
+        message="You need admin or vendor access to edit accommodations."
+      />
     );
   }
 
-  const { data: accommodation } = await supabase
+  const vendorId =
+    role === "vendor"
+      ? await getCurrentVendorIdForManage(supabase, redirectTo)
+      : null;
+
+  if (role === "vendor" && !vendorId) {
+    return (
+      <ManageListingStatePage
+        title="Vendor profile required"
+        message="You need a vendor profile to manage accommodations."
+      />
+    );
+  }
+
+  let accommodationQuery = supabase
     .from("accommodations")
     .select(
       "id, vendor_id, name, accommodation_type, bedroom_count, bed_count, bathroom_count, max_guest_capacity, price_min_usd, price_max_usd, check_in_time, check_out_time, suitable_for_children, wheelchair_accessible, smoking_allowed, pets_allowed, beach_access_or_view, transportation_provided, amenities, address, parish, transportation_notes, pickup_notes, image_url, status",
     )
-    .eq("id", resolvedParams.id)
-    .maybeSingle();
+    .eq("id", resolvedParams.id);
+
+  if (vendorId) {
+    accommodationQuery = accommodationQuery.eq("vendor_id", vendorId);
+  }
+
+  const { data: accommodation } = await accommodationQuery.maybeSingle();
 
   if (!accommodation) {
     return (
-      <>
-        <Header />
-        <div className="min-h-screen bg-white px-6 pt-32 pb-16 text-[#193059]">
-          <div className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-            <h1 className="text-2xl font-semibold">Accommodation not found</h1>
-            <p className="mt-2 text-sm text-slate-600">
-              We couldn&apos;t find that accommodation.
-            </p>
-          </div>
-        </div>
-      </>
+      <ManageListingStatePage
+        title="Accommodation not found"
+        message="We couldn&apos;t find that accommodation."
+      />
     );
+  }
+
+  // Fetch accommodation images
+  let existingImages: AccommodationImage[] = [];
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: imageData } = await (supabase as any)
+      .from("accommodation_images")
+      .select("id, image_url, alt_text, display_order")
+      .eq("accommodation_id", resolvedParams.id)
+      .order("display_order", { ascending: true });
+    existingImages = (imageData as AccommodationImage[]) ?? [];
+  } catch {
+    // Table may not exist yet
   }
 
   return (
     <>
       <Header />
-      <AccommodationEditClient
+      <AccommodationFormClient
+        mode="edit"
         accommodationId={accommodation.id}
         vendorId={accommodation.vendor_id}
         initial={{
@@ -106,6 +119,7 @@ export default async function ManageAccommodationEditPage({ params }: PageProps)
           image_url: accommodation.image_url,
           status: accommodation.status,
         }}
+        existingImages={existingImages}
       />
     </>
   );

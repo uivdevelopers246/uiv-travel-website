@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getUserRole } from "@/lib/auth/roles";
-import { hasValidCoordinates } from "@/lib/activities/service";
 import {
   deleteAccommodation,
   getAccommodationById,
@@ -9,6 +7,18 @@ import {
   type AccommodationStatus,
   type UpdateAccommodationInput,
 } from "@/lib/accommodations/service";
+import { hasValidCoordinates } from "@/lib/utils/geo";
+import { normalizeOptionalImageUrl } from "@/lib/utils/image";
+import {
+  badRequest,
+  forbidden,
+  notFound,
+  parseJsonBody,
+  parseUuidParam,
+  requireRole,
+  serverError,
+  unauthorized,
+} from "../../_shared/route-helpers";
 
 const validStatuses = new Set<AccommodationStatus>([
   "draft",
@@ -21,30 +31,23 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const resolvedParams = await params;
-  const id = resolvedParams?.id;
-  const isUuid =
-    typeof id === "string" && /^[0-9a-fA-F-]{36}$/.test(id);
-  if (!isUuid) {
-    return NextResponse.json(
-      { error: "Invalid accommodation id." },
-      { status: 400 },
-    );
+  const parsedParam = parseUuidParam(resolvedParams?.id, "accommodation");
+  if ("response" in parsedParam) {
+    return parsedParam.response;
   }
+  const { id } = parsedParam;
 
   const supabase = await createClient();
   try {
     const accommodation = await getAccommodationById(supabase, id);
     if (accommodation === null) {
-      return NextResponse.json(
-        { error: "Accommodation not found" },
-        { status: 404 },
-      );
+      return notFound("Accommodation not found");
     }
     return NextResponse.json(accommodation);
   } catch (error: unknown) {
     const message =
       error instanceof Error ? error.message : "Failed to fetch accommodation";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return serverError(message);
   }
 }
 
@@ -53,46 +56,34 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const resolvedParams = await params;
-  const id = resolvedParams?.id;
-  const isUuid =
-    typeof id === "string" && /^[0-9a-fA-F-]{36}$/.test(id);
-  if (!isUuid) {
-    return NextResponse.json(
-      { error: "Invalid accommodation id." },
-      { status: 400 },
-    );
+  const parsedParam = parseUuidParam(resolvedParams?.id, "accommodation");
+  if ("response" in parsedParam) {
+    return parsedParam.response;
   }
+  const { id } = parsedParam;
 
   const supabase = await createClient();
-  const role = await getUserRole(supabase);
-
-  if (role === "guest") {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const roleResult = await requireRole(supabase, ["admin", "vendor"]);
+  if ("response" in roleResult) {
+    return roleResult.response;
   }
+  const { role } = roleResult;
 
-  if (role !== "admin" && role !== "vendor") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const parsedBody = await parseJsonBody(req);
+  if ("response" in parsedBody) {
+    return parsedBody.response;
   }
-
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  const { body } = parsedBody;
 
   const updates: UpdateAccommodationInput = {};
 
   if (typeof body?.name === "string") {
     const trimmed = body.name.trim();
     if (!trimmed) {
-      return NextResponse.json({ error: "Name cannot be empty" }, { status: 400 });
+      return badRequest("Name cannot be empty");
     }
     if (trimmed.length > 255) {
-      return NextResponse.json(
-        { error: "Name is too long (max 255 characters)" },
-        { status: 400 },
-      );
+      return badRequest("Name is too long (max 255 characters)");
     }
     updates.name = trimmed;
   }
@@ -100,16 +91,10 @@ export async function PATCH(
   if (typeof body?.accommodation_type === "string") {
     const trimmed = body.accommodation_type.trim();
     if (!trimmed) {
-      return NextResponse.json(
-        { error: "accommodation_type cannot be empty" },
-        { status: 400 },
-      );
+      return badRequest("accommodation_type cannot be empty");
     }
     if (trimmed.length > 120) {
-      return NextResponse.json(
-        { error: "accommodation_type is too long (max 120 characters)" },
-        { status: 400 },
-      );
+      return badRequest("accommodation_type is too long (max 120 characters)");
     }
     updates.accommodation_type = trimmed;
   }
@@ -123,10 +108,7 @@ export async function PATCH(
     ) {
       updates.bedroom_count = body.bedroom_count;
     } else {
-      return NextResponse.json(
-        { error: "bedroom_count must be a non-negative integer or null" },
-        { status: 400 },
-      );
+      return badRequest("bedroom_count must be a non-negative integer or null");
     }
   }
 
@@ -139,10 +121,7 @@ export async function PATCH(
     ) {
       updates.bed_count = body.bed_count;
     } else {
-      return NextResponse.json(
-        { error: "bed_count must be a non-negative integer or null" },
-        { status: 400 },
-      );
+      return badRequest("bed_count must be a non-negative integer or null");
     }
   }
 
@@ -155,10 +134,7 @@ export async function PATCH(
     ) {
       updates.bathroom_count = body.bathroom_count;
     } else {
-      return NextResponse.json(
-        { error: "bathroom_count must be a non-negative integer or null" },
-        { status: 400 },
-      );
+      return badRequest("bathroom_count must be a non-negative integer or null");
     }
   }
 
@@ -171,10 +147,7 @@ export async function PATCH(
     ) {
       updates.max_guest_capacity = body.max_guest_capacity;
     } else {
-      return NextResponse.json(
-        { error: "max_guest_capacity must be a positive integer or null" },
-        { status: 400 },
-      );
+      return badRequest("max_guest_capacity must be a positive integer or null");
     }
   }
 
@@ -187,10 +160,7 @@ export async function PATCH(
     ) {
       updates.price_min_usd = body.price_min_usd;
     } else {
-      return NextResponse.json(
-        { error: "price_min_usd must be a non-negative number or null" },
-        { status: 400 },
-      );
+      return badRequest("price_min_usd must be a non-negative number or null");
     }
   }
 
@@ -203,10 +173,7 @@ export async function PATCH(
     ) {
       updates.price_max_usd = body.price_max_usd;
     } else {
-      return NextResponse.json(
-        { error: "price_max_usd must be a non-negative number or null" },
-        { status: 400 },
-      );
+      return badRequest("price_max_usd must be a non-negative number or null");
     }
   }
 
@@ -225,10 +192,7 @@ export async function PATCH(
     typeof effMax === "number" &&
     effMin > effMax
   ) {
-    return NextResponse.json(
-      { error: "price_min_usd must be less than or equal to price_max_usd" },
-      { status: 400 },
-    );
+    return badRequest("price_min_usd must be less than or equal to price_max_usd");
   }
 
   if (typeof body?.check_in_time !== "undefined") {
@@ -268,17 +232,11 @@ export async function PATCH(
 
   if (typeof body?.amenities !== "undefined") {
     if (!Array.isArray(body.amenities)) {
-      return NextResponse.json(
-        { error: "amenities must be an array of strings" },
-        { status: 400 },
-      );
+      return badRequest("amenities must be an array of strings");
     }
     for (let i = 0; i < body.amenities.length; i++) {
       if (typeof body.amenities[i] !== "string") {
-        return NextResponse.json(
-          { error: `amenities[${i}] must be a string` },
-          { status: 400 },
-        );
+        return badRequest(`amenities[${i}] must be a string`);
       }
     }
     updates.amenities = (body.amenities as string[]).map((s) => s.trim());
@@ -305,21 +263,24 @@ export async function PATCH(
         : null;
   }
   if (typeof body?.image_url !== "undefined") {
-    updates.image_url =
-      typeof body.image_url === "string"
-        ? body.image_url.trim() || null
-        : null;
+    try {
+      updates.image_url = normalizeOptionalImageUrl(body.image_url) ?? null;
+    } catch (error: unknown) {
+      return badRequest(
+        error instanceof Error ? error.message : "Invalid image_url",
+      );
+    }
   }
 
   if (typeof body?.status !== "undefined") {
     if (body.status === null) {
-      return NextResponse.json({ error: "Invalid status" }, { status: 400 });
+      return badRequest("Invalid status");
     }
     if (
       typeof body.status !== "string" ||
       !validStatuses.has(body.status as AccommodationStatus)
     ) {
-      return NextResponse.json({ error: "Invalid status" }, { status: 400 });
+      return badRequest("Invalid status");
     }
     updates.status = body.status as AccommodationStatus;
   }
@@ -342,14 +303,14 @@ export async function PATCH(
       updates.latitude = body.latitude as number;
       updates.longitude = body.longitude as number;
     } else {
-      return NextResponse.json({ error: coordPairError }, { status: 400 });
+      return badRequest(coordPairError);
     }
   } else if (latPresent || lngPresent) {
-    return NextResponse.json({ error: coordPairError }, { status: 400 });
+    return badRequest(coordPairError);
   }
 
   if (Object.keys(updates).length === 0) {
-    return NextResponse.json({ error: "No updates provided" }, { status: 400 });
+    return badRequest("No updates provided");
   }
 
   try {
@@ -360,15 +321,12 @@ export async function PATCH(
     const message =
       error instanceof Error ? error.message : "Failed to update accommodation";
     if (message === "Unauthorized" || message === "User is not associated with a vendor") {
-      return NextResponse.json({ error: message }, { status: 403 });
+      return message === "Unauthorized" ? unauthorized(message) : forbidden(message);
     }
     if (message.includes("PGRST116")) {
-      return NextResponse.json(
-        { error: "Accommodation not found or access denied" },
-        { status: 404 },
-      );
+      return notFound("Accommodation not found or access denied");
     }
-    return NextResponse.json({ error: message }, { status: 400 });
+    return badRequest(message);
   }
 }
 
@@ -377,26 +335,18 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const resolvedParams = await params;
-  const id = resolvedParams?.id;
-  const isUuid =
-    typeof id === "string" && /^[0-9a-fA-F-]{36}$/.test(id);
-  if (!isUuid) {
-    return NextResponse.json(
-      { error: "Invalid accommodation id." },
-      { status: 400 },
-    );
+  const parsedParam = parseUuidParam(resolvedParams?.id, "accommodation");
+  if ("response" in parsedParam) {
+    return parsedParam.response;
   }
+  const { id } = parsedParam;
 
   const supabase = await createClient();
-  const role = await getUserRole(supabase);
-
-  if (role === "guest") {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const roleResult = await requireRole(supabase, ["admin", "vendor"]);
+  if ("response" in roleResult) {
+    return roleResult.response;
   }
-
-  if (role !== "admin" && role !== "vendor") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const { role } = roleResult;
 
   try {
     const deleted = await deleteAccommodation(supabase, id, {
@@ -407,14 +357,11 @@ export async function DELETE(
     const message =
       error instanceof Error ? error.message : "Failed to delete accommodation";
     if (message === "Unauthorized" || message === "User is not associated with a vendor") {
-      return NextResponse.json({ error: message }, { status: 403 });
+      return message === "Unauthorized" ? unauthorized(message) : forbidden(message);
     }
     if (message === "Row not found" || message.includes("PGRST116")) {
-      return NextResponse.json(
-        { error: "Accommodation not found" },
-        { status: 404 },
-      );
+      return notFound("Accommodation not found");
     }
-    return NextResponse.json({ error: message }, { status: 400 });
+    return badRequest(message);
   }
 }

@@ -13,7 +13,6 @@ export function MyListingsClient() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [accommodations, setAccommodations] = useState<Accommodation[]>([]);
   const [loading, setLoading] = useState(true);
-  const [vendorId, setVendorId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     const supabase = createClient();
@@ -22,12 +21,11 @@ export function MyListingsClient() {
 
     if (nextRole === "admin") {
       // Admin sees all activities and accommodations across all vendors
-      const [{ data: activitiesData }, { data: vendorData }] = await Promise.all([
+      const [{ data: activitiesData },] = await Promise.all([
         supabase
           .from("activities")
           .select("id, title, description, location, category, status, price_per_person, image_url, created_at, vendor_id")
           .order("created_at", { ascending: false }),
-        supabase.from("vendors").select("id").limit(1).maybeSingle(),
       ]);
 
       setActivities(activitiesData ?? []);
@@ -38,11 +36,6 @@ export function MyListingsClient() {
         .select("id, name, accommodation_type, status, bedroom_count, bathroom_count, max_guest_capacity, price_min_usd, price_max_usd, address, parish, image_url, created_at, vendor_id")
         .order("created_at", { ascending: false });
       setAccommodations(accommodationsData ?? []);
-      
-      // Set a default vendor ID for creating new items (admin can use any vendor)
-      if (vendorData) {
-        setVendorId(vendorData.id);
-      }
     } else if (nextRole === "vendor") {
       const { data: userData } = await supabase.auth.getUser();
       if (!userData.user) return;
@@ -54,7 +47,6 @@ export function MyListingsClient() {
         .single();
 
       if (vendorData) {
-        setVendorId(vendorData.id);
         const [{ data: activitiesData }, { data: accommodationsData }] = await Promise.all([
           supabase
             .from("activities")
@@ -171,7 +163,6 @@ export function MyListingsClient() {
         {activeTab === "activities" && (
           <ManageActivitiesClient
             activities={activities}
-            vendorId={vendorId}
             onRefresh={loadData}
           />
         )}
@@ -179,7 +170,6 @@ export function MyListingsClient() {
         {activeTab === "accommodations" && (
           <ManageAccommodationsClient
             accommodations={accommodations}
-            vendorId={vendorId}
             onRefresh={loadData}
           />
         )}
