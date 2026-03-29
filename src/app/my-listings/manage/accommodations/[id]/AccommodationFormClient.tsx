@@ -4,43 +4,86 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { accommodationTypes, amenityOptions } from "@/lib/accommodations/constants";
-import { validateImageFile } from "@/lib/utils/image";
+import {
+  DEFAULT_IMAGE_FALLBACK,
+  getSafeImageUrl,
+  validateImageFile,
+} from "@/lib/utils/image";
+import { ImageManager, type ManagedImage } from "@/components/shared";
+import { MAX_ACCOMMODATION_IMAGES } from "@/lib/accommodations/types";
 
-type Props = {
-  accommodationId: string;
-  vendorId: string;
-  initial: {
-    name: string;
-    accommodation_type: string;
-    bedroom_count: number | null;
-    bed_count: number | null;
-    bathroom_count: number | null;
-    max_guest_capacity: number | null;
-    price_min_usd: number | null;
-    price_max_usd: number | null;
-    check_in_time: string | null;
-    check_out_time: string | null;
-    suitable_for_children: boolean;
-    wheelchair_accessible: boolean;
-    smoking_allowed: boolean;
-    pets_allowed: boolean;
-    beach_access_or_view: boolean;
-    transportation_provided: boolean;
-    amenities: string[];
-    address: string | null;
-    parish: string | null;
-    transportation_notes: string | null;
-    pickup_notes: string | null;
-    image_url: string | null;
-    status: string;
-  };
+type AccommodationFormData = {
+  name: string;
+  accommodation_type: string;
+  bedroom_count: number | null;
+  bed_count: number | null;
+  bathroom_count: number | null;
+  max_guest_capacity: number | null;
+  price_min_usd: number | null;
+  price_max_usd: number | null;
+  check_in_time: string | null;
+  check_out_time: string | null;
+  suitable_for_children: boolean;
+  wheelchair_accessible: boolean;
+  smoking_allowed: boolean;
+  pets_allowed: boolean;
+  beach_access_or_view: boolean;
+  transportation_provided: boolean;
+  amenities: string[];
+  address: string | null;
+  parish: string | null;
+  transportation_notes: string | null;
+  pickup_notes: string | null;
+  image_url: string | null;
+  status: string;
 };
 
-export function AccommodationEditClient({ accommodationId, vendorId, initial }: Props) {
+type Props = {
+  mode: "create" | "edit";
+  accommodationId?: string;
+  vendorId: string;
+  initial?: AccommodationFormData;
+  existingImages?: ManagedImage[];
+};
+
+const defaultFormData: AccommodationFormData = {
+  name: "",
+  accommodation_type: accommodationTypes[0]?.value ?? "hotel",
+  bedroom_count: null,
+  bed_count: null,
+  bathroom_count: null,
+  max_guest_capacity: null,
+  price_min_usd: null,
+  price_max_usd: null,
+  check_in_time: null,
+  check_out_time: null,
+  suitable_for_children: false,
+  wheelchair_accessible: false,
+  smoking_allowed: false,
+  pets_allowed: false,
+  beach_access_or_view: false,
+  transportation_provided: false,
+  amenities: [],
+  address: null,
+  parish: null,
+  transportation_notes: null,
+  pickup_notes: null,
+  image_url: null,
+  status: "draft",
+};
+
+export function AccommodationFormClient({
+  mode,
+  accommodationId,
+  vendorId,
+  initial = defaultFormData,
+  existingImages = [],
+}: Props) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [galleryImages, setGalleryImages] = useState<ManagedImage[]>(existingImages);
   const [form, setForm] = useState({
     name: initial.name ?? "",
     accommodation_type: initial.accommodation_type ?? accommodationTypes[0]?.value ?? "hotel",
@@ -66,6 +109,8 @@ export function AccommodationEditClient({ accommodationId, vendorId, initial }: 
     image_url: initial.image_url ?? "",
     status: initial.status ?? "draft",
   });
+
+  const isEdit = mode === "edit";
 
   const updateField = <K extends keyof typeof form>(field: K, value: typeof form[K]) => {
     setForm(prev => ({ ...prev, [field]: value }));
@@ -162,24 +207,33 @@ export function AccommodationEditClient({ accommodationId, vendorId, initial }: 
     }
 
     try {
-      const res = await fetch(`/api/accommodations/${accommodationId}`, {
-        method: "PATCH",
+      const endpoint = isEdit ? `/api/accommodations/${accommodationId}` : "/api/accommodations";
+      const method = isEdit ? "PATCH" : "POST";
+
+      const res = await fetch(endpoint, {
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setMessage({ type: "error", text: data?.error ?? "Failed to update accommodation." });
+        setMessage({ type: "error", text: data?.error ?? `Failed to ${isEdit ? "update" : "create"} accommodation.` });
         setSaving(false);
         return;
       }
 
-      setMessage({ type: "success", text: "Changes saved successfully." });
-      setImageFile(null);
-      router.refresh();
+      if (isEdit) {
+        setMessage({ type: "success", text: "Changes saved successfully." });
+        setImageFile(null);
+        router.refresh();
+      } else {
+        // For create, redirect to the edit page
+        router.push(`/my-listings/manage/accommodations/${data.id}`);
+        router.refresh();
+      }
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : "Failed to update accommodation.";
+      const msg = error instanceof Error ? error.message : `Failed to ${isEdit ? "update" : "create"} accommodation.`;
       setMessage({ type: "error", text: msg });
     } finally {
       setSaving(false);
@@ -187,6 +241,8 @@ export function AccommodationEditClient({ accommodationId, vendorId, initial }: 
   };
 
   const handleDelete = async () => {
+    if (!accommodationId || !isEdit) return;
+
     if (!confirm("Are you sure you want to delete this accommodation? This action cannot be undone.")) {
       return;
     }
@@ -221,17 +277,19 @@ export function AccommodationEditClient({ accommodationId, vendorId, initial }: 
           <div className="flex flex-wrap items-center justify-between gap-3 mb-8">
             <div>
               <h1 className="text-3xl font-semibold" style={{ fontFamily: 'var(--font-playfair)' }}>
-                Edit Accommodation
+                {isEdit ? "Edit Accommodation" : "Create New Accommodation"}
               </h1>
               <p className="mt-2 text-sm text-slate-600">
-                Update the details for this accommodation listing.
+                {isEdit
+                  ? "Update the details for this accommodation listing."
+                  : "Fill in the details to create a new accommodation listing."}
               </p>
             </div>
             <a
               href="/my-listings"
               className="text-sm font-semibold text-[#407FC2] underline-offset-4 hover:underline"
             >
-              ← Back to My Listings
+              Back to My Listings
             </a>
           </div>
 
@@ -537,23 +595,28 @@ export function AccommodationEditClient({ accommodationId, vendorId, initial }: 
               </div>
             </section>
 
-            {/* Image */}
+            {/* Main Cover Image */}
             <section>
               <h2 className="text-lg font-semibold text-slate-900 mb-4 pb-2 border-b">
-                Image
+                Cover Image
               </h2>
+              <p className="text-sm text-slate-600 mb-4">
+                This is the main image that appears in search results and cards.
+              </p>
               <div className="space-y-4">
                 {form.image_url && (
                   <div className="w-48 h-32 rounded-lg overflow-hidden bg-slate-100">
                     <img
-                      src={form.image_url}
+                      src={getSafeImageUrl(form.image_url, DEFAULT_IMAGE_FALLBACK)}
                       alt="Current accommodation image"
                       className="w-full h-full object-cover"
                     />
                   </div>
                 )}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">Upload New Image</label>
+                  <label className="block text-sm font-medium text-slate-700">
+                    {form.image_url ? "Upload New Cover Image" : "Upload Cover Image"}
+                  </label>
                   <input
                     type="file"
                     accept="image/*"
@@ -569,6 +632,36 @@ export function AccommodationEditClient({ accommodationId, vendorId, initial }: 
               </div>
             </section>
 
+            {/* Gallery Images - Only show for edit mode */}
+            {isEdit && accommodationId && (
+              <section>
+                <h2 className="text-lg font-semibold text-slate-900 mb-4 pb-2 border-b">
+                  Gallery Images
+                </h2>
+                <p className="text-sm text-slate-600 mb-4">
+                  Add additional photos to showcase your accommodation. These appear in the detail page gallery.
+                </p>
+                <ImageManager
+                  images={galleryImages}
+                  maxImages={MAX_ACCOMMODATION_IMAGES}
+                  storageBucket="accommodation-images"
+                  storagePath={vendorId}
+                  apiEndpoint={`/api/accommodations/${accommodationId}/images`}
+                  onImagesChange={setGalleryImages}
+                  onError={(error) => setMessage({ type: "error", text: error })}
+                  label="Gallery Images"
+                />
+              </section>
+            )}
+
+            {!isEdit && (
+              <div className="p-4 bg-blue-50 rounded-lg">
+                <p className="text-sm text-blue-700">
+                  <strong>Note:</strong> After creating the accommodation, you&apos;ll be able to add gallery images from the edit page.
+                </p>
+              </div>
+            )}
+
             {/* Messages */}
             {message && (
               <div className={`p-4 rounded-lg ${message.type === "success" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
@@ -578,14 +671,18 @@ export function AccommodationEditClient({ accommodationId, vendorId, initial }: 
 
             {/* Action Buttons */}
             <div className="flex flex-wrap items-center justify-between gap-4 pt-6 border-t">
-              <button
-                type="button"
-                onClick={handleDelete}
-                disabled={saving}
-                className="px-4 py-2 text-sm font-medium text-rose-600 border border-rose-300 rounded-lg hover:bg-rose-50 transition-colors disabled:opacity-60"
-              >
-                Delete Accommodation
-              </button>
+              {isEdit ? (
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  disabled={saving}
+                  className="px-4 py-2 text-sm font-medium text-rose-600 border border-rose-300 rounded-lg hover:bg-rose-50 transition-colors disabled:opacity-60"
+                >
+                  Delete Accommodation
+                </button>
+              ) : (
+                <div />
+              )}
               <div className="flex gap-3">
                 <a
                   href="/my-listings"
@@ -598,7 +695,7 @@ export function AccommodationEditClient({ accommodationId, vendorId, initial }: 
                   disabled={saving}
                   className="px-6 py-2 bg-gradient-to-r from-[#407FC2] to-[#193059] hover:from-[#193059] hover:to-[#407FC2] text-white text-sm font-semibold rounded-lg transition-all duration-300 disabled:opacity-60"
                 >
-                  {saving ? "Saving..." : "Save Changes"}
+                  {saving ? "Saving..." : isEdit ? "Save Changes" : "Create Accommodation"}
                 </button>
               </div>
             </div>

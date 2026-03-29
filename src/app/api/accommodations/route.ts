@@ -4,8 +4,16 @@ import {
   listAccommodations,
   type AccommodationStatus,
 } from "@/lib/accommodations/service";
-import { hasValidCoordinates } from "@/lib/activities/service";
 import { createClient } from "@/lib/supabase/server";
+import { hasValidCoordinates } from "@/lib/utils/geo";
+import { normalizeOptionalImageUrl } from "@/lib/utils/image";
+import {
+  badRequest,
+  forbidden,
+  parseJsonBody,
+  requireAuthenticatedUser,
+  unauthorized,
+} from "../_shared/route-helpers";
 
 const validStatuses = new Set<AccommodationStatus>([
   "draft",
@@ -64,28 +72,23 @@ function parseAmenities(value: unknown): string[] | undefined {
 
 export async function POST(req: Request) {
   const supabase = await createClient();
-
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const authResponse = await requireAuthenticatedUser(supabase);
+  if (authResponse) {
+    return authResponse;
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const parsedBody = await parseJsonBody(req);
+  if ("response" in parsedBody) {
+    return parsedBody.response;
   }
+  const { body } = parsedBody;
 
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) {
-    return NextResponse.json({ error: "Name is required" }, { status: 400 });
+    return badRequest("Name is required");
   }
   if (name.length > 255) {
-    return NextResponse.json(
-      { error: "Name is too long (max 255 characters)" },
-      { status: 400 },
-    );
+    return badRequest("Name is too long (max 255 characters)");
   }
 
   const accommodationType =
@@ -93,16 +96,10 @@ export async function POST(req: Request) {
       ? body.accommodation_type.trim()
       : "";
   if (!accommodationType) {
-    return NextResponse.json(
-      { error: "accommodation_type is required" },
-      { status: 400 },
-    );
+    return badRequest("accommodation_type is required");
   }
   if (accommodationType.length > 120) {
-    return NextResponse.json(
-      { error: "accommodation_type is too long (max 120 characters)" },
-      { status: 400 },
-    );
+    return badRequest("accommodation_type is too long (max 120 characters)");
   }
 
   if (body.status !== undefined && body.status !== null) {
@@ -110,7 +107,7 @@ export async function POST(req: Request) {
       typeof body.status !== "string" ||
       !validStatuses.has(body.status as AccommodationStatus)
     ) {
-      return NextResponse.json({ error: "Invalid status" }, { status: 400 });
+      return badRequest("Invalid status");
     }
   }
 
@@ -118,18 +115,11 @@ export async function POST(req: Request) {
   const hasLng = body.longitude !== undefined;
   if (hasLat || hasLng) {
     if (!hasLat || !hasLng) {
-      return NextResponse.json(
-        { error: "Provide both latitude and longitude, or omit both" },
-        { status: 400 },
-      );
+      return badRequest("Provide both latitude and longitude, or omit both");
     }
     if (!hasValidCoordinates(body.latitude as number, body.longitude as number)) {
-      return NextResponse.json(
-        {
-          error:
-            "Latitude must be between -90 and 90, longitude between -180 and 180.",
-        },
-        { status: 400 },
+      return badRequest(
+        "Latitude must be between -90 and 90, longitude between -180 and 180.",
       );
     }
   }
@@ -153,10 +143,7 @@ export async function POST(req: Request) {
       price_max_usd != null &&
       price_min_usd > price_max_usd
     ) {
-      return NextResponse.json(
-        { error: "price_min_usd must be less than or equal to price_max_usd" },
-        { status: 400 },
-      );
+      return badRequest("price_min_usd must be less than or equal to price_max_usd");
     }
 
     const amenities = parseAmenities(body.amenities);
@@ -231,10 +218,8 @@ export async function POST(req: Request) {
     } else if (body.pickup_notes === null) {
       createPayload.pickup_notes = null;
     }
-    if (typeof body.image_url === "string") {
-      createPayload.image_url = body.image_url.trim() || null;
-    } else if (body.image_url === null) {
-      createPayload.image_url = null;
+    if (body.image_url !== undefined) {
+      createPayload.image_url = normalizeOptionalImageUrl(body.image_url) ?? null;
     }
 
     if (
@@ -259,12 +244,12 @@ export async function POST(req: Request) {
     const message =
       error instanceof Error ? error.message : "Failed to create accommodation";
     if (message === "Unauthorized") {
-      return NextResponse.json({ error: message }, { status: 401 });
+      return unauthorized(message);
     }
     if (message === "User is not associated with a vendor") {
-      return NextResponse.json({ error: message }, { status: 403 });
+      return forbidden(message);
     }
-    return NextResponse.json({ error: message }, { status: 400 });
+    return badRequest(message);
   }
 }
 
@@ -280,16 +265,10 @@ export async function GET(req: Request) {
     : undefined;
 
   if (limit !== undefined && (Number.isNaN(limit) || limit < 1 || limit > 100)) {
-    return NextResponse.json(
-      { error: "limit must be between 1 and 100" },
-      { status: 400 },
-    );
+    return badRequest("limit must be between 1 and 100");
   }
   if (offset !== undefined && (Number.isNaN(offset) || offset < 0)) {
-    return NextResponse.json(
-      { error: "offset must be a non-negative number" },
-      { status: 400 },
-    );
+    return badRequest("offset must be a non-negative number");
   }
 
   try {
