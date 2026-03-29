@@ -27,18 +27,25 @@ async function runLocationPointRpc(
   supabase: SupabaseClient<Database>,
   options: LocationPointOptions,
 ) {
+  if (options.latitude == null || options.longitude == null) {
+    throw new Error(LOCATION_POINT_INPUT_ERROR);
+  }
+
+  const latitude = options.latitude;
+  const longitude = options.longitude;
+
   switch (options.rpcName) {
     case "set_accommodation_location_point":
       return supabase.rpc("set_accommodation_location_point", {
         p_accommodation_id: options.entityId,
-        p_lng: options.longitude,
-        p_lat: options.latitude,
+        p_lng: longitude,
+        p_lat: latitude,
       });
     case "set_activity_location_point":
       return supabase.rpc("set_activity_location_point", {
         p_activity_id: options.entityId,
-        p_lng: options.longitude,
-        p_lat: options.latitude,
+        p_lng: longitude,
+        p_lat: latitude,
       });
   }
 }
