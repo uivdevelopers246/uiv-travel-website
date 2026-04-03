@@ -1,9 +1,13 @@
-# ADR-M4: Booking & Availability Module
+# ADR-M4-A: Booking & Availability Module
 
 **Status:** Accepted  
 **Milestone:** M4 — Booking & Availability  
-**Date:** 2026-03-28  
+**Date:** 2026-03-28 (updated 2026-04-01)  
 **Deciders:** UIV Travel development team  
+
+**Related ADRs**
+
+- **[ADR-M4-B: Shopping Cart & Checkout](./ADR-M4-shopping-cart-and-checkout.md)** — authenticated cart, `orders`, Stripe Checkout Session, **creation of `activity_bookings` after payment** (webhook), order-level Stripe IDs, merge rules, refund-on-full-failure.
 
 ---
 
@@ -14,11 +18,10 @@ UIV Travel requires a booking system that allows public users to reserve spots o
 - Multiple users booking into the same time slot (e.g. a catamaran cruise with 20 spots)
 - Vendor-managed availability windows derived from activity duration
 - Overbooking prevention under concurrent booking attempts
-- A payment flow where bookings are held pending Stripe confirmation
-- A 5% discount for first-time customers
+- **Checkout and payment at the order level** (Stripe Checkout Session for one or more cart lines); **`activity_bookings` rows are created only after successful payment** via webhook — see ADR-M4-B
 - Commission retention (10% to platform, 90% to operator) managed externally via bank accounts for MVP
 
-The payment document specifies two flows: a **Full Payment (MVP)** option where users pay 100% upfront via Stripe, and a **Deposit option (post-MVP)** where users pay 25% upfront and the remaining 75% is auto-charged two weeks before the activity date.
+The payment document specifies two flows: a **Full Payment (MVP)** option where users pay **100% upfront** via Stripe, and a **Deposit option (post-MVP)** where users pay 25% upfront and the remaining 75% is auto-charged two weeks before the activity date.
 
 ---
 
@@ -31,6 +34,8 @@ Capacity enforcement uses **Option B: computed capacity** — `booked_count` is 
 Overbooking is prevented via a `FOR UPDATE` row lock on the slot inside a dedicated RPC (`reserve_slot_capacity`), combined with a `CHECK` constraint on the `activity_bookings` table.
 
 The deposit payment option is explicitly out of scope for MVP and deferred to a post-launch milestone.
+
+**Cart vs capacity:** Items in the **shopping cart do not reserve capacity** (ADR-M4-B). Only rows in `activity_bookings` with qualifying statuses count toward slot capacity — in MVP, effectively **`confirmed`** bookings created after payment.
 
 ---
 
@@ -78,9 +83,11 @@ create table public.activity_bookings (
   user_id                   uuid not null references auth.users(id) on delete restrict,
   vendor_id                 uuid not null references public.vendors(id) on delete restrict,
 
-  status                    text not null default 'pending_payment'
+  -- Checkout aggregate; set when booking is created from a paid order (ADR-M4-B)
+  order_id                  uuid references public.orders(id) on delete restrict,
+
+  status                    text not null default 'confirmed'
                             check (status in (
-                              'pending_payment',
                               'confirmed',
                               'cancelled',
                               'completed'
@@ -88,15 +95,11 @@ create table public.activity_bookings (
 
   participants              integer not null check (participants >= 1),
 
-  -- Price snapshot at time of booking (never re-read from activity)
+  -- Immutable snapshot at row creation (never re-read from activity); see ADR-M4-B for cart snapshot vs ledger
   unit_price_cents          integer not null,
   subtotal_cents            integer not null,
-  discount_cents            integer not null default 0,
+  discount_cents            integer not null default 0,  -- MVP: always 0; reserved for future promotions/coupons
   total_cents               integer not null,
-
-  -- Stripe references
-  stripe_payment_intent_id  text unique,
-  stripe_session_id         text unique,
 
   created_at                timestamptz not null default now(),
   updated_at                timestamptz not null default now()
@@ -104,21 +107,25 @@ create table public.activity_bookings (
 
 create index idx_activity_bookings_slot_status
   on activity_bookings(slot_id, status)
-  where status in ('pending_payment', 'confirmed');
+  where status = 'confirmed';
+
+create index idx_activity_bookings_order_id on activity_bookings(order_id);
 
 create index idx_activity_bookings_user_id on activity_bookings(user_id);
 create index idx_activity_bookings_vendor_id on activity_bookings(vendor_id);
 ```
 
 `activity_id` and `vendor_id` are denormalized from the slot for query simplicity and RLS.  
-Prices are snapshotted at booking creation time. The vendor can change their activity price without affecting existing bookings.
+`order_id` links the booking to the paid checkout (ADR-M4-B). **Stripe identifiers live on `orders`**, not on each booking row for MVP.
+
+Prices are snapshotted at **booking row creation** (webhook time). The vendor can change their activity price without affecting existing bookings. **Cart lines** also store a snapshot at add-to-cart (ADR-M4-B).
 
 ### Status Machine
 
+MVP inserts bookings as **`confirmed`** immediately after successful payment (single transactional path from webhook). There is no long-lived `pending_payment` row for the happy path.
+
 ```
-pending_payment → confirmed   (Stripe webhook: payment_intent.succeeded)
-pending_payment → cancelled   (user cancels before payment, or payment fails)
-confirmed       → cancelled   (user or vendor cancels; admin handles if booked_count > 0)
+confirmed       → cancelled   (user or vendor cancels; admin handles edge cases)
 confirmed       → completed   (admin marks after activity executes; triggers payout eligibility)
 ```
 
@@ -143,7 +150,7 @@ begin
       select sum(b.participants)
       from activity_bookings b
       where b.slot_id = p_slot_id
-        and b.status in ('pending_payment', 'confirmed')
+        and b.status = 'confirmed'
     ), 0),
     s.max_capacity
   into v_current_booked, v_max_capacity
@@ -168,9 +175,9 @@ revoke execute on function reserve_slot_capacity(uuid, integer) from public;
 
 `v_current_booked` reads the live sum of participants across all active bookings on the slot at the moment the function runs. The `FOR UPDATE` lock on the slot row prevents a second concurrent call from reading the same value simultaneously, eliminating the race condition that causes overbooking. The capacity check is a guard only — no write to `booked_count` occurs because the column does not exist.
 
-### First-Time Customer Discount
+### Promotional discounts (MVP)
 
-In `createBooking`, before inserting, the service checks whether `auth.uid()` has any prior booking in `activity_bookings` with `status IN ('confirmed', 'completed')`. If none exist, `discount_cents = round(subtotal_cents * 0.05)` is applied and stored on the booking row. This is computed once at booking creation and never recalculated.
+**No discount or coupon logic in MVP** — `discount_cents` on `activity_bookings` (and order/cart line discount fields in ADR-M4-B) remains **0**. The columns are retained so future promotions do not require a breaking schema change.
 
 ### Slot Cancellation Rule (MVP)
 
@@ -207,7 +214,10 @@ create policy "admins_all_slots" on availability_slots
 create policy "users_select_own" on activity_bookings
   for select to authenticated using (user_id = auth.uid());
 
--- Users can insert (service enforces user_id = auth.uid())
+-- Inserts in MVP are expected from the paid-order / webhook path (ADR-M4-B), not from the client.
+-- Options: (1) revoke direct user insert and use a SECURITY DEFINER RPC or service-role server path
+-- that sets user_id from the paid order; (2) keep user insert disabled for authenticated direct API.
+-- If a thin "add to cart only" API is used, it must not insert into activity_bookings.
 create policy "users_insert" on activity_bookings
   for insert to authenticated with check (user_id = auth.uid());
 
@@ -242,16 +252,21 @@ Status transitions have no update policy for `authenticated`. All updates go thr
 
 | Method | Route | Auth | Description |
 |--------|-------|------|-------------|
-| `POST` | `/api/activity-bookings` | User | Create a booking. Body: `{ slotId, participants }`. Calls `reserve_slot_capacity` RPC, snapshots price, applies new-customer discount, inserts as `pending_payment`. Returns booking ID for Stripe handoff. |
-| `GET` | `/api/activity-bookings` | User | List the authenticated user's activity bookings. Joins slot and activity for display. |
+| `GET` | `/api/activity-bookings` | User | List the authenticated user's activity bookings. Joins slot, activity, optional `order` for display. |
 | `GET` | `/api/activity-bookings/[id]` | User / Vendor | Single booking detail. Accessible by the booking owner or the relevant vendor. Used for confirmation screen. |
 | `POST` | `/api/activity-bookings/[id]/cancel` | User | Cancel a booking. Validates cancellable state. Status → `cancelled`. |
+
+**Creation path:** New bookings are **not** created via a public `POST /api/activity-bookings` in the MVP flow. They are created from the **Stripe webhook** after payment (ADR-M4-B), optionally preceded by a **“Book now”** UX that adds a line to the cart or starts checkout. A direct create endpoint may exist for **admin/support** only if needed.
 
 ### Stripe Webhook
 
 | Method | Route | Auth | Description |
 |--------|-------|------|-------------|
-| `POST` | `/api/webhooks/stripe` | None (signature verified) | Stripe webhook receiver. Verifies `stripe-signature` header. On `payment_intent.succeeded`, calls `confirmBooking` → status transitions to `confirmed`, triggers Resend email to vendor. Only path that moves a booking to `confirmed`. |
+| `POST` | `/api/webhooks/stripe` | None (signature verified) | See **ADR-M4-B**. Verifies `stripe-signature`. On successful Checkout Session / PaymentIntent completion, **idempotently** creates `activity_bookings`, calls `reserve_slot_capacity` per line, sets `order_id`, triggers notifications as needed. On fulfillment failure after charge: **refund full order** (MVP policy). |
+
+### Shopping cart & checkout
+
+Cart, `orders`, and Checkout Session creation are defined in **[ADR-M4-B](./ADR-M4-shopping-cart-and-checkout.md)** (`/api/cart`, `/api/checkout`, etc.).
 
 ### Vendor Dashboard
 
@@ -275,26 +290,33 @@ Status transitions have no update policy for `authenticated`. All updates go thr
 
 ```
 supabase/migrations/
+  YYYYMMDD_create_orders.sql              -- ADR-M4-B: may precede activity_bookings if FK from bookings → orders
+  YYYYMMDD_create_cart_lines.sql          -- ADR-M4-B
   YYYYMMDD_create_availability_slots.sql
-  YYYYMMDD_create_activity_bookings.sql
+  YYYYMMDD_create_activity_bookings.sql   -- includes order_id FK to orders
   YYYYMMDD_rls_availability_slots.sql
   YYYYMMDD_rls_activity_bookings.sql
+  YYYYMMDD_rls_orders.sql
+  YYYYMMDD_rls_cart_lines.sql
   YYYYMMDD_reserve_slot_capacity_rpc.sql
 ```
 
-One migration per concern for clean rollback.
+Order migrations before `activity_bookings` if the booking table references `orders`. One migration per concern for clean rollback.
 
 ### Service Layer
 
 ```
 src/lib/activity-bookings/
-  service.ts         — createBooking, confirmBooking, cancelBooking, listUserBookings, getBooking
-  types.ts           — ActivityBookingDisplay, ActivityBookingStatus, CreateActivityBookingInput
-  constants.ts       — ACTIVITY_BOOKING_STATUS enum, PLATFORM_COMMISSION_RATE, NEW_CUSTOMER_DISCOUNT_RATE
+  service.ts         — createBookingsFromPaidOrder (webhook), cancelBooking, listUserBookings, getBooking
+  types.ts           — ActivityBookingDisplay, ActivityBookingStatus
+  constants.ts       — ACTIVITY_BOOKING_STATUS enum, PLATFORM_COMMISSION_RATE
 
 src/lib/slots/
   service.ts         — createSlot, listPublicSlots, listVendorSlots, updateSlot, cancelSlot
   types.ts           — SlotDisplay, CreateSlotInput
+
+src/lib/cart/        — ADR-M4-B
+src/lib/orders/      — ADR-M4-B
 ```
 
 ### API Routes
@@ -306,8 +328,11 @@ src/app/api/
     manage/route.ts                       — GET (vendor manage view)
     [slotId]/route.ts                     — PATCH, DELETE (vendor)
 
+  cart/                                   — ADR-M4-B (lines CRUD)
+  checkout/route.ts                       — ADR-M4-B
+
   activity-bookings/
-    route.ts                              — GET (user list), POST (create)
+    route.ts                              — GET (user list)
     [id]/
       route.ts                            — GET (detail)
       cancel/route.ts                     — POST (cancel)
@@ -321,7 +346,7 @@ src/app/api/
     [id]/route.ts                         — PATCH (admin status transition)
 
   webhooks/
-    stripe/route.ts                       — POST (Stripe webhook, signature verified)
+    stripe/route.ts                       — POST (ADR-M4-B: payment + create bookings)
 ```
 
 ### Environment Variables to Add
@@ -381,11 +406,13 @@ Rejected for MVP. Would surrender control of the payment and commission relation
 - Capacity computation is always accurate with no synchronization required
 - The slot table design is compatible with future recurring rule generation (Option C) without migration changes
 - Price snapshotting on the booking row means financial records are immutable after creation
+- Order-level Stripe integration (ADR-M4-B) supports multi-item checkout without per-booking payment IDs
 
 **Negative / Accepted tradeoffs**
 - Capacity queries join `bookings` on every request; acceptable at MVP scale, addressable with the Option A migration path if needed
 - Vendors must create slots manually for MVP; the recurring rule engine (Option C) is the long-term solution
 - Slot cancellation with active bookings requires admin intervention; refund and notification automation is deferred
+- Cart does not hold inventory (ADR-M4-B): users may lose a slot between add-to-cart and payment; MVP mitigates with fail-whole-order + refund
 
 **Out of scope for M4 Phase 1 (this ADR)**
 - Deposit payment option (25% upfront, 75% auto-charged two weeks before activity)
@@ -407,4 +434,3 @@ Accommodation bookings are a distinct booking model and are explicitly out of sc
 - Overbooking prevention via overlapping date-range detection (`tsrange` or explicit `check_in` / `check_out` exclusion constraints in Postgres) rather than headcount against a slot
 - Whether nightly pricing is flat (`price_min_usd` from the accommodation row) or varies by date (requires a separate rate table — likely post-MVP)
 - Check-in / check-out time enforcement from the `accommodations` schema (`check_in_time`, `check_out_time` columns already exist)
-- The new-customer discount logic will need to check both `activity_bookings` and `accommodation_bookings` for prior confirmed bookings

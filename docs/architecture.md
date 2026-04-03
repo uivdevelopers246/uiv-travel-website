@@ -27,6 +27,10 @@ UIV Travel is a Barbados-focused travel site where **vendors** list **activities
 | `NEXT_PUBLIC_SUPABASE_URL`                        | Supabase project URL (required at build/run)                |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`            | Anon key for browser and server Supabase clients (required) |
 | `NEXT_PUBLIC_SITE_URL` / `NEXT_PUBLIC_VERCEL_URL` | Signup redirect URL (production)                            |
+| `STRIPE_SECRET_KEY`                               | Server-only; Stripe API (Checkout Session, refunds). Planned for M4 — see `docs/adrs/ADR-M4-shopping-cart-and-checkout.md` |
+| `STRIPE_WEBHOOK_SECRET`                           | Server-only; verifies `stripe-signature` on `/api/webhooks/stripe`. Planned for M4 |
+
+**Booking & checkout (M4):** See `docs/adrs/ADR-M4-booking-availability.md` (slots, `activity_bookings`, capacity RPC) and `docs/adrs/ADR-M4-shopping-cart-and-checkout.md` (cart, `orders`, Stripe webhook fulfillment).
 
 ## Request/Response Flows
 
