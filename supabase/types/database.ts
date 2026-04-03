@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -205,6 +205,179 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      activity_bookings: {
+        Row: {
+          activity_id: string
+          created_at: string
+          discount_cents: number
+          id: string
+          order_id: string | null
+          participants: number
+          slot_id: string
+          status: string
+          subtotal_cents: number
+          total_cents: number
+          unit_price_cents: number
+          updated_at: string
+          user_id: string
+          vendor_id: string
+        }
+        Insert: {
+          activity_id: string
+          created_at?: string
+          discount_cents?: number
+          id?: string
+          order_id?: string | null
+          participants: number
+          slot_id: string
+          status?: string
+          subtotal_cents: number
+          total_cents: number
+          unit_price_cents: number
+          updated_at?: string
+          user_id: string
+          vendor_id: string
+        }
+        Update: {
+          activity_id?: string
+          created_at?: string
+          discount_cents?: number
+          id?: string
+          order_id?: string | null
+          participants?: number
+          slot_id?: string
+          status?: string
+          subtotal_cents?: number
+          total_cents?: number
+          unit_price_cents?: number
+          updated_at?: string
+          user_id?: string
+          vendor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "activity_bookings_activity_id_fkey"
+            columns: ["activity_id"]
+            isOneToOne: false
+            referencedRelation: "activities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "activity_bookings_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "activity_bookings_slot_id_fkey"
+            columns: ["slot_id"]
+            isOneToOne: false
+            referencedRelation: "availability_slots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "activity_bookings_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      availability_slots: {
+        Row: {
+          activity_id: string
+          created_at: string
+          ends_at: string
+          id: string
+          is_cancelled: boolean
+          max_capacity: number
+          starts_at: string
+          updated_at: string
+          vendor_id: string
+        }
+        Insert: {
+          activity_id: string
+          created_at?: string
+          ends_at: string
+          id?: string
+          is_cancelled?: boolean
+          max_capacity: number
+          starts_at: string
+          updated_at?: string
+          vendor_id: string
+        }
+        Update: {
+          activity_id?: string
+          created_at?: string
+          ends_at?: string
+          id?: string
+          is_cancelled?: boolean
+          max_capacity?: number
+          starts_at?: string
+          updated_at?: string
+          vendor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "availability_slots_activity_id_fkey"
+            columns: ["activity_id"]
+            isOneToOne: false
+            referencedRelation: "activities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "availability_slots_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      orders: {
+        Row: {
+          created_at: string
+          currency: string
+          discount_cents: number
+          id: string
+          status: string
+          stripe_checkout_session_id: string | null
+          stripe_payment_intent_id: string | null
+          subtotal_cents: number
+          total_cents: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          currency?: string
+          discount_cents?: number
+          id?: string
+          status?: string
+          stripe_checkout_session_id?: string | null
+          stripe_payment_intent_id?: string | null
+          subtotal_cents: number
+          total_cents: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          currency?: string
+          discount_cents?: number
+          id?: string
+          status?: string
+          stripe_checkout_session_id?: string | null
+          stripe_payment_intent_id?: string | null
+          subtotal_cents?: number
+          total_cents?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       profiles: {
         Row: {
