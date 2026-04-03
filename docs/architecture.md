@@ -30,7 +30,7 @@ UIV Travel is a Barbados-focused travel site where **vendors** list **activities
 | `STRIPE_SECRET_KEY`                               | Server-only; Stripe API (Checkout Session, refunds). Planned for M4 — see `docs/adrs/ADR-M4-shopping-cart-and-checkout.md` |
 | `STRIPE_WEBHOOK_SECRET`                           | Server-only; verifies `stripe-signature` on `/api/webhooks/stripe`. Planned for M4 |
 
-**Booking & checkout (M4):** See `docs/adrs/ADR-M4-booking-availability.md` (slots, `activity_bookings`, capacity RPC) and `docs/adrs/ADR-M4-shopping-cart-and-checkout.md` (cart, `orders`, Stripe webhook fulfillment).
+**Booking & checkout (M4):** See `docs/adrs/ADR-M4-booking-availability.md` (slots, `activity_bookings`, capacity RPC) and `docs/adrs/ADR-M4-shopping-cart-and-checkout.md` (cart, `orders`, Stripe webhook fulfillment). **`activity_bookings` rows are inserted only through privileged server paths** (Stripe webhook with **service role** after signature verification, or site admin); the **`authenticated`** role has **no** `INSERT` policy on that table, so the publishable key cannot mint paid bookings without payment fulfillment.
 
 ## Request/Response Flows
 
@@ -66,9 +66,9 @@ UIV Travel is a Barbados-focused travel site where **vendors** list **activities
 
 ## Data Layer (High-level)
 
-- **Supabase Postgres:** Main schema in `public`. Tables: `profiles` (1:1 with `auth.users`), `vendors` (owner + optional business profile columns), `site_admins` (user_id → auth.users), `activities` and **`accommodations`** (both `vendor_id → vendors`). Activities have text `location` (display) and optional `location_point`. Accommodations have address/parish fields and optional `location_point`. Location geometry is set only via RPCs, not direct column writes from the app.
-- **RLS:** Enabled on `profiles`, `vendors`, `activities`, `accommodations`, `site_admins`. Policies mirror the activities model for accommodations (published public read; vendor/admin for own rows). **Vendors:** owners can read/insert/update their row (subject to column grants); admins retain elevated policies from consolidated migrations. Column-level grants on `activities` and `accommodations` limit inserts/updates (e.g. no `rating` on activities; no `location_point` or `is_featured` on accommodations for authenticated direct writes).
-- **RPCs:** `set_activity_location_point` and `set_accommodation_location_point` set or clear PostGIS points (`st_setsrid(st_makepoint(...), 4326)`). Granted to `authenticated` only; underlying UPDATE still enforced by RLS.
+- **Supabase Postgres:** Main schema in `public`. Tables: `profiles` (1:1 with `auth.users`), `vendors` (owner + optional business profile columns), `site_admins` (user_id → auth.users), `activities` and **`accommodations`** (both `vendor_id → vendors`), plus M4 **`orders`**, **`availability_slots`**, and **`activity_bookings`** for paid activity bookings. Activities have text `location` (display) and optional `location_point`. Accommodations have address/parish fields and optional `location_point`. Location geometry is set only via RPCs, not direct column writes from the app.
+- **RLS:** Enabled on `profiles`, `vendors`, `activities`, `accommodations`, `site_admins`. Policies mirror the activities model for accommodations (published public read; vendor/admin for own rows). **Vendors:** owners can read/insert/update their row (subject to column grants); admins retain elevated policies from consolidated migrations. Column-level grants on `activities` and `accommodations` limit inserts/updates (e.g. no `rating` on activities; no `location_point` or `is_featured` on accommodations for authenticated direct writes). **M4:** `activity_bookings` allows **select** for owners, vendors, and admins; **`authenticated` has no insert policy** — webhook fulfillment uses **service role** (see ADRs).
+- **RPCs:** `set_activity_location_point` and `set_accommodation_location_point` set or clear PostGIS points (`st_setsrid(st_makepoint(...), 4326)`). Granted to `authenticated` only; underlying UPDATE still enforced by RLS. **M4:** `reserve_slot_capacity` (capacity guard, `SECURITY DEFINER`), `cancel_activity_booking` (user cancel, `SECURITY DEFINER`).
 - **Storage:** Buckets `activity-images` and `accommodation-images` (public read). RLS: paths under `{vendor_id}/%` for the owning vendor or site admin. Clients upload then store the public URL on the row (`image_url`).
 
 ## Geospatial / Maps Architecture
@@ -111,6 +111,9 @@ None yet. No workers, no webhook handlers, no cron in repo.
 - **Decision: No Map UI in initial scope**
   - Why: DB schema and coordinate flow support future maps; UI deferred.
   - Implications: Create/update accept optional coordinates; map components can be added later.
+- **Decision: `activity_bookings` inserts are webhook / admin only at the DB**
+  - Why: Enforces “paid before confirmed booking” for normal users; prevents authenticated clients from inserting reservation rows without going through Stripe fulfillment.
+  - Implications: Verified `/api/webhooks/stripe` uses a **service-role** Supabase client for inserts; app code must not rely on user JWTs to create bookings. User cancellation uses `cancel_activity_booking` RPC. See ADR-M4-A / ADR-M4-B and `docs/database.md`.
 - **Decision: Session refresh via Next.js 16 `proxy.ts` + `lib/supabase/proxy`**
   - Why: Next.js 16 replaces `middleware.ts` with `proxy.ts` for the network boundary; Supabase SSR still needs per-request cookie refresh (`getClaims()` after `createServerClient`).
   - Implications: Keep `proxy.ts` matcher in sync with routes that need refreshed sessions; implementation lives in `updateSession`.

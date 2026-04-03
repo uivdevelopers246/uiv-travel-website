@@ -2,7 +2,7 @@
 
 **Status:** Accepted  
 **Milestone:** M4 — Booking & Availability  
-**Date:** 2026-03-28 (updated 2026-04-01)  
+**Date:** 2026-03-28 (updated 2026-04-03)  
 **Deciders:** UIV Travel development team  
 
 **Related ADRs**
@@ -36,6 +36,8 @@ Overbooking is prevented via a `FOR UPDATE` row lock on the slot inside a dedica
 The deposit payment option is explicitly out of scope for MVP and deferred to a post-launch milestone.
 
 **Cart vs capacity:** Items in the **shopping cart do not reserve capacity** (ADR-M4-B). Only rows in `activity_bookings` with qualifying statuses count toward slot capacity — in MVP, effectively **`confirmed`** bookings created after payment.
+
+**DB rule for booking creation:** RLS grants **no `INSERT` policy to `authenticated`** on `activity_bookings`. New rows are inserted only by the **Stripe webhook** (or other server paths) using the **service role** client, which bypasses RLS, and by **site admins** via the admin `FOR ALL` policy when acting with an admin JWT. This matches “paid checkout only” at the database boundary; ordinary users cannot mint bookings without going through payment fulfillment.
 
 ---
 
@@ -214,12 +216,10 @@ create policy "admins_all_slots" on availability_slots
 create policy "users_select_own" on activity_bookings
   for select to authenticated using (user_id = auth.uid());
 
--- Inserts in MVP are expected from the paid-order / webhook path (ADR-M4-B), not from the client.
--- Options: (1) revoke direct user insert and use a SECURITY DEFINER RPC or service-role server path
--- that sets user_id from the paid order; (2) keep user insert disabled for authenticated direct API.
--- If a thin "add to cart only" API is used, it must not insert into activity_bookings.
-create policy "users_insert" on activity_bookings
-  for insert to authenticated with check (user_id = auth.uid());
+-- No INSERT policy for authenticated. Inserts are performed by:
+--   - Stripe webhook (service role; bypasses RLS) after successful payment — see ADR-M4-B
+--   - Site admins via the policy below (FOR ALL includes INSERT)
+-- Cart and checkout APIs must not insert into activity_bookings as the end user.
 
 -- Vendors see bookings on their activities
 create policy "vendors_select_own_activity_bookings" on activity_bookings
@@ -232,7 +232,7 @@ create policy "admins_all_bookings" on activity_bookings
   using (is_site_admin()) with check (is_site_admin());
 ```
 
-Status transitions have no update policy for `authenticated`. All updates go through the service layer using a server-side Supabase client (which respects RLS) or the admin route.
+**User cancel:** Authenticated users do not get a broad `UPDATE` policy. They cancel via the **`cancel_activity_booking`** `SECURITY DEFINER` RPC (sets `status` to `cancelled` for their own `confirmed` row only). Other status transitions use the service layer with a server-side client (e.g. admin JWT with `FOR ALL`) or privileged paths as documented in ADR-M4-B.
 
 ---
 
@@ -256,7 +256,7 @@ Status transitions have no update policy for `authenticated`. All updates go thr
 | `GET` | `/api/activity-bookings/[id]` | User / Vendor | Single booking detail. Accessible by the booking owner or the relevant vendor. Used for confirmation screen. |
 | `POST` | `/api/activity-bookings/[id]/cancel` | User | Cancel a booking. Validates cancellable state. Status → `cancelled`. |
 
-**Creation path:** New bookings are **not** created via a public `POST /api/activity-bookings` in the MVP flow. They are created from the **Stripe webhook** after payment (ADR-M4-B), optionally preceded by a **“Book now”** UX that adds a line to the cart or starts checkout. A direct create endpoint may exist for **admin/support** only if needed.
+**Creation path:** New bookings are **not** created via a public `POST /api/activity-bookings` in the MVP flow. They are created from the **Stripe webhook** after payment (ADR-M4-B), optionally preceded by a **“Book now”** UX that adds a line to the cart or starts checkout. **RLS enforces this:** `authenticated` has **no** `INSERT` on `activity_bookings`; the webhook uses the **service role**. **Admin/support** creation (if ever needed) uses a site-admin session (`FOR ALL` policy) or the same privileged server client — not the anon/publishable user role.
 
 ### Stripe Webhook
 

@@ -2,7 +2,7 @@
 
 **Status:** Accepted  
 **Milestone:** M4 — Booking & Availability  
-**Date:** 2026-04-01  
+**Date:** 2026-04-01 (updated 2026-04-03)  
 **Deciders:** UIV Travel development team  
 **Related:** [ADR-M4-A: Booking & Availability](./ADR-M4-booking-availability.md) — slots, `activity_bookings`, `reserve_slot_capacity` RPC.
 
@@ -25,6 +25,7 @@ This ADR defines **cart storage**, **checkout**, **Stripe Checkout Session**, **
 - **Inventory:** The cart **does not reserve** slot capacity. Capacity is enforced only when **`activity_bookings`** are created **after** successful payment (see flow below).
 - **Payment unit:** Stripe **Checkout Session** is created for the **order** (collection of lines). **Stripe IDs live on `orders` only** for MVP — not duplicated on each `activity_bookings` row.
 - **Source of truth:** **Stripe webhooks** (not the browser return URL) drive **paid** state and **booking creation**. Handlers must be **idempotent** (e.g. use Stripe event id or order idempotency keys) so retries do not duplicate bookings.
+- **`activity_bookings` inserts:** RLS grants **no `INSERT` to `authenticated`**. The verified webhook handler uses a **service-role** Supabase client so inserts succeed after payment without exposing that privilege to browsers. **Site admins** may still insert via the admin `FOR ALL` policy on `activity_bookings` (ADR-M4-A). This is a **hard DB rule** aligned with “bookings only after successful payment” for normal users.
 - **Partial failure after payment:** If any line cannot be fulfilled (e.g. slot sold out between cart add and capture), policy is **fail the whole order** and **refund** the Stripe charge — no partial fulfillment in MVP.
 - **Cart clearing:** The cart is cleared **only after** a **successful** webhook path that creates bookings (or explicitly marks the order complete). It is **not** cleared merely when the Checkout Session is created (avoids losing the cart if the user abandons Stripe).
 - **Pricing:** **Snapshot unit/total in cents on cart lines at add-to-cart** (commercial quote for the cart UI). **Immutable snapshot again on each `activity_bookings` row** at creation time (ledger). Integer **cents** avoids float drift and matches Stripe amounts. **No promotional or first-time discounts in MVP** — see § Data Model (`discount_cents` / `line_discount_cents` remain 0).
@@ -111,9 +112,11 @@ Existing **user booking list/detail** routes from ADR-M4-A remain; **direct `POS
 
 ## RLS (high level)
 
-- **`orders`:** Users `select`/`insert` (or only service role insert — prefer server creates orders) their own rows; vendors/admins as needed for support. **Stripe webhook** uses a **server path** with service role or security-definer function — **do not** expose secret to client; typical pattern is Edge Function or Next.js route with **webhook secret verification** then Supabase server client with sufficient privilege to insert bookings (subject to ADR-M4-A RLS — may require **privileged RPC** for booking insert after payment if RLS blocks user insert in webhook context; **design in implementation** to satisfy “no RLS bypass for normal users”).
+- **`activity_bookings`:** **`authenticated` has no `INSERT` policy** — end users cannot create rows with the publishable key + JWT. **Booking inserts** after payment use the **service role** in the webhook route (verified by `stripe-signature`); **never** expose the service role or webhook secret to the client. **Site admins** retain `INSERT` through the admin `FOR ALL` policy (ADR-M4-A). User **cancel** uses the `cancel_activity_booking` RPC (not a broad `UPDATE` policy).
 
-- **`cart_lines`:** `user_id = auth.uid()` for all operations.
+- **`orders`:** Users `select`/`insert` their own rows (or server-only order creation — follow migrations / `rls_orders` when added). **Webhook** uses the same privileged server client as needed for order updates alongside booking fulfillment.
+
+- **`cart_lines`:** `user_id = auth.uid()` for all operations (when implemented).
 
 ---
 

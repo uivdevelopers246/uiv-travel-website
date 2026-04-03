@@ -1,6 +1,6 @@
 ## Overview
 
-The database is Supabase Postgres in the `public` schema, with PostGIS in `extensions`. It backs a Barbados travel app: **profiles** (1:1 with auth users), **vendors** (one per owner, with optional business profile columns), **site_admins** (admin users), **activities**, and **accommodations** (vendor-owned listings with optional map pins). RLS is enabled on all application tables; policies evolved across migrations (see Migration Workflow). Column-level grants on `activities` and `accommodations` restrict which columns authenticated users can write. `location_point` on activities and accommodations is set or cleared only via **`set_activity_location_point`** and **`set_accommodation_location_point`** RPCs using user-provided coordinates (no geocoding in migrations).
+The database is Supabase Postgres in the `public` schema, with PostGIS in `extensions`. It backs a Barbados travel app: **profiles** (1:1 with auth users), **vendors** (one per owner, with optional business profile columns), **site_admins** (admin users), **activities**, and **accommodations** (vendor-owned listings with optional map pins). **M4** adds **`orders`**, **`availability_slots`**, and **`activity_bookings`** for paid activity checkout and slot capacity (see ADRs in `docs/adrs/`). RLS is enabled on all application tables; policies evolved across migrations (see Migration Workflow). Column-level grants on `activities` and `accommodations` restrict which columns authenticated users can write. `location_point` on activities and accommodations is set or cleared only via **`set_activity_location_point`** and **`set_accommodation_location_point`** RPCs using user-provided coordinates (no geocoding in migrations). **`activity_bookings`:** ordinary **`authenticated` users have no `INSERT` policy**; rows are created by the **Stripe webhook** using the **service role** (and by site admins via `FOR ALL`), per ADR-M4-A / ADR-M4-B.
 
 ## Core Tables
 
@@ -80,6 +80,14 @@ Policies below reflect the consolidated vendors/activities migration (`202601290
 - **Security definer:** `is_site_admin()`, `is_vendor_user()`, `vendor_id_for_user()` and trigger functions `handle_new_user()`, `handle_audit_fields()` are `security definer` so they run with definer rights (e.g. read `site_admins`/`vendors` for RLS). `is_vendor_owner(v_id)` is not security definer; it runs as invoker and relies on RLS.
 - **RPCs:** `set_activity_location_point` and `set_accommodation_location_point` are revoked from `public` and granted to `authenticated`. Neither RPC checks ownership in SQL; RLS on the target table applies to the underlying UPDATE, so only vendor owners or admins can change rows they are allowed to update.
 
+### M4: `availability_slots`, `activity_bookings`, `orders`
+
+| Table | Notes |
+|-------|--------|
+| **`availability_slots`** | Vendor/admin manage slots; public **select** for non-cancelled slots tied to **published** activities (see `20260403120400_rls_availability_slots.sql`). |
+| **`activity_bookings`** | **Select:** booking owner (`user_id`), vendor owner (`is_vendor_owner(vendor_id)`), site admin. **`INSERT`:** not allowed for **`authenticated`** — use **service role** in the Stripe webhook (or admin `FOR ALL`). **User cancel:** `cancel_activity_booking` RPC (`SECURITY DEFINER`). **`reserve_slot_capacity`** is `SECURITY DEFINER`; called before insert on the webhook path. |
+| **`orders`** | RLS enabled in migration; detailed policies may follow in `rls_orders` (ADR-M4-B). |
+
 ## Database Functions (RPC + helpers)
 
 ### RPC (callable from app)
@@ -88,6 +96,8 @@ Policies below reflect the consolidated vendors/activities migration (`202601290
 |----------|---------|------|---------------------|-------------|--------|
 | **set_activity_location_point** | Set or clear an activity’s geographic point (user-provided coordinates). | `p_activity_id` uuid; `p_lng`, `p_lat` double precision. | `p_lng` and `p_lat` default to null. | `authenticated` only (execute granted; public revoked). | If `p_lng` or `p_lat` is null, clears `location_point`; otherwise sets point via `st_setsrid(st_makepoint(p_lng, p_lat), 4326)`. UPDATE is subject to RLS. |
 | **set_accommodation_location_point** | Set or clear an accommodation’s geographic point. | `p_accommodation_id` uuid; `p_lng`, `p_lat` double precision. | Defaults null. | `authenticated` only. | Same clear/set semantics as activities; targets `accommodations.location_point`. |
+| **reserve_slot_capacity** | Serialize capacity check before inserting a booking (sum of `confirmed` participants vs slot `max_capacity`). | `p_slot_id` uuid; `p_participants` integer. | — | `authenticated`, `service_role` (see migration). | `SECURITY DEFINER`; locks slot row `FOR UPDATE`. |
+| **cancel_activity_booking** | User sets own `confirmed` booking to `cancelled`. | `p_booking_id` uuid. | — | `authenticated`, `service_role`. | `SECURITY DEFINER`; triggers `updated_at` on the row. |
 
 ### RLS helper functions (used in policies)
 
@@ -153,6 +163,13 @@ Migrations live under `supabase/migrations/` and are applied in filename order (
 11. `20260221222439_drop_geocode_columns_and_constraints.sql` — Drops geocode_accuracy, geocode_label, geocode_feature_id and their check constraint; location_point remains.
 12. `20260324120000_accommodations_and_vendor_profile.sql` — Vendor profile columns on `vendors`; `accommodations` table, indexes, triggers; `set_accommodation_location_point` RPC; RLS on `accommodations`; vendor owner UPDATE policy and column grants on `vendors` and `accommodations`.
 13. `20260325120000_accommodation_images_bucket.sql` — Storage bucket `accommodation-images` and policies (mirror `activity-images` path pattern).
+14. `20260403120000_create_orders.sql` — `orders` table (checkout aggregate; RLS enabled).
+15. `20260403120100_create_availability_slots.sql` — `availability_slots` + vendor/activity consistency trigger.
+16. `20260403120200_create_activity_bookings.sql` — `activity_bookings` + indexes + `updated_at` trigger.
+17. `20260403120300_reserve_slot_capacity_rpc.sql` — `reserve_slot_capacity` (`SECURITY DEFINER`).
+18. `20260403120400_rls_availability_slots.sql` — RLS on `availability_slots`.
+19. `20260403120500_rls_activity_bookings.sql` — RLS on `activity_bookings`; `cancel_activity_booking` RPC.
+20. `20260403120600_activity_bookings_webhook_only_insert.sql` — Drops legacy `authenticated` INSERT policy on `activity_bookings` if present.
 
 ## Common Query Patterns (from the codebase)
 
