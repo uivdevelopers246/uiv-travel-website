@@ -30,7 +30,7 @@ UIV Travel is a Barbados-focused travel site where **vendors** list **activities
 | `STRIPE_SECRET_KEY`                               | Server-only; Stripe API (Checkout Session, refunds). Planned for M4 — see `docs/adrs/ADR-M4-shopping-cart-and-checkout.md` |
 | `STRIPE_WEBHOOK_SECRET`                           | Server-only; verifies `stripe-signature` on `/api/webhooks/stripe`. Planned for M4 |
 
-**Booking & checkout (M4):** See `docs/adrs/ADR-M4-booking-availability.md` (slots, `activity_bookings`, capacity RPC) and `docs/adrs/ADR-M4-shopping-cart-and-checkout.md` (cart, `orders`, Stripe webhook fulfillment). **`activity_bookings` rows are inserted only through privileged server paths** (Stripe webhook with **service role** after signature verification, or site admin); the **`authenticated`** role has **no** `INSERT` policy on that table, so the publishable key cannot mint paid bookings without payment fulfillment.
+**Booking & checkout (M4):** See `docs/adrs/ADR-M4-booking-availability.md` (slots, `activity_bookings`, capacity RPC) and `docs/adrs/ADR-M4-shopping-cart-and-checkout.md` (cart, `orders`, Stripe webhook fulfillment). **`activity_bookings` rows are inserted only through privileged server paths** (Stripe webhook with **service role** after signature verification, or site admin); the **`authenticated`** role has **no** `INSERT` policy on that table, so the publishable key cannot mint paid bookings without payment fulfillment. **Read/cancel APIs** live under `src/app/api/activity-bookings` (consumer), `src/app/api/vendor/activity-bookings` (vendor-only list/detail), and `src/app/api/admin/activity-bookings` (admin list + PATCH to `completed`); handlers call `lib/activity-bookings/service.ts` with the cookie-based server client (RLS applies).
 
 ## Request/Response Flows
 
@@ -61,7 +61,7 @@ UIV Travel is a Barbados-focused travel site where **vendors** list **activities
 ## Auth & Authorization Model (High-level)
 
 - **Auth:** Supabase Auth. Email OTP (magic link / OTP). Signup uses `signInWithOtp`; confirmation is handled by `GET /auth/confirm` (verifies `token_hash` and `type`, then redirects). **Next.js 16** uses root **`proxy.ts`** (export `proxy`) instead of `middleware.ts` for the same role: it calls `updateSession` from `lib/supabase/proxy.ts` so Supabase cookies/session refresh run on matched routes. The `config.matcher` in `proxy.ts` defines which paths run through this layer.
-- **Roles (application-level):** Derived in app and API via `getUserRole(supabase)` from `@/lib/auth/roles`: **guest** (no user), **user** (authenticated, no vendor/admin), **vendor** (has row in `vendors`), **admin** (has row in `site_admins`). Used for route protection (e.g. manage pages, admin users) and API authorization (e.g. PATCH/DELETE activity, POST status, admin-only `/api/admin/users`).
+- **Roles (application-level):** Derived in app and API via `getUserRole(supabase)` from `@/lib/auth/roles`: **guest** (no user), **user** (authenticated, no vendor/admin), **vendor** (has row in `vendors`), **admin** (has row in `site_admins`). Used for route protection (e.g. manage pages, admin users) and API authorization (e.g. PATCH/DELETE activity, POST status, admin-only `/api/admin/users`, vendor-only `/api/vendor/activity-bookings`, admin-only `/api/admin/activity-bookings`).
 - **Protected routes:** Server components (e.g. `/activities/manage`, `/activities/manage/[id]`, `/admin/users`) call `getUserRole()` and redirect or render “Access denied” for guest / non-vendor or non-admin as appropriate. API routes return 401/403 when role is insufficient.
 
 ## Data Layer (High-level)
@@ -113,7 +113,7 @@ None yet. No workers, no webhook handlers, no cron in repo.
   - Implications: Create/update accept optional coordinates; map components can be added later.
 - **Decision: `activity_bookings` inserts are webhook / admin only at the DB**
   - Why: Enforces “paid before confirmed booking” for normal users; prevents authenticated clients from inserting reservation rows without going through Stripe fulfillment.
-  - Implications: Verified `/api/webhooks/stripe` uses a **service-role** Supabase client and `create_activity_booking_after_payment` (not user JWT inserts). User cancellation uses `cancel_activity_booking` RPC. See ADR-M4-A / ADR-M4-B and `docs/database.md`.
+  - Implications: Verified `/api/webhooks/stripe` uses a **service-role** Supabase client and `create_activity_booking_after_payment` (not user JWT inserts). User cancellation uses `POST /api/activity-bookings/[id]/cancel` → `cancel_activity_booking` RPC. See ADR-M4-A / ADR-M4-B and `docs/database.md`.
 - **Decision: Session refresh via Next.js 16 `proxy.ts` + `lib/supabase/proxy`**
   - Why: Next.js 16 replaces `middleware.ts` with `proxy.ts` for the network boundary; Supabase SSR still needs per-request cookie refresh (`getClaims()` after `createServerClient`).
   - Implications: Keep `proxy.ts` matcher in sync with routes that need refreshed sessions; implementation lives in `updateSession`.

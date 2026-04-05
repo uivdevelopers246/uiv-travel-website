@@ -216,9 +216,9 @@ create policy "admins_all_bookings" on activity_bookings
 
 | Method | Route | Auth | Description |
 |--------|-------|------|-------------|
-| `GET` | `/api/activity-bookings` | User | List the authenticated user's activity bookings. Joins slot, activity, optional `order` for display. |
-| `GET` | `/api/activity-bookings/[id]` | User / Vendor | Single booking detail. Accessible by the booking owner or the relevant vendor. Used for confirmation screen. |
-| `POST` | `/api/activity-bookings/[id]/cancel` | User | Cancel a booking. Validates cancellable state. Status → `cancelled`. |
+| `GET` | `/api/activity-bookings` | Authenticated (not guest) | Lists **only the current user’s bookings as a customer** (`user_id` = session), including when the caller is also vendor or admin. Query: optional `status` (`confirmed` \| `cancelled` \| `completed`), `limit` (default 20, max 100), `offset`. Response: JSON array of **`activity_bookings` rows** (no embedded slot/activity/order joins in MVP). |
+| `GET` | `/api/activity-bookings/[id]` | Authenticated (not guest) | Single booking. **RLS** allows the booking owner, the activity’s vendor owner, or site admin. Response: one **`activity_bookings` row**. |
+| `POST` | `/api/activity-bookings/[id]/cancel` | Authenticated (not guest) | Cancels via `cancel_activity_booking` RPC (`confirmed` → `cancelled` for caller’s own row). Success: `{ ok: true }`. Bundled DB error (not found / not owned / not cancellable) → **400**. |
 
 **Creation path:** New bookings are **not** created via a public `POST /api/activity-bookings` in the MVP flow. They are created from the **Stripe webhook** after payment (ADR-M4-B), optionally preceded by a **“Book now”** UX that adds a line to the cart or starts checkout. **RLS enforces this:** `authenticated` has **no** `INSERT` on `activity_bookings`; the webhook uses the **service role**. **Admin/support** creation (if ever needed) uses a site-admin session (`FOR ALL` policy) or the same privileged server client — not the anon/publishable user role.
 
@@ -236,15 +236,17 @@ Cart, `orders`, and Checkout Session creation are defined in **[ADR-M4-B](./ADR-
 
 | Method | Route | Auth | Description |
 |--------|-------|------|-------------|
-| `GET` | `/api/vendor/activity-bookings` | Vendor | All activity bookings across the vendor's activities. Supports filtering by `status` and date range. RLS scopes automatically. |
-| `GET` | `/api/vendor/activity-bookings/[id]` | Vendor | Single booking detail from the vendor's perspective — customer info, slot, participants, payment status. |
+| `GET` | `/api/vendor/activity-bookings` | **`vendor` role only** (`getUserRole`); 403 if not linked to a vendor | Bookings for the caller’s vendor (`vendor_id`). Query: optional `status`, `activityId`, `orderId`, `limit`, `offset` (same pagination rules as consumer list). Response: JSON array of **`activity_bookings` rows**. **Date range** filtering (ADR aspirational) is **not** implemented yet. |
+| `GET` | `/api/vendor/activity-bookings/[id]` | **`vendor` role only** | Same **`activity_bookings` row** shape as the consumer detail route; RLS ensures the booking belongs to the vendor. Admins use the admin routes below. |
 
 ### Admin
 
 | Method | Route | Auth | Description |
 |--------|-------|------|-------------|
-| `GET` | `/api/admin/activity-bookings` | Admin | All activity bookings across all vendors. For support and dispute resolution. |
-| `PATCH` | `/api/admin/activity-bookings/[id]` | Admin | Manual status transition. Primary use: moving a booking to `completed` after the activity executes, which flags it as payout-eligible. |
+| `GET` | `/api/admin/activity-bookings` | Admin | Lists bookings with optional filters: `userId`, `vendorId`, `activityId`, `slotId`, `orderId`, `status`, plus `limit` / `offset`. Response: JSON array of **`activity_bookings` rows**. |
+| `PATCH` | `/api/admin/activity-bookings/[id]` | Admin | **MVP body must be exactly** `{ "status": "completed" }` (marks payout-eligible / completed). Other transitions can be documented when added. |
+
+**MVP vs richer UI:** The ADR originally mentioned joins (slot, activity, order) and extra vendor display fields. The implemented API returns **table rows only**; the UI can fetch related entities separately. Optional **date range** filters for vendor list can be added later (e.g. filter by slot `starts_at` or booking `created_at`).
 
 ---
 
@@ -270,12 +272,13 @@ Order migrations before `activity_bookings` if the booking table references `ord
 ### Service Layer
 
 ```
-src/lib/activity-bookings/
-  service.ts         — createBookingsFromPaidOrder (webhook), cancelBooking, listUserBookings, getBooking
-  types.ts           — ActivityBookingDisplay, ActivityBookingStatus
-  constants.ts       — ACTIVITY_BOOKING_STATUS enum, PLATFORM_COMMISSION_RATE
+lib/activity-bookings/
+  service.ts         — listActivityBookings, getActivityBookingById, cancelActivityBooking, setActivityBookingCompleted, createActivityBookingAfterPayment (webhook / service role)
+  constants.ts       — ACTIVITY_BOOKING_STATUSES, ActivityBookingStatus
+  route-utils.ts     — shared parsing for booking API routes (UUID, limit/offset, status query param)
+  service.test.ts    — Vitest
 
-src/lib/slots/
+lib/slots/
   service.ts         — createSlot, listPublicSlots, listVendorSlots, updateSlot, cancelSlot
   types.ts           — SlotDisplay, CreateSlotInput
 
