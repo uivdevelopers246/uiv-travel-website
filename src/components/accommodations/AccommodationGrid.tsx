@@ -18,6 +18,7 @@ export function AccommodationGrid({ accommodations, showFilters = true, showHead
     priceRange: "all",
     maxGuests: 10,
   });
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   const filtered = useMemo(() => {
     return accommodations.filter(accommodation => {
@@ -73,7 +74,38 @@ export function AccommodationGrid({ accommodations, showFilters = true, showHead
       )}
 
       {showFilters && (
-        <AccommodationFilters filters={filters} onChange={setFilters} />
+        <div>
+          <button
+            type="button"
+            onClick={() => setMobileFiltersOpen(open => !open)}
+            className="mb-8 flex w-full items-center justify-between rounded-full border border-[#d8e5f2] bg-white px-5 py-3 text-left text-sm font-semibold text-[#193059] shadow-[0_10px_30px_rgba(25,48,89,0.08)] transition-colors hover:border-[#407FC2] md:hidden"
+            style={{ fontFamily: "var(--font-source-sans)" }}
+            aria-expanded={mobileFiltersOpen}
+            aria-controls="accommodation-filters-panel"
+          >
+            <span>{mobileFiltersOpen ? "Hide filters" : "Show filters"}</span>
+            <svg
+              className={`h-4 w-4 transition-transform ${mobileFiltersOpen ? "rotate-180" : ""}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.8}
+                d="m6 9 6 6 6-6"
+              />
+            </svg>
+          </button>
+
+          <div
+            id="accommodation-filters-panel"
+            className={mobileFiltersOpen ? "block md:block" : "hidden md:block"}
+          >
+            <AccommodationFilters filters={filters} onChange={setFilters} />
+          </div>
+        </div>
       )}
 
       {/* Count */}

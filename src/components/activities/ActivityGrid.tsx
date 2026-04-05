@@ -18,6 +18,7 @@ export function ActivityGrid({ activities, showFilters = true, showHeader = true
     duration: "all",
     maxGroupSize: 25,
   });
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   const filtered = useMemo(() => {
     return activities.filter(activity => {
@@ -71,7 +72,38 @@ export function ActivityGrid({ activities, showFilters = true, showHeader = true
       )}
 
       {showFilters && (
-        <ActivityFilters filters={filters} onChange={setFilters} />
+        <div>
+          <button
+            type="button"
+            onClick={() => setMobileFiltersOpen(open => !open)}
+            className="mb-8 flex w-full items-center justify-between rounded-full border border-[#d8e5f2] bg-white px-5 py-3 text-left text-sm font-semibold text-[#193059] shadow-[0_10px_30px_rgba(25,48,89,0.08)] transition-colors hover:border-[#407FC2] md:hidden"
+            style={{ fontFamily: "var(--font-source-sans)" }}
+            aria-expanded={mobileFiltersOpen}
+            aria-controls="activity-filters-panel"
+          >
+            <span>{mobileFiltersOpen ? "Hide filters" : "Show filters"}</span>
+            <svg
+              className={`h-4 w-4 transition-transform ${mobileFiltersOpen ? "rotate-180" : ""}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.8}
+                d="m6 9 6 6 6-6"
+              />
+            </svg>
+          </button>
+
+          <div
+            id="activity-filters-panel"
+            className={mobileFiltersOpen ? "block md:block" : "hidden md:block"}
+          >
+            <ActivityFilters filters={filters} onChange={setFilters} />
+          </div>
+        </div>
       )}
 
       {/* Count */}

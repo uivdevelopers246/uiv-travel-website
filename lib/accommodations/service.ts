@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/supabase/types/database";
-import { hasValidCoordinates } from "@/lib/activities/service";
+import { applyLocationPointUpdate, setLocationPointIfValid } from "@/lib/listings/service-helpers";
+import { getCurrentUserIdOrThrow, getOwnedVendorIdOrThrow } from "@/lib/vendors/ownership";
 
 export type AccommodationStatus = "draft" | "published" | "archived";
 
@@ -154,72 +155,36 @@ async function applyAccommodationLocationPoint(
   accommodationId: string,
   input: Pick<UpdateAccommodationInput, "latitude" | "longitude">,
 ) {
-  const latPresent = input.latitude !== undefined;
-  const lngPresent = input.longitude !== undefined;
-
-  if (!latPresent && !lngPresent) return;
-
-  if (latPresent !== lngPresent) {
-    throw new Error(
-      "Provide both latitude and longitude, or both null to clear the location point.",
-    );
-  }
-
-  if (input.latitude === null && input.longitude === null) {
-    const { error: rpcError } = await supabase.rpc("set_accommodation_location_point", {
-      p_accommodation_id: accommodationId,
-    });
-    if (rpcError) throw new Error(rpcError.message);
-  } else if (hasValidCoordinates(input.latitude, input.longitude)) {
-    const { error: rpcError } = await supabase.rpc("set_accommodation_location_point", {
-      p_accommodation_id: accommodationId,
-      p_lng: input.longitude as number,
-      p_lat: input.latitude as number,
-    });
-    if (rpcError) throw new Error(rpcError.message);
-  } else {
-    throw new Error(
-      "Provide both latitude and longitude, or both null to clear the location point.",
-    );
-  }
+  await applyLocationPointUpdate(supabase, {
+    entityId: accommodationId,
+    entityParamName: "p_accommodation_id",
+    latitude: input.latitude,
+    longitude: input.longitude,
+    rpcName: "set_accommodation_location_point",
+  });
 }
 
 export async function createAccommodation(
   supabase: SupabaseClient<Database>,
   input: CreateAccommodationInput,
 ) {
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData.user) {
-    throw new Error("Unauthorized");
-  }
-
-  const { data: vendor, error: vendorError } = await supabase
-    .from("vendors")
-    .select("id")
-    .eq("owner_user_id", userData.user.id)
-    .maybeSingle();
-
-  if (vendorError) throw new Error(vendorError.message);
-  if (!vendor) {
-    throw new Error("User is not associated with a vendor");
-  }
+  const vendorId = await getOwnedVendorIdOrThrow(supabase);
 
   const { data, error } = await supabase
     .from("accommodations")
-    .insert(buildCreateInsert(vendor.id, input))
+    .insert(buildCreateInsert(vendorId, input))
     .select("*")
     .single();
 
   if (error) throw new Error(error.message);
 
-  if (hasValidCoordinates(input.latitude, input.longitude)) {
-    const { error: rpcError } = await supabase.rpc("set_accommodation_location_point", {
-      p_accommodation_id: data.id,
-      p_lng: input.longitude as number,
-      p_lat: input.latitude as number,
-    });
-    if (rpcError) throw new Error(rpcError.message);
-  }
+  await setLocationPointIfValid(supabase, {
+    entityId: data.id,
+    entityParamName: "p_accommodation_id",
+    latitude: input.latitude,
+    longitude: input.longitude,
+    rpcName: "set_accommodation_location_point",
+  });
 
   const { data: accommodation, error: refetchError } = await supabase
     .from("accommodations")
@@ -269,8 +234,7 @@ export async function updateAccommodation(
   input: UpdateAccommodationInput,
   options?: { isAdmin?: boolean },
 ) {
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData.user) throw new Error("Unauthorized");
+  const userId = await getCurrentUserIdOrThrow(supabase);
 
   const payload: Record<string, unknown> = {};
   if (input.name !== undefined) payload.name = (input.name as string).trim();
@@ -327,20 +291,13 @@ export async function updateAccommodation(
     return accommodation as Accommodation;
   }
 
-  const { data: vendor, error: vendorError } = await supabase
-    .from("vendors")
-    .select("id")
-    .eq("owner_user_id", userData.user.id)
-    .maybeSingle();
-
-  if (vendorError) throw new Error(vendorError.message);
-  if (!vendor) throw new Error("User is not associated with a vendor");
+  const vendorId = await getOwnedVendorIdOrThrow(supabase, userId);
 
   const { data, error } = await supabase
     .from("accommodations")
     .update(payload)
     .eq("id", accommodationId)
-    .eq("vendor_id", vendor.id)
+    .eq("vendor_id", vendorId)
     .select("*")
     .single();
 
@@ -362,8 +319,7 @@ export async function deleteAccommodation(
   accommodationId: string,
   options?: { isAdmin?: boolean },
 ) {
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData.user) throw new Error("Unauthorized");
+  const userId = await getCurrentUserIdOrThrow(supabase);
 
   if (options?.isAdmin) {
     const { data, error } = await supabase
@@ -377,20 +333,13 @@ export async function deleteAccommodation(
     return data as Accommodation;
   }
 
-  const { data: vendor, error: vendorError } = await supabase
-    .from("vendors")
-    .select("id")
-    .eq("owner_user_id", userData.user.id)
-    .maybeSingle();
-
-  if (vendorError) throw new Error(vendorError.message);
-  if (!vendor) throw new Error("User is not associated with a vendor");
+  const vendorId = await getOwnedVendorIdOrThrow(supabase, userId);
 
   const { data, error } = await supabase
     .from("accommodations")
     .delete()
     .eq("id", accommodationId)
-    .eq("vendor_id", vendor.id)
+    .eq("vendor_id", vendorId)
     .select("*")
     .single();
 

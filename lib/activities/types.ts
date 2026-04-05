@@ -13,6 +13,16 @@ import type { activityCategories } from "./constants";
 export type ActivityCategoryValue = (typeof activityCategories)[number]["value"];
 
 /**
+ * Activity image type for gallery display.
+ */
+export type ActivityImage = {
+  id: string;
+  image_url: string;
+  alt_text: string | null;
+  display_order: number;
+};
+
+/**
  * UI-friendly activity type for frontend components.
  * Used for display purposes with optional vendor relationship.
  */
@@ -21,6 +31,8 @@ export type ActivityDisplay = {
   title: string;
   description: string | null;
   location: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   category: string;
   duration_hours: number | null;
   price_per_person: number | null;
@@ -28,3 +40,21 @@ export type ActivityDisplay = {
   image_url: string | null;
   vendors?: { name: string | null } | null;
 };
+
+/**
+ * Extended activity type with full details for detail pages.
+ */
+export type ActivityDetail = ActivityDisplay & {
+  rating: number | null;
+  is_featured: boolean;
+  images?: ActivityImage[];
+  vendors?: {
+    id: string;
+    name: string | null;
+    contact_email: string | null;
+    business_phone: string | null;
+  } | null;
+};
+
+/** Maximum number of images allowed per activity */
+export const MAX_ACTIVITY_IMAGES = 20;

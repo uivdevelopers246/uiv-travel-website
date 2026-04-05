@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/supabase/types/database";
+import { getCurrentUserIdOrThrow, getOwnedVendorIdOrThrow } from "@/lib/vendors/ownership";
 
 export type Vendor = Database["public"]["Tables"]["vendors"]["Row"];
 
@@ -52,17 +53,8 @@ export async function updateVendorProfile(
   supabase: SupabaseClient<Database>,
   input: UpdateVendorProfileInput,
 ) {
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData.user) throw new Error("Unauthorized");
-
-  const { data: vendor, error: vendorError } = await supabase
-    .from("vendors")
-    .select("id")
-    .eq("owner_user_id", userData.user.id)
-    .maybeSingle();
-
-  if (vendorError) throw new Error(vendorError.message);
-  if (!vendor) throw new Error("User is not associated with a vendor");
+  const userId = await getCurrentUserIdOrThrow(supabase);
+  const vendorId = await getOwnedVendorIdOrThrow(supabase, userId);
 
   const payload: Database["public"]["Tables"]["vendors"]["Update"] = {};
   if (input.name !== undefined) payload.name = input.name.trim();
@@ -83,7 +75,7 @@ export async function updateVendorProfile(
   const { data, error } = await supabase
     .from("vendors")
     .update(payload)
-    .eq("id", vendor.id)
+    .eq("id", vendorId)
     .select("*")
     .single();
 
