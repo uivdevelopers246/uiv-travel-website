@@ -31,6 +31,8 @@ export type ActivityDisplay = {
   title: string;
   description: string | null;
   location: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   category: string;
   duration_hours: number | null;
   price_per_person: number | null;

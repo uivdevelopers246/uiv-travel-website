@@ -4,18 +4,21 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { activityCategories } from "@/lib/activities/constants";
+import { applyCoordinatesToPayload } from "@/lib/utils/geo";
 import {
   DEFAULT_IMAGE_FALLBACK,
   getSafeImageUrl,
   validateImageFile,
 } from "@/lib/utils/image";
-import { ImageManager, type ManagedImage } from "@/components/shared";
+import { ImageManager, LocationPickerMap, type ManagedImage } from "@/components/shared";
 import { MAX_ACTIVITY_IMAGES } from "@/lib/activities/types";
 
 type ActivityFormData = {
   title: string;
   description: string | null;
   location: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   category: string;
   duration_hours: number | null;
   price_per_person: number | null;
@@ -54,10 +57,13 @@ export function ActivityFormClient({
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [galleryImages, setGalleryImages] = useState<ManagedImage[]>(existingImages);
+  const [coordinatesTouched, setCoordinatesTouched] = useState(false);
   const [form, setForm] = useState({
     title: initial.title ?? "",
     description: initial.description ?? "",
     location: initial.location ?? "",
+    latitude: initial.latitude?.toString() ?? "",
+    longitude: initial.longitude?.toString() ?? "",
     category: initial.category ?? activityCategories[0]?.value ?? "water-sports",
     duration_hours: initial.duration_hours?.toString() ?? "",
     price_per_person: initial.price_per_person?.toString() ?? "",
@@ -69,6 +75,11 @@ export function ActivityFormClient({
 
   const updateField = (field: keyof typeof form, value: string) => {
     setForm(prev => ({ ...prev, [field]: value }));
+  };
+
+  const updateCoordinates = (value: { latitude: string; longitude: string }) => {
+    setCoordinatesTouched(true);
+    setForm(prev => ({ ...prev, ...value }));
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -129,12 +140,34 @@ export function ActivityFormClient({
       price_per_person: form.price_per_person ? Number(form.price_per_person) : null,
       max_capacity: form.max_capacity ? Number(form.max_capacity) : null,
       image_url: imageUrl,
+      status: "published",
+    } as {
+      title: string;
+      description: string | null;
+      location: string | null;
+      category: string;
+      duration_hours: number | null;
+      price_per_person: number | null;
+      max_capacity: number | null;
+      image_url: string | null;
+      status: string;
+      latitude?: number | null;
+      longitude?: number | null;
     };
 
     if (!payload.title) {
       setMessage({ type: "error", text: "Title is required." });
       setSaving(false);
       return;
+    }
+
+    if (coordinatesTouched) {
+      const coordError = applyCoordinatesToPayload(form.latitude, form.longitude, payload);
+      if (coordError) {
+        setMessage({ type: "error", text: coordError });
+        setSaving(false);
+        return;
+      }
     }
 
     try {
@@ -292,6 +325,21 @@ export function ActivityFormClient({
               </div>
             </section>
 
+            <LocationPickerMap
+              title="Map Pin"
+              description="Set the exact activity coordinates that should appear on the public Barbados map. Search by place or move the pin to fine-tune it."
+              value={{
+                latitude: form.latitude,
+                longitude: form.longitude,
+              }}
+              onChange={updateCoordinates}
+              onClear={() => updateCoordinates({ latitude: "", longitude: "" })}
+              searchValue={form.location}
+              onSearchValueChange={value => updateField("location", value)}
+              onResolvedSearchValue={value => updateField("location", value)}
+              searchLabel="Approximate address or area"
+            />
+
             {/* Pricing & Capacity */}
             <section>
               <h2 className="text-lg font-semibold text-slate-900 mb-4 pb-2 border-b">
@@ -380,15 +428,14 @@ export function ActivityFormClient({
               </div>
             </section>
 
-            {/* Gallery Images - Only show for edit mode */}
-            {isEdit && activityId && (
-              <section>
-                <h2 className="text-lg font-semibold text-slate-900 mb-4 pb-2 border-b">
-                  Gallery Images
-                </h2>
-                <p className="text-sm text-slate-600 mb-4">
-                  Add additional photos to showcase your activity. These appear in the detail page gallery.
-                </p>
+            <section>
+              <h2 className="text-lg font-semibold text-slate-900 mb-4 pb-2 border-b">
+                Gallery Images
+              </h2>
+              <p className="text-sm text-slate-600 mb-4">
+                Add additional photos to showcase your activity. These appear in the detail page gallery.
+              </p>
+              {isEdit && activityId ? (
                 <ImageManager
                   images={galleryImages}
                   maxImages={MAX_ACTIVITY_IMAGES}
@@ -399,16 +446,12 @@ export function ActivityFormClient({
                   onError={(error) => setMessage({ type: "error", text: error })}
                   label="Gallery Images"
                 />
-              </section>
-            )}
-
-            {!isEdit && (
-              <div className="p-4 bg-blue-50 rounded-lg">
-                <p className="text-sm text-blue-700">
-                  <strong>Note:</strong> After creating the activity, you&apos;ll be able to add gallery images from the edit page.
-                </p>
-              </div>
-            )}
+              ) : (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-600">
+                  Save the activity once to enable gallery image uploads.
+                </div>
+              )}
+            </section>
 
             {/* Messages */}
             {message && (

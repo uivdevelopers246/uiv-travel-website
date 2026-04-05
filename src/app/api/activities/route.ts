@@ -106,6 +106,7 @@ export async function POST(req: Request) {
       price_per_person: body.price_per_person ?? null,
       max_capacity: body.max_capacity ?? null,
       image_url: normalizeOptionalImageUrl(body.image_url) ?? null,
+      status: "published",
     } as Parameters<typeof createActivity>[1];
 
     if (

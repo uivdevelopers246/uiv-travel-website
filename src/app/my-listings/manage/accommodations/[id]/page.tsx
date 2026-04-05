@@ -51,10 +51,10 @@ export default async function ManageAccommodationEditPage({ params }: PageProps)
     );
   }
 
-  let accommodationQuery = supabase
+  let accommodationQuery = (supabase as any)
     .from("accommodations")
     .select(
-      "id, vendor_id, name, accommodation_type, bedroom_count, bed_count, bathroom_count, max_guest_capacity, price_min_usd, price_max_usd, check_in_time, check_out_time, suitable_for_children, wheelchair_accessible, smoking_allowed, pets_allowed, beach_access_or_view, transportation_provided, amenities, address, parish, transportation_notes, pickup_notes, image_url, status",
+      "id, vendor_id, name, accommodation_type, latitude, longitude, bedroom_count, bed_count, bathroom_count, max_guest_capacity, price_min_usd, price_max_usd, check_in_time, check_out_time, suitable_for_children, wheelchair_accessible, smoking_allowed, pets_allowed, beach_access_or_view, transportation_provided, amenities, address, parish, transportation_notes, pickup_notes, image_url, status",
     )
     .eq("id", resolvedParams.id);
 
@@ -97,6 +97,8 @@ export default async function ManageAccommodationEditPage({ params }: PageProps)
         initial={{
           name: accommodation.name,
           accommodation_type: accommodation.accommodation_type,
+          latitude: accommodation.latitude,
+          longitude: accommodation.longitude,
           bedroom_count: accommodation.bedroom_count,
           bed_count: accommodation.bed_count,
           bathroom_count: accommodation.bathroom_count,

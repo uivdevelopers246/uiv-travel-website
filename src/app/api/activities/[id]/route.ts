@@ -176,6 +176,8 @@ export async function PATCH(
     return badRequest("No updates provided");
   }
 
+  updates.status = "published";
+
   try {
     const isAdmin = role === "admin";
     const data = await updateActivity(supabase, id, updates, { isAdmin });

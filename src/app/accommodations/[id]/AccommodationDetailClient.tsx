@@ -11,15 +11,19 @@ import {
   BedIcon,
   UsersIcon,
   LocationIcon,
+  ListingMap,
   CheckIcon,
   XIcon,
   type GalleryImage,
 } from "@/components/shared";
+import { hasValidCoordinates } from "@/lib/utils/geo";
 
 type Accommodation = {
   id: string;
   name: string;
   accommodation_type: string;
+  latitude?: number | null;
+  longitude?: number | null;
   bedroom_count: number | null;
   bed_count: number | null;
   bathroom_count: number | null;
@@ -245,6 +249,34 @@ export function AccommodationDetailClient({ accommodation, images }: Props) {
           </div>
         </div>
       </section>
+
+      {hasValidCoordinates(accommodation.latitude, accommodation.longitude) && (
+        <section className="bg-white pb-12">
+          <div className="container mx-auto max-w-7xl px-4">
+            <ListingMap
+              title="Stay Map"
+              description="This accommodation has a saved map pin so guests can preview where the stay is located before booking."
+              markers={[
+                {
+                  id: accommodation.id,
+                  kind: "accommodation",
+                  title: accommodation.name,
+                  href: `/accommodations/${accommodation.id}`,
+                  latitude: accommodation.latitude as number,
+                  longitude: accommodation.longitude as number,
+                  imageUrl: accommodation.image_url,
+                  locationLabel:
+                    [accommodation.address, accommodation.parish].filter(Boolean).join(", ") ||
+                    null,
+                  detailLine: `${typeLabel}${accommodation.price_min_usd != null ? ` | ${formatPrice()}/night` : ""}`,
+                  badge: typeLabel,
+                },
+              ]}
+              emptyMessage="This accommodation does not have a saved map location yet."
+            />
+          </div>
+        </section>
+      )}
     </>
   );
 }

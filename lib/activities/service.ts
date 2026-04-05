@@ -36,6 +36,7 @@ export type CreateActivityInput = {
     price_per_person?: number | null;
     max_capacity?: number | null;
     image_url?: string | null;
+    status?: ActivityStatus;
 };
 
 export type UpdateActivityInput = Partial<
@@ -84,6 +85,7 @@ export async function createActivity(
             price_per_person: input.price_per_person,
             max_capacity: input.max_capacity,
             image_url: input.image_url,
+            status: input.status ?? "published",
         })
         .select("*") 
         .single();

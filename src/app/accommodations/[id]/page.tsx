@@ -20,13 +20,15 @@ export default async function AccommodationDetailPage({ params }: Props) {
   const supabase = await createClient();
 
   // Fetch accommodation with vendor info
-  const { data: accommodation, error } = await supabase
+  const { data: accommodation, error } = await (supabase as any)
     .from("accommodations")
     .select(
       `
       id,
       name,
       accommodation_type,
+      latitude,
+      longitude,
       bedroom_count,
       bed_count,
       bathroom_count,
@@ -77,7 +79,7 @@ export default async function AccommodationDetailPage({ params }: Props) {
     <>
       <Header />
       <AccommodationDetailClient 
-        accommodation={accommodation} 
+        accommodation={accommodation as any} 
         images={images} 
       />
     </>

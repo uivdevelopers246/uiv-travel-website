@@ -20,7 +20,7 @@ export default async function ActivityDetailPage({ params }: Props) {
   const supabase = await createClient();
 
   // Fetch activity with vendor info
-  const { data: activity, error } = await supabase
+  const { data: activity, error } = await (supabase as any)
     .from("activities")
     .select(
       `
@@ -28,6 +28,8 @@ export default async function ActivityDetailPage({ params }: Props) {
       title,
       description,
       location,
+      latitude,
+      longitude,
       category,
       duration_hours,
       price_per_person,
@@ -64,7 +66,7 @@ export default async function ActivityDetailPage({ params }: Props) {
     <>
       <Header />
       <ActivityDetailClient 
-        activity={activity} 
+        activity={activity as any} 
         images={images ?? []} 
       />
     </>

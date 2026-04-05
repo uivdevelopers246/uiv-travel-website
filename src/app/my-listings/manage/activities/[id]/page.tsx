@@ -51,10 +51,11 @@ export default async function ManageActivityEditPage({ params }: PageProps) {
     );
   }
 
-  let activityQuery = supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let activityQuery = (supabase as any)
     .from("activities")
     .select(
-      "id, vendor_id, title, description, location, category, duration_hours, price_per_person, max_capacity, image_url",
+      "id, vendor_id, title, description, location, latitude, longitude, category, duration_hours, price_per_person, max_capacity, image_url, status",
     )
     .eq("id", resolvedParams.id);
 
@@ -98,6 +99,8 @@ export default async function ManageActivityEditPage({ params }: PageProps) {
           title: activity.title,
           description: activity.description,
           location: activity.location,
+          latitude: activity.latitude,
+          longitude: activity.longitude,
           category: activity.category,
           duration_hours: activity.duration_hours,
           price_per_person: activity.price_per_person,

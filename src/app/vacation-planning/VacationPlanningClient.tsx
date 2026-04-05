@@ -2,20 +2,37 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { startTransition, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityGrid } from "@/components/activities";
 import { AccommodationGrid } from "@/components/accommodations";
+import { ListingMap, type ListingMapMarker } from "@/components/shared";
+import { getMapboxToken } from "@/components/shared/mapbox";
 import { activityCategories } from "@/lib/activities/constants";
 import type { ActivityDisplay } from "@/lib/activities/types";
-import { accommodationTypes, amenityOptions } from "@/lib/accommodations/constants";
+import { accommodationTypes } from "@/lib/accommodations/constants";
 import type { AccommodationDisplay } from "@/lib/accommodations/types";
+import { hasValidCoordinates } from "@/lib/utils/geo";
 import { DEFAULT_IMAGE_FALLBACK, getSafeImageUrl } from "@/lib/utils/image";
 
 type ActiveTab = "activities" | "accommodations";
+type MapView = ActiveTab | "all";
 
 type Props = {
   activities: ActivityDisplay[];
   accommodations: AccommodationDisplay[];
+};
+
+type ResolvedCoordinates = {
+  latitude: number;
+  longitude: number;
+};
+
+type MapboxGeocodeResponse = {
+  features?: Array<{
+    geometry?: {
+      coordinates?: [number, number];
+    };
+  }>;
 };
 
 const categoryLabelMap = Object.fromEntries(
@@ -24,10 +41,6 @@ const categoryLabelMap = Object.fromEntries(
 
 const accommodationTypeLabelMap = Object.fromEntries(
   accommodationTypes.map(type => [type.value, type.label]),
-);
-
-const amenityLabelMap = Object.fromEntries(
-  amenityOptions.map(amenity => [amenity.value, amenity.label]),
 );
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
@@ -155,89 +168,88 @@ function BrowseButton({
   );
 }
 
-function FeatureCard({
-  eyebrow,
-  title,
-  description,
-  pills,
-  ctaLabel,
-  onClick,
-  tone = "light",
-}: {
-  eyebrow: string;
-  title: string;
-  description: string;
-  pills: string[];
-  ctaLabel: string;
-  onClick: () => void;
-  tone?: "light" | "dark";
-}) {
-  const isDark = tone === "dark";
-
-  return (
-    <article
-      className={`rounded-[32px] border p-6 shadow-[0_18px_60px_rgba(25,48,89,0.08)] md:p-7 ${
-        isDark
-          ? "border-[#193059] bg-[#193059] text-white"
-          : "border-[#d8e5f2] bg-white text-[#193059]"
-      }`}
-    >
-      <p
-        className={`text-xs font-semibold uppercase tracking-[0.28em] ${
-          isDark ? "text-[#FBCA1A]" : "text-[#407FC2]"
-        }`}
-        style={{ fontFamily: "var(--font-source-sans)" }}
-      >
-        {eyebrow}
-      </p>
-      <h3
-        className="mt-3 text-2xl font-bold md:text-3xl"
-        style={{ fontFamily: "var(--font-playfair)" }}
-      >
-        {title}
-      </h3>
-      <p
-        className={`mt-4 text-base leading-7 ${
-          isDark ? "text-white/80" : "text-slate-600"
-        }`}
-        style={{ fontFamily: "var(--font-source-sans)" }}
-      >
-        {description}
-      </p>
-      <div className="mt-6 flex flex-wrap gap-2">
-        {pills.map(pill => (
-          <span
-            key={pill}
-            className={`rounded-full px-3 py-2 text-sm font-medium ${
-              isDark ? "bg-white/10 text-white" : "bg-[#eef5fb] text-[#193059]"
-            }`}
-          >
-            {pill}
-          </span>
-        ))}
-      </div>
-      <button
-        type="button"
-        onClick={onClick}
-        className={`mt-7 inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold transition-colors ${
-          isDark
-            ? "bg-white text-[#193059] hover:bg-[#FBCA1A]"
-            : "bg-[#193059] text-white hover:bg-[#407FC2]"
-        }`}
-        style={{ fontFamily: "var(--font-source-sans)" }}
-      >
-        {ctaLabel}
-        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M5 12h14m-6-6 6 6-6 6" />
-        </svg>
-      </button>
-    </article>
-  );
-}
-
 export function VacationPlanningClient({ activities, accommodations }: Props) {
   const [activeTab, setActiveTab] = useState<ActiveTab>("accommodations");
+  const [mapView, setMapView] = useState<MapView>("all");
+  const [activityFallbackCoordinates, setActivityFallbackCoordinates] = useState<
+    Record<string, ResolvedCoordinates>
+  >({});
   const browseSectionRef = useRef<HTMLElement | null>(null);
+  const mapboxToken = getMapboxToken();
+
+  useEffect(() => {
+    if (!mapboxToken) {
+      return;
+    }
+
+    const activitiesNeedingFallback = activities.filter(
+      activity =>
+        !hasValidCoordinates(activity.latitude, activity.longitude) &&
+        Boolean(activity.location?.trim()),
+    );
+
+    if (activitiesNeedingFallback.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void Promise.all(
+      activitiesNeedingFallback.map(async activity => {
+        try {
+          const searchUrl = new URL("https://api.mapbox.com/search/geocode/v6/forward");
+          searchUrl.searchParams.set("q", activity.location!.trim());
+          searchUrl.searchParams.set("access_token", mapboxToken);
+          searchUrl.searchParams.set("country", "BB");
+          searchUrl.searchParams.set("limit", "1");
+          searchUrl.searchParams.set("language", "en");
+
+          const response = await fetch(searchUrl.toString());
+          if (!response.ok) {
+            return null;
+          }
+
+          const data = (await response.json()) as MapboxGeocodeResponse;
+          const coordinates = data.features?.[0]?.geometry?.coordinates;
+
+          if (!coordinates) {
+            return null;
+          }
+
+          return {
+            id: activity.id,
+            latitude: coordinates[1],
+            longitude: coordinates[0],
+          };
+        } catch {
+          return null;
+        }
+      }),
+    ).then(results => {
+      if (cancelled) {
+        return;
+      }
+
+      const nextCoordinates: Record<string, ResolvedCoordinates> = {};
+
+      results.forEach(result => {
+        if (!result) {
+          return;
+        }
+
+        nextCoordinates[result.id] = {
+          latitude: result.latitude,
+          longitude: result.longitude,
+        };
+      });
+
+      setActivityFallbackCoordinates(nextCoordinates);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activities, mapboxToken]);
 
   const featuredActivity = activities[0] ?? null;
   const featuredAccommodation =
@@ -271,15 +283,6 @@ export function VacationPlanningClient({ activities, accommodations }: Props) {
     [accommodations],
   );
 
-  const topAmenities = useMemo(
-    () =>
-      summarizeValues(
-        accommodations.flatMap(accommodation => accommodation.amenities ?? []),
-        amenityLabelMap,
-      ),
-    [accommodations],
-  );
-
   const heroImage = getSafeImageUrl(
     featuredAccommodation?.image_url ??
       featuredActivity?.image_url ??
@@ -290,6 +293,7 @@ export function VacationPlanningClient({ activities, accommodations }: Props) {
   const scrollToBrowse = (tab: ActiveTab) => {
     startTransition(() => {
       setActiveTab(tab);
+      setMapView(tab);
     });
 
     requestAnimationFrame(() => {
@@ -304,6 +308,92 @@ export function VacationPlanningClient({ activities, accommodations }: Props) {
     activeTab === "accommodations"
       ? "Browse accommodations below with the existing filters and listing cards."
       : "Browse activities below with the existing filters and listing cards.";
+
+  const activityMapMarkers = useMemo<ListingMapMarker[]>(
+    () =>
+      activities
+        .filter(activity => {
+          const fallbackCoordinates = activityFallbackCoordinates[activity.id];
+
+          return (
+            hasValidCoordinates(activity.latitude, activity.longitude) ||
+            Boolean(fallbackCoordinates)
+          );
+        })
+        .map(activity => {
+          const fallbackCoordinates = activityFallbackCoordinates[activity.id];
+          const latitude = hasValidCoordinates(activity.latitude, activity.longitude)
+            ? (activity.latitude as number)
+            : (fallbackCoordinates as ResolvedCoordinates).latitude;
+          const longitude = hasValidCoordinates(activity.latitude, activity.longitude)
+            ? (activity.longitude as number)
+            : (fallbackCoordinates as ResolvedCoordinates).longitude;
+
+          return {
+            id: activity.id,
+            kind: "activity",
+            title: activity.title,
+            href: `/activities/${activity.id}`,
+            latitude,
+            longitude,
+            imageUrl: activity.image_url,
+            locationLabel: activity.location,
+            detailLine: [
+              activity.category ? formatLabel(activity.category) : null,
+              activity.duration_hours != null ? `${activity.duration_hours} hrs` : null,
+              activity.price_per_person != null
+                ? formatPrice(activity.price_per_person, "per person")
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" | "),
+            badge: fallbackCoordinates ? "Approximate Activity" : "Activity",
+          };
+        }),
+    [activities, activityFallbackCoordinates],
+  );
+
+  const accommodationMapMarkers = useMemo<ListingMapMarker[]>(
+    () =>
+      accommodations
+        .filter(accommodation =>
+          hasValidCoordinates(accommodation.latitude, accommodation.longitude),
+        )
+        .map(accommodation => ({
+          id: accommodation.id,
+          kind: "accommodation",
+          title: accommodation.name,
+          href: `/accommodations/${accommodation.id}`,
+          latitude: accommodation.latitude as number,
+          longitude: accommodation.longitude as number,
+          imageUrl: accommodation.image_url,
+          locationLabel:
+            [accommodation.parish, accommodation.address].filter(Boolean).join(", ") || null,
+          detailLine: [
+            accommodation.accommodation_type
+              ? accommodationTypeLabelMap[accommodation.accommodation_type] ??
+                formatLabel(accommodation.accommodation_type)
+              : null,
+            accommodation.max_guest_capacity != null
+              ? `${accommodation.max_guest_capacity} guests`
+              : null,
+            accommodation.price_min_usd != null
+              ? formatPrice(accommodation.price_min_usd, "/night")
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" | "),
+          badge: "Accommodation",
+        })),
+    [accommodations],
+  );
+
+  const activeMapMarkers =
+    mapView === "all"
+      ? [...accommodationMapMarkers, ...activityMapMarkers]
+      : mapView === "accommodations"
+        ? accommodationMapMarkers
+        : activityMapMarkers;
 
   return (
     <div className="bg-[linear-gradient(180deg,#f7fbff_0%,#eef5fb_45%,#ffffff_100%)]">
@@ -590,23 +680,30 @@ export function VacationPlanningClient({ activities, accommodations }: Props) {
       </section>
 
       <section className="pb-14">
-        <div className="mx-auto grid max-w-7xl gap-6 px-4 lg:grid-cols-2 lg:px-8">
-          <FeatureCard
-            eyebrow="Accommodations"
-            title="Find a stay that fits the trip."
-            description="Browse villas, hotels, resorts, and guesthouses across Barbados and compare options by price, amenities, and location."
-            pills={topAmenities.length > 0 ? topAmenities : ["Pool", "Beach Access", "WiFi"]}
-            ctaLabel="Browse accommodations"
-            onClick={() => scrollToBrowse("accommodations")}
-          />
-          <FeatureCard
-            eyebrow="Activities"
-            title="Move from interest to itinerary faster."
-            description="Discover island experiences by category, budget, and vibe so you can build out the fun side of your trip."
-            pills={topCategories.length > 0 ? topCategories : ["Culture", "Nature", "Adventure"]}
-            ctaLabel="Browse activities"
-            onClick={() => scrollToBrowse("activities")}
-            tone="dark"
+        <div className="mx-auto max-w-7xl px-4 lg:px-8">
+          <ListingMap
+            title={
+              mapView === "all"
+                ? "Trip Map"
+                : mapView === "accommodations"
+                  ? "Stay Map"
+                  : "Activity Map"
+            }
+            description={
+              mapView === "all"
+                ? "Preview published accommodations and activities across Barbados, then jump into the listing you want to plan first."
+                : mapView === "accommodations"
+                ? "Preview published accommodations with saved coordinates across Barbados, then jump into the stay you want to compare."
+                : "Preview published activities with saved coordinates across Barbados, then jump into the experience you want to plan."
+            }
+            markers={activeMapMarkers}
+            emptyMessage={
+              mapView === "all"
+                ? "No published accommodations or activities have saved map locations yet."
+                : mapView === "accommodations"
+                ? "No accommodations have saved map coordinates yet."
+                : "No activities have saved map coordinates yet."
+            }
           />
         </div>
       </section>
@@ -641,7 +738,10 @@ export function VacationPlanningClient({ activities, accommodations }: Props) {
               <div className="grid gap-3 sm:grid-cols-2">
                 <button
                   type="button"
-                  onClick={() => setActiveTab("accommodations")}
+                  onClick={() => {
+                    setActiveTab("accommodations");
+                    setMapView("accommodations");
+                  }}
                   className={`rounded-full px-5 py-3 text-sm font-semibold transition-colors ${
                     activeTab === "accommodations"
                       ? "bg-[#193059] text-white"
@@ -653,7 +753,10 @@ export function VacationPlanningClient({ activities, accommodations }: Props) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveTab("activities")}
+                  onClick={() => {
+                    setActiveTab("activities");
+                    setMapView("activities");
+                  }}
                   className={`rounded-full px-5 py-3 text-sm font-semibold transition-colors ${
                     activeTab === "activities"
                       ? "bg-[#193059] text-white"

@@ -4,17 +4,20 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { accommodationTypes, amenityOptions } from "@/lib/accommodations/constants";
+import { applyCoordinatesToPayload } from "@/lib/utils/geo";
 import {
   DEFAULT_IMAGE_FALLBACK,
   getSafeImageUrl,
   validateImageFile,
 } from "@/lib/utils/image";
-import { ImageManager, type ManagedImage } from "@/components/shared";
+import { ImageManager, LocationPickerMap, type ManagedImage } from "@/components/shared";
 import { MAX_ACCOMMODATION_IMAGES } from "@/lib/accommodations/types";
 
 type AccommodationFormData = {
   name: string;
   accommodation_type: string;
+  latitude?: number | null;
+  longitude?: number | null;
   bedroom_count: number | null;
   bed_count: number | null;
   bathroom_count: number | null;
@@ -72,6 +75,49 @@ const defaultFormData: AccommodationFormData = {
   status: "draft",
 };
 
+function normalizeTimeInputValue(value: string | null | undefined) {
+  if (!value) return "";
+
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  const twentyFourHourMatch = trimmed.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (twentyFourHourMatch) {
+    const hours = Number(twentyFourHourMatch[1]);
+    const minutes = Number(twentyFourHourMatch[2]);
+
+    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+      return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`;
+    }
+
+    return "";
+  }
+
+  const meridiemMatch = trimmed.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i);
+  if (!meridiemMatch) {
+    return "";
+  }
+
+  const rawHours = Number(meridiemMatch[1]);
+  const minutes = Number(meridiemMatch[2] ?? "0");
+  const meridiem = meridiemMatch[3].toLowerCase();
+
+  if (rawHours < 1 || rawHours > 12 || minutes < 0 || minutes > 59) {
+    return "";
+  }
+
+  const hours =
+    meridiem === "pm"
+      ? rawHours === 12
+        ? 12
+        : rawHours + 12
+      : rawHours === 12
+        ? 0
+        : rawHours;
+
+  return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`;
+}
+
 export function AccommodationFormClient({
   mode,
   accommodationId,
@@ -84,17 +130,20 @@ export function AccommodationFormClient({
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [galleryImages, setGalleryImages] = useState<ManagedImage[]>(existingImages);
+  const [coordinatesTouched, setCoordinatesTouched] = useState(false);
   const [form, setForm] = useState({
     name: initial.name ?? "",
     accommodation_type: initial.accommodation_type ?? accommodationTypes[0]?.value ?? "hotel",
+    latitude: initial.latitude?.toString() ?? "",
+    longitude: initial.longitude?.toString() ?? "",
     bedroom_count: initial.bedroom_count?.toString() ?? "",
     bed_count: initial.bed_count?.toString() ?? "",
     bathroom_count: initial.bathroom_count?.toString() ?? "",
     max_guest_capacity: initial.max_guest_capacity?.toString() ?? "",
     price_min_usd: initial.price_min_usd?.toString() ?? "",
     price_max_usd: initial.price_max_usd?.toString() ?? "",
-    check_in_time: initial.check_in_time ?? "",
-    check_out_time: initial.check_out_time ?? "",
+    check_in_time: normalizeTimeInputValue(initial.check_in_time),
+    check_out_time: normalizeTimeInputValue(initial.check_out_time),
     suitable_for_children: initial.suitable_for_children ?? false,
     wheelchair_accessible: initial.wheelchair_accessible ?? false,
     smoking_allowed: initial.smoking_allowed ?? false,
@@ -114,6 +163,11 @@ export function AccommodationFormClient({
 
   const updateField = <K extends keyof typeof form>(field: K, value: typeof form[K]) => {
     setForm(prev => ({ ...prev, [field]: value }));
+  };
+
+  const updateCoordinates = (value: { latitude: string; longitude: string }) => {
+    setCoordinatesTouched(true);
+    setForm(prev => ({ ...prev, ...value }));
   };
 
   const toggleAmenity = (amenity: string) => {
@@ -198,12 +252,47 @@ export function AccommodationFormClient({
       pickup_notes: form.pickup_notes.trim() || null,
       image_url: imageUrl,
       status: form.status,
+    } as {
+      name: string;
+      accommodation_type: string;
+      bedroom_count: number | null;
+      bed_count: number | null;
+      bathroom_count: number | null;
+      max_guest_capacity: number | null;
+      price_min_usd: number | null;
+      price_max_usd: number | null;
+      check_in_time: string | null;
+      check_out_time: string | null;
+      suitable_for_children: boolean;
+      wheelchair_accessible: boolean;
+      smoking_allowed: boolean;
+      pets_allowed: boolean;
+      beach_access_or_view: boolean;
+      transportation_provided: boolean;
+      amenities: string[];
+      address: string | null;
+      parish: string | null;
+      transportation_notes: string | null;
+      pickup_notes: string | null;
+      image_url: string | null;
+      status: string;
+      latitude?: number | null;
+      longitude?: number | null;
     };
 
     if (!payload.name) {
       setMessage({ type: "error", text: "Name is required." });
       setSaving(false);
       return;
+    }
+
+    if (coordinatesTouched) {
+      const coordError = applyCoordinatesToPayload(form.latitude, form.longitude, payload);
+      if (coordError) {
+        setMessage({ type: "error", text: coordError });
+        setSaving(false);
+        return;
+      }
     }
 
     try {
@@ -368,6 +457,21 @@ export function AccommodationFormClient({
                 </div>
               </div>
             </section>
+
+            <LocationPickerMap
+              title="Map Pin"
+              description="Set the exact accommodation coordinates for the public map. Search by address or move the pin to fine-tune it."
+              value={{
+                latitude: form.latitude,
+                longitude: form.longitude,
+              }}
+              onChange={updateCoordinates}
+              onClear={() => updateCoordinates({ latitude: "", longitude: "" })}
+              searchValue={form.address}
+              onSearchValueChange={value => updateField("address", value)}
+              onResolvedSearchValue={value => updateField("address", value)}
+              searchLabel="Address"
+            />
 
             {/* Room Details */}
             <section>

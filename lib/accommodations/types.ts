@@ -31,6 +31,8 @@ export type AccommodationDisplay = {
   id: string;
   name: string;
   accommodation_type: string;
+  latitude?: number | null;
+  longitude?: number | null;
   bedroom_count: number | null;
   bed_count: number | null;
   bathroom_count: number | null;

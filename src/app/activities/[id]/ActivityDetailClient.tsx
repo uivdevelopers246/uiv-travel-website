@@ -10,15 +10,19 @@ import {
   UsersIcon,
   CurrencyIcon,
   LocationIcon,
+  ListingMap,
   StarIcon,
   type GalleryImage,
 } from "@/components/shared";
+import { hasValidCoordinates } from "@/lib/utils/geo";
 
 type Activity = {
   id: string;
   title: string;
   description: string | null;
   location: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   category: string;
   duration_hours: number | null;
   price_per_person: number | null;
@@ -145,6 +149,32 @@ export function ActivityDetailClient({ activity, images }: Props) {
           </div>
         </div>
       </section>
+
+      {hasValidCoordinates(activity.latitude, activity.longitude) && (
+        <section className="bg-white pb-12">
+          <div className="container mx-auto max-w-7xl px-4">
+            <ListingMap
+              title="Activity Map"
+              description="This activity has a saved map pin, so guests can preview where the experience is based before booking."
+              markers={[
+                {
+                  id: activity.id,
+                  kind: "activity",
+                  title: activity.title,
+                  href: `/activities/${activity.id}`,
+                  latitude: activity.latitude as number,
+                  longitude: activity.longitude as number,
+                  imageUrl: activity.image_url,
+                  locationLabel: activity.location,
+                  detailLine: activity.description ?? categoryLabel,
+                  badge: categoryLabel,
+                },
+              ]}
+              emptyMessage="This activity does not have a saved map location yet."
+            />
+          </div>
+        </section>
+      )}
     </>
   );
 }
