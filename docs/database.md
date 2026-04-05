@@ -1,6 +1,6 @@
 ## Overview
 
-The database is Supabase Postgres in the `public` schema, with PostGIS in `extensions`. It backs a Barbados travel app: **profiles** (1:1 with auth users), **vendors** (one per owner), **site_admins** (admin users), and **activities** (vendor-owned, with optional geolocation). RLS is enabled on all application tables; policies are consolidated in a single migration. Column-level grants on `activities` restrict which columns authenticated users can write. The `location_point` column is set or cleared only via the `set_activity_location_point` RPC using user-provided coordinates (no geocoding).
+The database is Supabase Postgres in the `public` schema, with PostGIS in `extensions`. It backs a Barbados travel app: **profiles** (1:1 with auth users), **vendors** (one per owner, with optional business profile columns), **site_admins** (admin users), **activities**, and **accommodations** (vendor-owned listings with optional map pins). **M4** adds **`orders`**, **`availability_slots`**, and **`activity_bookings`** for paid activity checkout and slot capacity (see ADRs in `docs/adrs/`). RLS is enabled on all application tables; policies evolved across migrations (see Migration Workflow). Column-level grants on `activities` and `accommodations` restrict which columns authenticated users can write. `location_point` on activities and accommodations is set or cleared only via **`set_activity_location_point`** and **`set_accommodation_location_point`** RPCs using user-provided coordinates (no geocoding in migrations). **`activity_bookings`:** ordinary **`authenticated` users have no `INSERT` policy**; rows are created by the **Stripe webhook** using the **service role** (and by site admins via `FOR ALL`), per ADR-M4-A / ADR-M4-B.
 
 ## Core Tables
 
@@ -16,13 +16,13 @@ Extends Supabase Auth: one row per `auth.users` row. Holds display name, avatar,
 
 ### public.vendors
 
-A vendor account; one per owner. Owner is `auth.users.id`.
+A vendor account; one per owner. Owner is `auth.users.id`. Optional **business intake** columns (nullable): `owner_full_name`, `business_phone`, `personal_phone`, `contact_email`, `is_incorporated`, `country_of_incorporation`, `business_registration_number`.
 
 | Item | Detail |
 |------|--------|
 | **Primary key** | `id` (uuid, default `gen_random_uuid()`) |
-| **Important columns** | `name` (text not null), `owner_user_id` (uuid not null unique, FK to `auth.users(id)` ON DELETE CASCADE), `created_at`, `updated_at` (timestamptz not null default `now()`) |
-| **Conventions** | `updated_at` maintained by trigger `trg_vendors_set_updated_at`. No status/enum. |
+| **Important columns** | `name` (text not null), `owner_user_id` (uuid not null unique, FK to `auth.users(id)` ON DELETE CASCADE), profile fields above, `created_at`, `updated_at` (timestamptz not null default `now()`) |
+| **Conventions** | `updated_at` maintained by trigger `trg_vendors_set_updated_at`. Column-level INSERT/UPDATE grants list which columns `authenticated` may write (see migration `20260324120000_accommodations_and_vendor_profile.sql`). |
 
 ### public.site_admins
 
@@ -45,28 +45,48 @@ Vendor-owned activity listing (tours, experiences). Can have a text `location` (
 | **Enums / status** | `category` check: `'water-sports' | 'wildlife' | 'adventure' | 'culture' | 'nature'`. `status` check: `'draft' | 'published' | 'archived'`. |
 | **Conventions** | `updated_at` set by trigger `trg_activities_set_updated_at`. `rating` and `location_point` are not in the INSERT/UPDATE grant list for `authenticated` — rating is system-only; `location_point` is set only via RPC. |
 
+### public.accommodations
+
+Vendor-owned accommodation listing (lodging). Parity with activities for status workflow and optional PostGIS pin.
+
+| Item | Detail |
+|------|--------|
+| **Primary key** | `id` (uuid, default `gen_random_uuid()`) |
+| **Important columns** | `vendor_id` (uuid not null, FK to `vendors(id)` ON DELETE CASCADE), `name`, `accommodation_type` (text not null; app-level validation), counts (`bedroom_count`, `bed_count`, `bathroom_count`, `max_guest_capacity`), `price_min_usd` / `price_max_usd` (range constraint), `check_in_time`, `check_out_time`, boolean amenity flags (`suitable_for_children`, `wheelchair_accessible`, `smoking_allowed`, `pets_allowed`, `beach_access_or_view`, `transportation_provided`, `amenities_complete`), `amenities` (text array), `address`, `parish`, `transportation_notes`, `pickup_notes`, `image_url`, `is_featured` (boolean; not in authenticated insert/update grants—set by admin/system only), `location_point` (geometry Point 4326), `status` (`draft` \| `published` \| `archived`), `created_at`, `updated_at` |
+| **Conventions** | `updated_at` via `trg_accommodations_set_updated_at`. `location_point` set only via `set_accommodation_location_point` RPC. |
+
 ## Relationships & Ownership Model
 
 - **profiles** → `id` = `auth.users.id` (1:1).
 - **vendors** → `owner_user_id` = `auth.users.id` (many-to-one from auth; app treats one vendor per user).
 - **site_admins** → `user_id` = `auth.users.id` (many-to-one; app uses “is admin” by existence of row).
 - **activities** → `vendor_id` = `vendors.id` (many activities per vendor).
+- **accommodations** → `vendor_id` = `vendors.id` (many accommodations per vendor).
 
-Ownership for RLS: activity rows are “owned” by the vendor; the vendor is identified by `auth.uid()` = `vendors.owner_user_id`. Admins bypass ownership via `is_site_admin()`.
+Ownership for RLS: activity and accommodation rows are “owned” by the vendor; the vendor is identified by `auth.uid()` = `vendors.owner_user_id`. Admins bypass ownership via `is_site_admin()`.
 
 ## RLS Policies Summary
 
-Policies below are the consolidated set (migration `20260129022541`). Column-level grants from `20260119233304` remain: `authenticated` has no broad INSERT/UPDATE on `activities`; only specific columns are granted.
+Policies below reflect the consolidated vendors/activities migration (`20260129022541`) plus later additions: **accommodations** (`20260324120000_accommodations_and_vendor_profile.sql`) and **vendor owner self-update** on `vendors`. Column-level grants: `activities` (`20260119233304` + later), `accommodations` and `vendors` (`20260324120000`).
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |-------|--------|--------|--------|--------|
 | **activities** | **anon, authenticated:** published rows OR (authenticated and (vendor owner of row OR site admin)). | **authenticated:** with check vendor owner of `vendor_id` OR site admin. | **authenticated:** using/with check vendor owner of row OR site admin. | **authenticated:** using vendor owner of row OR site admin. |
-| **vendors** | **authenticated:** own row (`owner_user_id` = auth.uid()) OR site admin. | **authenticated:** with check owner inserting for self OR site admin. | **authenticated:** using/with check site admin only. | **authenticated:** using site admin only. |
+| **accommodations** | **anon, authenticated:** published rows OR (authenticated and (vendor owner of row OR site admin)). | **authenticated:** with check vendor owner of `vendor_id` OR site admin. | **authenticated:** using/with check vendor owner of row OR site admin. | **authenticated:** using vendor owner of row OR site admin. |
+| **vendors** | **authenticated:** own row (`owner_user_id` = auth.uid()) OR site admin. | **authenticated:** with check owner inserting for self OR site admin. | **authenticated:** site admin **or** vendor owner updating own row (`20260324120000`: policy `"Vendors update (owner)"` alongside `"Vendors update (admins only)"`). | **authenticated:** using site admin only. |
 | **site_admins** | **authenticated:** own row (`user_id` = auth.uid()) for “read self”; “table access” policy: using/with check site admin for all. | Same “table access” policy (site admin only). | Same. | Same. |
 | **profiles** | **authenticated:** own profile (`id` = auth.uid()); plus policy “Site admins can view all profiles” (authenticated, using is_site_admin()). | **authenticated:** with check own profile (`id` = auth.uid()). | **authenticated:** using/with check own profile. | (No delete policy in migrations; default deny.) |
 
 - **Security definer:** `is_site_admin()`, `is_vendor_user()`, `vendor_id_for_user()` and trigger functions `handle_new_user()`, `handle_audit_fields()` are `security definer` so they run with definer rights (e.g. read `site_admins`/`vendors` for RLS). `is_vendor_owner(v_id)` is not security definer; it runs as invoker and relies on RLS.
-- **RPC:** `revoke all ... from public` and `grant execute ... to authenticated` on `set_activity_location_point`. Only authenticated users can call it; RPC does not check activity ownership — it updates by `p_activity_id`. RLS on `activities` still applies to the underlying UPDATE, so the update only succeeds if the caller can update that row (vendor owner or admin).
+- **RPCs:** `set_activity_location_point` and `set_accommodation_location_point` are revoked from `public` and granted to `authenticated`. Neither RPC checks ownership in SQL; RLS on the target table applies to the underlying UPDATE, so only vendor owners or admins can change rows they are allowed to update.
+
+### M4: `availability_slots`, `activity_bookings`, `orders`
+
+| Table | Notes |
+|-------|--------|
+| **`availability_slots`** | Vendor/admin manage slots; public **select** for non-cancelled slots tied to **published** activities (see `20260403120400_rls_availability_slots.sql`). |
+| **`activity_bookings`** | **Select:** booking owner (`user_id`), vendor owner (`is_vendor_owner(vendor_id)`), site admin. **`INSERT`:** not allowed for **`authenticated`** — Stripe webhook uses **service role** with **`create_activity_booking_after_payment`** (atomic capacity + insert), or admin `FOR ALL` for direct inserts. **User cancel:** `cancel_activity_booking` RPC (`SECURITY DEFINER`). |
+| **`orders`** | RLS enabled in migration; detailed policies may follow in `rls_orders` (ADR-M4-B). |
 
 ## Database Functions (RPC + helpers)
 
@@ -75,6 +95,9 @@ Policies below are the consolidated set (migration `20260129022541`). Column-lev
 | Function | Purpose | Args | Optional / defaults | Permissions | Notes |
 |----------|---------|------|---------------------|-------------|--------|
 | **set_activity_location_point** | Set or clear an activity’s geographic point (user-provided coordinates). | `p_activity_id` uuid; `p_lng`, `p_lat` double precision. | `p_lng` and `p_lat` default to null. | `authenticated` only (execute granted; public revoked). | If `p_lng` or `p_lat` is null, clears `location_point`; otherwise sets point via `st_setsrid(st_makepoint(p_lng, p_lat), 4326)`. UPDATE is subject to RLS. |
+| **set_accommodation_location_point** | Set or clear an accommodation’s geographic point. | `p_accommodation_id` uuid; `p_lng`, `p_lat` double precision. | Defaults null. | `authenticated` only. | Same clear/set semantics as activities; targets `accommodations.location_point`. |
+| **create_activity_booking_after_payment** | In one transaction: lock slot `FOR UPDATE`, sum `confirmed` participants vs `max_capacity`, verify slot matches `activity_id`/`vendor_id`, insert `activity_bookings`, return row. | Slot, activity, user, vendor, order ids; `p_participants`; cent columns; optional `p_discount_cents` (default 0), `p_status` (default `confirmed`). | See migration. | **`service_role` only** (not `authenticated`). | `SECURITY DEFINER`; prevents overbooking between check and insert. |
+| **cancel_activity_booking** | User sets own `confirmed` booking to `cancelled`. | `p_booking_id` uuid. | — | `authenticated`, `service_role`. | `SECURITY DEFINER`; triggers `updated_at` on the row. |
 
 ### RLS helper functions (used in policies)
 
@@ -96,11 +119,11 @@ Policies below are the consolidated set (migration `20260129022541`). Column-lev
 ## Geospatial Data (PostGIS)
 
 - **Extension:** PostGIS in schema `extensions` (migration `20251227203101`).
-- **Type:** `geometry(Point, 4326)` on `public.activities.location_point` (WGS84).
-- **How set:** Only via RPC `set_activity_location_point`. The app does not insert/update `location_point` directly; the column is not in the UPDATE grant for `authenticated`. Coordinates are provided by the user (e.g. device geolocation or map pin) when creating or updating an activity; the API validates lat/lng and the service calls the RPC. The text column `location` is for display only and is not used to set the point.
+- **Type:** `geometry(Point, 4326)` on `public.activities.location_point` and `public.accommodations.location_point` (WGS84).
+- **How set:** Only via RPCs `set_activity_location_point` and `set_accommodation_location_point`. The app does not insert/update `location_point` directly on either table; columns are excluded from normal UPDATE grants for `authenticated`. Coordinates are user-provided on create/update; services in `lib/activities/service.ts` and `lib/accommodations/service.ts` call the RPCs. Activity text `location` and accommodation `address`/`parish` are for display and are not used to derive the point in current migrations.
 - **Clearing:** RPC clears `location_point` when `p_lng` or `p_lat` is null (e.g. PATCH with `latitude: null, longitude: null`).
-- **Index:** GIST index `idx_activities_location_point` on `activities(location_point)` for spatial queries.
-- **“Near” queries:** No app code found that runs distance/near queries yet. Expected pattern: use PostGIS (e.g. `ST_DWithin`, `ST_Distance`) on `location_point` with a radius; index supports such queries.
+- **Indexes:** GIST `idx_activities_location_point` on `activities(location_point)`; GIST `idx_accommodations_location_point` on `accommodations(location_point)`.
+- **“Near” queries:** No distance/near queries in app code yet; indexes support future `ST_DWithin` / `ST_Distance` patterns.
 
 ## Indexes & Performance Notes
 
@@ -114,6 +137,10 @@ Policies below are the consolidated set (migration `20260129022541`). Column-lev
 | idx_activities_status | activities | status | Filter published/draft/archived. |
 | idx_activities_vendor_created_at | activities | vendor_id, created_at DESC | Vendor’s activities by newest. |
 | idx_activities_location_point | activities | location_point (GIST) | Spatial “near me” / map queries. |
+| idx_accommodations_vendor_id | accommodations | vendor_id | Filter by vendor. |
+| idx_accommodations_status | accommodations | status | Filter published/draft/archived. |
+| idx_accommodations_vendor_created_at | accommodations | vendor_id, created_at DESC | Vendor listings by newest. |
+| idx_accommodations_location_point | accommodations | location_point (GIST) | Spatial queries. |
 
 Unique: `vendors.owner_user_id` (one vendor per user).
 
@@ -134,6 +161,15 @@ Migrations live under `supabase/migrations/` and are applied in filename order (
 9. `20260216123729_add_location_point_and_quality.sql` — Adds activities columns: location_point, geocode_accuracy, geocode_feature_id, geocode_label; check on geocode_accuracy; GIST index on location_point.
 10. `20260219012002_create_activity_location_point.sql` — Defines set_activity_location_point (sets or clears location_point from p_lng/p_lat); revoke/grant execute.
 11. `20260221222439_drop_geocode_columns_and_constraints.sql` — Drops geocode_accuracy, geocode_label, geocode_feature_id and their check constraint; location_point remains.
+12. `20260324120000_accommodations_and_vendor_profile.sql` — Vendor profile columns on `vendors`; `accommodations` table, indexes, triggers; `set_accommodation_location_point` RPC; RLS on `accommodations`; vendor owner UPDATE policy and column grants on `vendors` and `accommodations`.
+13. `20260325120000_accommodation_images_bucket.sql` — Storage bucket `accommodation-images` and policies (mirror `activity-images` path pattern).
+14. `20260403120000_create_orders.sql` — `orders` table (checkout aggregate; RLS enabled).
+15. `20260403120100_create_availability_slots.sql` — `availability_slots` + vendor/activity consistency trigger.
+16. `20260403120200_create_activity_bookings.sql` — `activity_bookings` + indexes + `updated_at` trigger.
+17. `20260403120300_reserve_slot_capacity_rpc.sql` — `create_activity_booking_after_payment` (`SECURITY DEFINER`; replaces legacy `reserve_slot_capacity`).
+18. `20260403120400_rls_availability_slots.sql` — RLS on `availability_slots`.
+19. `20260403120500_rls_activity_bookings.sql` — RLS on `activity_bookings`; `cancel_activity_booking` RPC.
+20. `20260403120600_activity_bookings_webhook_only_insert.sql` — Drops legacy `authenticated` INSERT policy on `activity_bookings` if present.
 
 ## Common Query Patterns (from the codebase)
 
@@ -147,10 +183,13 @@ Migrations live under `supabase/migrations/` and are applied in filename order (
 - **Vendor by owner / create vendor:** `from('vendors').select('*').eq('owner_user_id', uid).maybeSingle()`; insert with `owner_user_id`, `name`.
 - **Admin user management:** `from('site_admins').select('user_id')`; insert/delete by `user_id`. `from('vendors').insert/delete` for make_vendor/remove_vendor. `from('profiles')` for admin list (with other data).
 - **Profile (account page):** `from('profiles').select(...).eq('id', ...).single()`.
-- **Location point:** `supabase.rpc('set_activity_location_point', { p_activity_id, p_lng?, p_lat? })`. Called from `lib/activities/service.ts` in createActivity (when latitude/longitude provided) and updateActivity (when coordinates provided or both null to clear). API routes validate lat/lng and pass through.
-- **Storage:** `storage.from('activity-images').upload(path, file)` and `getPublicUrl(path)`; path pattern `{vendor_id}/{filename}`.
+- **Location point (activities):** `supabase.rpc('set_activity_location_point', { p_activity_id, p_lng?, p_lat? })`. Called from `lib/activities/service.ts` on create/update when coordinates are provided or cleared.
+- **Location point (accommodations):** `supabase.rpc('set_accommodation_location_point', { p_accommodation_id, p_lng?, p_lat? })`. Called from `lib/accommodations/service.ts` on create/update.
+- **List published accommodations (public):** e.g. `from('accommodations').select(...).eq('status','published')` with optional `vendors(name)` join (see `/vacation-planning`).
+- **Vendor profile:** `PATCH` via `/api/vendors/me` → `updateVendorProfile` in `lib/vendors/service.ts` (allowed columns only).
+- **Storage:** `storage.from('activity-images')` or `storage.from('accommodation-images')` with `upload` / `getPublicUrl`; path pattern `{vendor_id}/{filename}`.
 
 ## TODO / Open Questions
 
 - **Profiles delete policy:** No RLS policy for DELETE on profiles in migrations; deletes are denied by default. Add policy if soft-delete or account deletion is required.
-- **Column grants and RPC:** The RPC `set_activity_location_point` runs as the calling user; its UPDATE is subject to RLS. The `location_point` column is not in the UPDATE grant for `authenticated`; the RPC performs the update inside the database. Direct client updates to `location_point` remain blocked.
+- **Column grants and RPCs:** Location RPCs run as the calling user; their UPDATEs are subject to RLS. `location_point` is not in the normal UPDATE grants for `authenticated` on activities or accommodations; the RPC performs the update inside the database. Direct client updates to `location_point` remain blocked for typical authenticated clients.
