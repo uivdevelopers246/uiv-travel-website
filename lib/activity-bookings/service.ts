@@ -39,12 +39,17 @@ export type CreateActivityBookingAfterPaymentInput = {
 };
 
 export type ListActivityBookingsOptions = {
+  /** Filter by booking owner (consumer list). */
+  userId?: string;
+  /** Filter by vendor (vendor dashboard list). */
+  vendorId?: string;
   /** Filter by activity  */
   activityId?: string;
   /** Filter by availability slot. */
   slotId?: string;
   /** Filter by checkout order. */
   orderId?: string;
+  status?: ActivityBookingStatus;
   limit?: number;
   offset?: number;
 };
@@ -66,6 +71,15 @@ export async function listActivityBookings(
   }
   if (opts?.orderId !== undefined) {
     query = query.eq("order_id", opts.orderId);
+  }
+  if (opts?.userId !== undefined) {
+    query = query.eq("user_id", opts.userId);
+  }
+  if (opts?.vendorId !== undefined) {
+    query = query.eq("vendor_id", opts.vendorId);
+  }
+  if (opts?.status !== undefined) {
+    query = query.eq("status", opts.status);
   }
 
   const { data, error } = await query

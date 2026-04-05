@@ -192,17 +192,23 @@ describe("activity-bookings service (reads + cancel)", () => {
     query.range.mockResolvedValueOnce({ data: rows, error: null });
 
     const result = await listActivityBookings(supabase, {
+      userId: "user-1",
+      vendorId: "vendor-1",
       activityId: "act-1",
       slotId: "slot-1",
       orderId: "ord-1",
+      status: "confirmed",
       limit: 5,
       offset: 10,
     });
 
     expect(supabase.from).toHaveBeenCalledWith("activity_bookings");
+    expect(query.eq).toHaveBeenCalledWith("user_id", "user-1");
+    expect(query.eq).toHaveBeenCalledWith("vendor_id", "vendor-1");
     expect(query.eq).toHaveBeenCalledWith("activity_id", "act-1");
     expect(query.eq).toHaveBeenCalledWith("slot_id", "slot-1");
     expect(query.eq).toHaveBeenCalledWith("order_id", "ord-1");
+    expect(query.eq).toHaveBeenCalledWith("status", "confirmed");
     expect(query.order).toHaveBeenCalledWith("created_at", { ascending: false });
     expect(query.range).toHaveBeenCalledWith(10, 14);
     expect(result).toEqual(rows);
