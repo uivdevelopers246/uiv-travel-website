@@ -2,6 +2,18 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/supabase/types/database";
 import type { ActivityBookingStatus } from "./constants";
 
+/** Wraps upstream errors so logs and API mapping identify which operation failed. */
+function bookingServiceError(
+  operationDescription: string,
+  cause?: { message?: string } | null,
+): Error {
+  const detail =
+    cause && typeof cause.message === "string" && cause.message.trim() !== ""
+      ? cause.message.trim()
+      : "The database did not return a more specific message.";
+  return new Error(`${operationDescription}: ${detail}`);
+}
+
 export type ActivityBooking =
   Database["public"]["Tables"]["activity_bookings"]["Row"];
 
@@ -60,7 +72,9 @@ export async function listActivityBookings(
     .order("created_at", { ascending: false })
     .range(offset, offset + limit - 1);
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    throw bookingServiceError("Could not list activity bookings", error);
+  }
   return (data ?? []) as ActivityBooking[];
 }
 
@@ -74,7 +88,9 @@ export async function getActivityBookingById(
     .eq("id", id)
     .maybeSingle();
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    throw bookingServiceError("Could not load activity booking by id", error);
+  }
   return data ?? null;
 }
 
@@ -98,7 +114,12 @@ export async function setActivityBookingCompleted(
     .select("*")
     .single();
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    throw bookingServiceError(
+      "Could not mark activity booking as completed",
+      error,
+    );
+  }
   return data as ActivityBooking;
 }
 
@@ -127,8 +148,17 @@ export async function createActivityBookingAfterPayment(
     p_status: status,
   });
 
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error("Booking create returned no row");
+  if (error) {
+    throw bookingServiceError(
+      "Could not create activity booking after payment",
+      error,
+    );
+  }
+  if (!data) {
+    throw new Error(
+      "Activity booking was not created: create_activity_booking_after_payment returned no row.",
+    );
+  }
   return data as ActivityBooking;
 }
 
@@ -144,5 +174,7 @@ export async function cancelActivityBooking(
     p_booking_id: bookingId,
   });
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    throw bookingServiceError("Could not cancel activity booking", error);
+  }
 }
