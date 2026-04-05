@@ -85,7 +85,7 @@ Policies below reflect the consolidated vendors/activities migration (`202601290
 | Table | Notes |
 |-------|--------|
 | **`availability_slots`** | Vendor/admin manage slots; public **select** for non-cancelled slots tied to **published** activities (see `20260403120400_rls_availability_slots.sql`). |
-| **`activity_bookings`** | **Select:** booking owner (`user_id`), vendor owner (`is_vendor_owner(vendor_id)`), site admin. **`INSERT`:** not allowed for **`authenticated`** — use **service role** in the Stripe webhook (or admin `FOR ALL`). **User cancel:** `cancel_activity_booking` RPC (`SECURITY DEFINER`). **`reserve_slot_capacity`** is `SECURITY DEFINER`; called before insert on the webhook path. |
+| **`activity_bookings`** | **Select:** booking owner (`user_id`), vendor owner (`is_vendor_owner(vendor_id)`), site admin. **`INSERT`:** not allowed for **`authenticated`** — Stripe webhook uses **service role** with **`create_activity_booking_after_payment`** (atomic capacity + insert), or admin `FOR ALL` for direct inserts. **User cancel:** `cancel_activity_booking` RPC (`SECURITY DEFINER`). |
 | **`orders`** | RLS enabled in migration; detailed policies may follow in `rls_orders` (ADR-M4-B). |
 
 ## Database Functions (RPC + helpers)
@@ -96,7 +96,7 @@ Policies below reflect the consolidated vendors/activities migration (`202601290
 |----------|---------|------|---------------------|-------------|--------|
 | **set_activity_location_point** | Set or clear an activity’s geographic point (user-provided coordinates). | `p_activity_id` uuid; `p_lng`, `p_lat` double precision. | `p_lng` and `p_lat` default to null. | `authenticated` only (execute granted; public revoked). | If `p_lng` or `p_lat` is null, clears `location_point`; otherwise sets point via `st_setsrid(st_makepoint(p_lng, p_lat), 4326)`. UPDATE is subject to RLS. |
 | **set_accommodation_location_point** | Set or clear an accommodation’s geographic point. | `p_accommodation_id` uuid; `p_lng`, `p_lat` double precision. | Defaults null. | `authenticated` only. | Same clear/set semantics as activities; targets `accommodations.location_point`. |
-| **reserve_slot_capacity** | Serialize capacity check before inserting a booking (sum of `confirmed` participants vs slot `max_capacity`). | `p_slot_id` uuid; `p_participants` integer. | — | `authenticated`, `service_role` (see migration). | `SECURITY DEFINER`; locks slot row `FOR UPDATE`. |
+| **create_activity_booking_after_payment** | In one transaction: lock slot `FOR UPDATE`, sum `confirmed` participants vs `max_capacity`, verify slot matches `activity_id`/`vendor_id`, insert `activity_bookings`, return row. | Slot, activity, user, vendor, order ids; `p_participants`; cent columns; optional `p_discount_cents` (default 0), `p_status` (default `confirmed`). | See migration. | **`service_role` only** (not `authenticated`). | `SECURITY DEFINER`; prevents overbooking between check and insert. |
 | **cancel_activity_booking** | User sets own `confirmed` booking to `cancelled`. | `p_booking_id` uuid. | — | `authenticated`, `service_role`. | `SECURITY DEFINER`; triggers `updated_at` on the row. |
 
 ### RLS helper functions (used in policies)
@@ -166,7 +166,7 @@ Migrations live under `supabase/migrations/` and are applied in filename order (
 14. `20260403120000_create_orders.sql` — `orders` table (checkout aggregate; RLS enabled).
 15. `20260403120100_create_availability_slots.sql` — `availability_slots` + vendor/activity consistency trigger.
 16. `20260403120200_create_activity_bookings.sql` — `activity_bookings` + indexes + `updated_at` trigger.
-17. `20260403120300_reserve_slot_capacity_rpc.sql` — `reserve_slot_capacity` (`SECURITY DEFINER`).
+17. `20260403120300_reserve_slot_capacity_rpc.sql` — `create_activity_booking_after_payment` (`SECURITY DEFINER`; replaces legacy `reserve_slot_capacity`).
 18. `20260403120400_rls_availability_slots.sql` — RLS on `availability_slots`.
 19. `20260403120500_rls_activity_bookings.sql` — RLS on `activity_bookings`; `cancel_activity_booking` RPC.
 20. `20260403120600_activity_bookings_webhook_only_insert.sql` — Drops legacy `authenticated` INSERT policy on `activity_bookings` if present.

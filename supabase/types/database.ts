@@ -481,13 +481,25 @@ export type Database = {
         Args: { p_booking_id: string }
         Returns: undefined
       },
+      create_activity_booking_after_payment: {
+        Args: {
+          p_activity_id: string
+          p_discount_cents?: number
+          p_order_id: string
+          p_participants: number
+          p_slot_id: string
+          p_status?: string
+          p_subtotal_cents: number
+          p_total_cents: number
+          p_unit_price_cents: number
+          p_user_id: string
+          p_vendor_id: string
+        }
+        Returns: Database["public"]["Tables"]["activity_bookings"]["Row"]
+      },
       is_site_admin: { Args: never; Returns: boolean }
       is_vendor_owner: { Args: { v_id: string }; Returns: boolean }
       is_vendor_user: { Args: never; Returns: boolean }
-      reserve_slot_capacity: {
-        Args: { p_participants: number; p_slot_id: string }
-        Returns: undefined
-      },
       set_accommodation_location_point: {
         Args: { p_accommodation_id: string; p_lat?: number; p_lng?: number }
         Returns: undefined

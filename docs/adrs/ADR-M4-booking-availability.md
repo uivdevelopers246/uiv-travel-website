@@ -31,7 +31,7 @@ Implement a native slot-based availability system using two new tables: `availab
 
 Capacity enforcement uses **Option B: computed capacity** — `booked_count` is derived at query time from the `activity_bookings` table rather than maintained as a stored column on the slot.
 
-Overbooking is prevented via a `FOR UPDATE` row lock on the slot inside a dedicated RPC (`reserve_slot_capacity`), combined with a `CHECK` constraint on the `activity_bookings` table.
+Overbooking is prevented via a `FOR UPDATE` row lock on the slot inside **`create_activity_booking_after_payment`**, which performs capacity check and **`INSERT` in one transaction**, plus `CHECK` constraints on `activity_bookings`.
 
 The deposit payment option is explicitly out of scope for MVP and deferred to a post-launch milestone.
 
@@ -133,49 +133,13 @@ confirmed       → completed   (admin marks after activity executes; triggers p
 
 Status transitions happen only in the service layer. No direct client writes to `status`.
 
-### Capacity Enforcement RPC
+### Capacity enforcement RPC (`create_activity_booking_after_payment`)
 
-```sql
--- p_ prefix = parameter (passed by caller)
--- v_ prefix = variable (declared locally)
-create or replace function reserve_slot_capacity(
-  p_slot_id      uuid,
-  p_participants integer
-) returns void language plpgsql as $$
-declare
-  v_current_booked  integer;
-  v_max_capacity    integer;
-begin
-  -- FOR UPDATE locks the slot row, serialising concurrent booking attempts
-  select
-    coalesce((
-      select sum(b.participants)
-      from activity_bookings b
-      where b.slot_id = p_slot_id
-        and b.status = 'confirmed'
-    ), 0),
-    s.max_capacity
-  into v_current_booked, v_max_capacity
-  from availability_slots s
-  where s.id = p_slot_id
-    and s.is_cancelled = false
-  for update;
+Canonical SQL lives in `supabase/migrations/20260403120300_reserve_slot_capacity_rpc.sql`. **`create_activity_booking_after_payment`** is `SECURITY DEFINER`, returns the inserted `activity_bookings` row, and **`grant execute` is limited to `service_role`** (it inserts rows; it must not be callable by ordinary `authenticated` clients).
 
-  if not found then
-    raise exception 'Slot not found or is cancelled';
-  end if;
+In one transaction it: locks the slot (`FOR UPDATE`), computes the sum of **`confirmed`** participants for that slot, verifies `p_activity_id` / `p_vendor_id` match the slot (defense in depth), rejects if over capacity or slot missing/cancelled, then **`INSERT`s** the booking. That removes the race between a separate “check capacity” RPC and a later `INSERT` that could each commit independently.
 
-  if v_current_booked + p_participants > v_max_capacity then
-    raise exception 'Not enough capacity on this slot';
-  end if;
-end;
-$$;
-
-grant execute on function reserve_slot_capacity(uuid, integer) to authenticated;
-revoke execute on function reserve_slot_capacity(uuid, integer) from public;
-```
-
-`v_current_booked` reads the live sum of participants across all active bookings on the slot at the moment the function runs. The `FOR UPDATE` lock on the slot row prevents a second concurrent call from reading the same value simultaneously, eliminating the race condition that causes overbooking. The capacity check is a guard only — no write to `booked_count` occurs because the column does not exist.
+`v_current_booked` reads the live sum at the moment the function runs, while the slot row stays locked until the insert commits — concurrent payers serialize on the same slot. No `booked_count` column exists (Option B).
 
 ### Promotional discounts (MVP)
 
@@ -262,7 +226,7 @@ create policy "admins_all_bookings" on activity_bookings
 
 | Method | Route | Auth | Description |
 |--------|-------|------|-------------|
-| `POST` | `/api/webhooks/stripe` | None (signature verified) | See **ADR-M4-B**. Verifies `stripe-signature`. On successful Checkout Session / PaymentIntent completion, **idempotently** creates `activity_bookings`, calls `reserve_slot_capacity` per line, sets `order_id`, triggers notifications as needed. On fulfillment failure after charge: **refund full order** (MVP policy). |
+| `POST` | `/api/webhooks/stripe` | None (signature verified) | See **ADR-M4-B**. Verifies `stripe-signature`. On successful Checkout Session / PaymentIntent completion, **idempotently** creates `activity_bookings` via **`create_activity_booking_after_payment`** per line (atomic capacity + insert). On fulfillment failure after charge: **refund full order** (MVP policy). |
 
 ### Shopping cart & checkout
 
@@ -298,7 +262,7 @@ supabase/migrations/
   YYYYMMDD_rls_activity_bookings.sql
   YYYYMMDD_rls_orders.sql
   YYYYMMDD_rls_cart_lines.sql
-  YYYYMMDD_reserve_slot_capacity_rpc.sql
+  YYYYMMDD_reserve_slot_capacity_rpc.sql   -- `create_activity_booking_after_payment` (atomic booking RPC)
 ```
 
 Order migrations before `activity_bookings` if the booking table references `orders`. One migration per concern for clean rollback.
@@ -374,7 +338,7 @@ Recommended migration path to Option A if scale demands it: add `booked_count` a
 
 ### Option B — Computed Capacity (Selected)
 
-Capacity is always derived fresh from the `activity_bookings` table. No stored count. The `reserve_slot_capacity` RPC uses `FOR UPDATE` on the slot row to serialize concurrent attempts, and queries the sum of active participants inline. Selected because:
+Capacity is always derived fresh from the `activity_bookings` table. No stored count. **`create_activity_booking_after_payment`** uses `FOR UPDATE` on the slot row and keeps the lock until the booking insert commits, serializing concurrent attempts on that slot. Selected because:
 
 - Single source of truth — the `activity_bookings` table is never out of sync with itself
 - Simpler cancellation — no counter to decrement

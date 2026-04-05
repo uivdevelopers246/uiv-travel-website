@@ -4,7 +4,7 @@
 **Milestone:** M4 — Booking & Availability  
 **Date:** 2026-04-01 (updated 2026-04-03)  
 **Deciders:** UIV Travel development team  
-**Related:** [ADR-M4-A: Booking & Availability](./ADR-M4-booking-availability.md) — slots, `activity_bookings`, `reserve_slot_capacity` RPC.
+**Related:** [ADR-M4-A: Booking & Availability](./ADR-M4-booking-availability.md) — slots, `activity_bookings`, `create_activity_booking_after_payment` RPC.
 
 ---
 
@@ -12,7 +12,7 @@
 
 Public users select an **activity slot** and **number of participants**, then add that selection to a **shopping cart**. They may add **one or more** activity lines before paying once for the whole cart. Payment is **100% upfront** for MVP (no deposit flow).
 
-This ADR defines **cart storage**, **checkout**, **Stripe Checkout Session**, **orders**, and how paid orders become **`activity_bookings`** rows. Slot inventory, the `reserve_slot_capacity` RPC, and `activity_bookings` shape are specified in [ADR-M4-A](./ADR-M4-booking-availability.md).
+This ADR defines **cart storage**, **checkout**, **Stripe Checkout Session**, **orders**, and how paid orders become **`activity_bookings`** rows. Slot inventory, the atomic `create_activity_booking_after_payment` RPC, and `activity_bookings` shape are specified in [ADR-M4-A](./ADR-M4-booking-availability.md).
 
 ---
 
@@ -83,11 +83,9 @@ One row per cart line; **merged** lines for the same activity slot (see below).
 5. **Webhook** receives e.g. `checkout.session.completed` (and/or `payment_intent.succeeded` — **pick one primary event** in implementation to avoid double processing). Handler:
    - Verifies signature.
    - **Idempotently** marks order `paid` if not already.
-   - In a **transaction**, for each cart line of type `activity`:
-     - Call `reserve_slot_capacity(slot_id, participants)`.
-     - Insert **`activity_bookings`** with `status = 'confirmed'`, **`order_id`** set, immutable price snapshot (`discount_cents` = 0 in MVP).
-   - On **any** failure (slot full, slot cancelled, etc.): **rollback** booking inserts, **refund** the Stripe payment, set order to a failure/refunded state, **do not** leave orphan confirmed rows.
-   - On **success**: clear **`cart_lines`** for that `user_id` (or for lines tied to this order if you snapshot line ids on the order — product choice: usually clear whole cart for simplicity).
+   - For each cart line of type `activity`, call **`create_activity_booking_after_payment`** (service role): **one DB transaction per line** that locks the slot, checks capacity, and inserts **`activity_bookings`** with `status = 'confirmed'`, **`order_id`** set, immutable price snapshot (`discount_cents` = 0 in MVP).
+   - On **any** failure after payment: **refund** the Stripe payment, set order to a failure/refunded state. Orders with **multiple** activity lines must run compensating cancels (or equivalent) on lines that already succeeded, because each RPC commits independently — MVP remains **fail whole order, no partial fulfillment**.
+   - On **full success**: clear **`cart_lines`** for that `user_id` (or for lines tied to this order if you snapshot line ids on the order — product choice: usually clear whole cart for simplicity).
 
 **Note:** Because inventory is not held in the cart, **race** at step 5 is possible. The policy **fail whole order + refund** is the explicit MVP tradeoff.
 
