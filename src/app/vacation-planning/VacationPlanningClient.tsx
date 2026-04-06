@@ -251,7 +251,8 @@ export function VacationPlanningClient({ activities, accommodations }: Props) {
     };
   }, [activities, mapboxToken]);
 
-  const featuredActivity = activities[0] ?? null;
+  const featuredActivity =
+    activities.find(activity => activity.is_featured) ?? activities[0] ?? null;
   const featuredAccommodation =
     accommodations.find(accommodation => accommodation.is_featured) ??
     accommodations[0] ??

@@ -38,6 +38,7 @@ export type ActivityDisplay = {
   price_per_person: number | null;
   max_capacity: number | null;
   image_url: string | null;
+  is_featured: boolean;
   vendors?: { name: string | null } | null;
 };
 
@@ -46,7 +47,6 @@ export type ActivityDisplay = {
  */
 export type ActivityDetail = ActivityDisplay & {
   rating: number | null;
-  is_featured: boolean;
   images?: ActivityImage[];
   vendors?: {
     id: string;
