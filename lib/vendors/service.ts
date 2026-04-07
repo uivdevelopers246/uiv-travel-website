@@ -1,6 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/supabase/types/database";
-import { getCurrentUserIdOrThrow, getOwnedVendorIdOrThrow } from "@/lib/vendors/ownership";
+import {
+  getCurrentUserIdOrThrow,
+  getVendorIdForCurrentUser,
+} from "@/lib/vendors/ownership";
 
 export type Vendor = Database["public"]["Tables"]["vendors"]["Row"];
 
@@ -54,7 +57,7 @@ export async function updateVendorProfile(
   input: UpdateVendorProfileInput,
 ) {
   const userId = await getCurrentUserIdOrThrow(supabase);
-  const vendorId = await getOwnedVendorIdOrThrow(supabase, userId);
+  const vendorId = await getVendorIdForCurrentUser(supabase, userId);
 
   const payload: Database["public"]["Tables"]["vendors"]["Update"] = {};
   if (input.name !== undefined) payload.name = input.name.trim();

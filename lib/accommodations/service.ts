@@ -1,7 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/supabase/types/database";
 import { applyLocationPointUpdate, setLocationPointIfValid } from "@/lib/listings/service-helpers";
-import { getCurrentUserIdOrThrow, getOwnedVendorIdOrThrow } from "@/lib/vendors/ownership";
+import {
+  getCurrentUserIdOrThrow,
+  getVendorIdForCurrentUser,
+} from "@/lib/vendors/ownership";
 
 export type AccommodationStatus = "draft" | "published" | "archived";
 
@@ -168,7 +171,7 @@ export async function createAccommodation(
   supabase: SupabaseClient<Database>,
   input: CreateAccommodationInput,
 ) {
-  const vendorId = await getOwnedVendorIdOrThrow(supabase);
+  const vendorId = await getVendorIdForCurrentUser(supabase);
 
   const { data, error } = await supabase
     .from("accommodations")
@@ -291,7 +294,7 @@ export async function updateAccommodation(
     return accommodation as Accommodation;
   }
 
-  const vendorId = await getOwnedVendorIdOrThrow(supabase, userId);
+  const vendorId = await getVendorIdForCurrentUser(supabase, userId);
 
   const { data, error } = await supabase
     .from("accommodations")
@@ -333,7 +336,7 @@ export async function deleteAccommodation(
     return data as Accommodation;
   }
 
-  const vendorId = await getOwnedVendorIdOrThrow(supabase, userId);
+  const vendorId = await getVendorIdForCurrentUser(supabase, userId);
 
   const { data, error } = await supabase
     .from("accommodations")

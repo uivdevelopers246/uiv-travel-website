@@ -1,7 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/supabase/types/database";
 import { applyLocationPointUpdate, setLocationPointIfValid } from "@/lib/listings/service-helpers";
-import { getCurrentUserIdOrThrow, getOwnedVendorIdOrThrow } from "@/lib/vendors/ownership";
+import {
+  getCurrentUserIdOrThrow,
+  getVendorIdForCurrentUser,
+} from "@/lib/vendors/ownership";
 
 export type ActivityStatus = "draft" | "published" | "archived";
 export type ActivityCategory = "water-sports" | "wildlife" | "adventure" | "culture" | "nature";
@@ -71,7 +74,7 @@ export async function createActivity(
     supabase: SupabaseClient<Database>,
     input: CreateActivityInput
 ) {
-    const vendorId = await getOwnedVendorIdOrThrow(supabase);
+    const vendorId = await getVendorIdForCurrentUser(supabase);
     
     const { data, error } = await supabase
         .from("activities")
@@ -198,7 +201,7 @@ export async function updateActivity(
     }
 
     // Non-admins must own the vendor associated with the activity
-    const vendorId = await getOwnedVendorIdOrThrow(supabase, userId);
+    const vendorId = await getVendorIdForCurrentUser(supabase, userId);
 
     const { data, error } = await supabase
         .from("activities")
@@ -241,7 +244,7 @@ export async function deleteActivity(
         return data;
     }
 
-    const vendorId = await getOwnedVendorIdOrThrow(supabase, userId);
+    const vendorId = await getVendorIdForCurrentUser(supabase, userId);
 
     const { data, error } = await supabase
         .from("activities")
