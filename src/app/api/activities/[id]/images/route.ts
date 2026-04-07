@@ -10,7 +10,7 @@ import {
   parseUuidParam,
   requireRole,
   serverError,
-} from "../../../_shared/route-helpers";
+} from "@/api-shared/route-helpers";
 import {
   getSupabaseStorageObjectPath,
   isSupabaseStoragePublicUrl,

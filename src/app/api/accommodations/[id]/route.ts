@@ -18,7 +18,7 @@ import {
   requireRole,
   serverError,
   unauthorized,
-} from "../../_shared/route-helpers";
+} from "@/api-shared/route-helpers";
 
 const validStatuses = new Set<AccommodationStatus>([
   "draft",
