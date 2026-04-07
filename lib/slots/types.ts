@@ -23,3 +23,6 @@ export type PublicSlotWithCapacity = Pick<
   booked_participants: number;
   remaining_capacity: number;
 };
+
+/** Vendor/admin manage list: full slot row plus confirmed headcount for the UI. */
+export type ManageSlotRow = AvailabilitySlot & { booked_participants: number };

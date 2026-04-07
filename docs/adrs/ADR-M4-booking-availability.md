@@ -212,6 +212,8 @@ create policy "admins_all_bookings" on activity_bookings
 | `PATCH` | `/api/activities/[id]/slots/[slotId]` | Vendor | Update a slot. Blocked if any active bookings exist on the slot. |
 | `DELETE` | `/api/activities/[id]/slots/[slotId]` | Vendor | Cancel a slot (`is_cancelled = true`). Blocked if computed `booked_count > 0`. Hard deletes are never used. |
 
+**Public list capacity (RLS):** `listPublicSlotsForActivity` in `lib/slots/service.ts` sums confirmed `participants` on `activity_bookings`. **Anonymous** roles have no `SELECT` policy on that table today, so unauthenticated callers may see **remaining capacity overstated** until an anon-safe aggregate (policy/RPC/view) exists. Authenticated users get accurate sums where RLS permits.
+
 ### Activity Bookings
 
 | Method | Route | Auth | Description |
@@ -279,11 +281,12 @@ lib/activity-bookings/
   service.test.ts    — Vitest
 
 lib/slots/
-  service.ts         — createSlot, listPublicSlots, listVendorSlots, updateSlot, cancelSlot
-  types.ts           — SlotDisplay, CreateSlotInput
+  service.ts         — sumConfirmedParticipantsBySlotIds, computeEndsAtIso, listPublicSlotsForActivity, listManageSlotsForActivity, createAvailabilitySlot, updateAvailabilitySlot, cancelAvailabilitySlot
+  types.ts           — AvailabilitySlot, CreateSlotInput, UpdateSlotInput, PublicSlotWithCapacity, ManageSlotRow
+  service.test.ts    — Vitest
 
-src/lib/cart/        — ADR-M4-B
-src/lib/orders/      — ADR-M4-B
+lib/cart/            — ADR-M4-B
+lib/orders/          — ADR-M4-B
 ```
 
 ### API Routes

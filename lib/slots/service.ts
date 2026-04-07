@@ -8,6 +8,7 @@ import {
 import type {
   AvailabilitySlot,
   CreateSlotInput,
+  ManageSlotRow,
   PublicSlotWithCapacity,
   UpdateSlotInput,
 } from "./types";
@@ -138,8 +139,6 @@ export async function listPublicSlotsForActivity(
 
   return result;
 }
-
-export type ManageSlotRow = AvailabilitySlot & { booked_participants: number };
 
 export async function listManageSlotsForActivity(
   supabase: SupabaseClient<Database>,
@@ -287,22 +286,12 @@ async function assertVendorOrAdminCanManageSlot(
   }
 }
 
-/**
- * Blocks PATCH/cancel when confirmed bookings sum to any participants (ADR-M4).
- * With `participants >= 1` on confirmed rows, this matches any confirmed booking;
- * a separate `max_capacity` vs booked check is unnecessary once this passes.
- */
-async function assertNoConfirmedBookingsWithParticipants(
+async function getConfirmedBookedParticipants(
   supabase: SupabaseClient<Database>,
   slotId: string,
-): Promise<void> {
+): Promise<number> {
   const sums = await sumConfirmedParticipantsBySlotIds(supabase, [slotId]);
-  const booked = sums.get(slotId) ?? 0;
-  if (booked > 0) {
-    throw new Error(
-      "Cannot modify or cancel this slot because it has confirmed bookings.",
-    );
-  }
+  return sums.get(slotId) ?? 0;
 }
 
 export async function updateAvailabilitySlot(
@@ -317,7 +306,12 @@ export async function updateAvailabilitySlot(
   const slot = await loadSlotForActivityOrThrow(supabase, activityId, slotId);
   await assertVendorOrAdminCanManageSlot(supabase, slot, options);
 
-  await assertNoConfirmedBookingsWithParticipants(supabase, slotId);
+  const booked = await getConfirmedBookedParticipants(supabase, slotId);
+  if (booked > 0) {
+    throw new Error(
+      "Cannot modify or cancel this slot because it has confirmed bookings.",
+    );
+  }
 
   const payload: Record<string, unknown> = {};
 
@@ -382,7 +376,12 @@ export async function cancelAvailabilitySlot(
   const slot = await loadSlotForActivityOrThrow(supabase, activityId, slotId);
   await assertVendorOrAdminCanManageSlot(supabase, slot, options);
 
-  await assertNoConfirmedBookingsWithParticipants(supabase, slotId);
+  const bookedCancel = await getConfirmedBookedParticipants(supabase, slotId);
+  if (bookedCancel > 0) {
+    throw new Error(
+      "Cannot modify or cancel this slot because it has confirmed bookings.",
+    );
+  }
 
   const { data, error } = await supabase
     .from("availability_slots")
