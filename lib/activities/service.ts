@@ -1,6 +1,7 @@
-// import { browserClient } from "@/lib/supabase/client";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/supabase/types/database";
+import { applyLocationPointUpdate, setLocationPointIfValid } from "@/lib/listings/service-helpers";
+import { getCurrentUserIdOrThrow, getOwnedVendorIdOrThrow } from "@/lib/vendors/ownership";
 
 export type ActivityStatus = "draft" | "published" | "archived";
 export type ActivityCategory = "water-sports" | "wildlife" | "adventure" | "culture" | "nature";
@@ -28,16 +29,22 @@ export type CreateActivityInput = {
     title: string;
     description?:string | null;
     location?: string | null;
+    latitude?: number | null;
+    longitude?: number | null;
     category: ActivityCategory;
     duration_hours?: number | null;
     price_per_person?: number | null;
     max_capacity?: number | null;
     image_url?: string | null;
+    status?: ActivityStatus;
 };
 
 export type UpdateActivityInput = Partial<
   Pick<Activity, "title" | "description" | "location" | "category" | "duration_hours" | "price_per_person" | "max_capacity" | "image_url" | "status">
->;
+> & {
+    longitude?: number | null;
+    latitude?: number | null;
+};
 
 /** Column names to select for public activity listings (no status, created_at, updated_at). */
 export const PUBLIC_ACTIVITY_SELECT = [
@@ -64,27 +71,12 @@ export async function createActivity(
     supabase: SupabaseClient<Database>,
     input: CreateActivityInput
 ) {
-
-    const { data: userData } = await supabase.auth.getUser();
-    if (!userData.user) {
-        throw new Error("Unauthorized");
-    }
-
-    const { data: vendor, error: vendorError } = await supabase
-        .from("vendors")
-        .select("id")
-        .eq("owner_user_id", userData.user.id)
-        .maybeSingle();
-    
-    if (vendorError) throw new Error(vendorError.message);
-    if(!vendor) {
-        throw new Error("User is not associated with a vendor");
-    }
+    const vendorId = await getOwnedVendorIdOrThrow(supabase);
     
     const { data, error } = await supabase
         .from("activities")
         .insert({
-            vendor_id: vendor.id,
+            vendor_id: vendorId,
             title: input.title.trim(),
             description: input.description,
             location: input.location,
@@ -93,12 +85,28 @@ export async function createActivity(
             price_per_person: input.price_per_person,
             max_capacity: input.max_capacity,
             image_url: input.image_url,
+            status: input.status ?? "published",
         })
         .select("*") 
         .single();
         
     if (error) throw new Error(error.message);
-    return data;
+
+    await setLocationPointIfValid(supabase, {
+        entityId: data.id,
+        entityParamName: "p_activity_id",
+        latitude: input.latitude,
+        longitude: input.longitude,
+        rpcName: "set_activity_location_point",
+    });
+ 
+    const { data: activity, error: refetchError } = await supabase
+        .from("activities")
+        .select("*")
+        .eq("id", data.id)
+        .single()
+    if (refetchError) throw new Error(refetchError.message);
+    return activity;
 }
 
 export async function listActivities(
@@ -134,23 +142,27 @@ export async function getActivityById(
     return (data ?? null) as PublicActivity | null;
 }
 
+async function applyActivityLocationPoint(
+    supabase: SupabaseClient<Database>,
+    activityId: string,
+    input: Pick<UpdateActivityInput, "latitude" | "longitude">,
+) {
+    await applyLocationPointUpdate(supabase, {
+        entityId: activityId,
+        entityParamName: "p_activity_id",
+        latitude: input.latitude,
+        longitude: input.longitude,
+        rpcName: "set_activity_location_point",
+    });
+}
+
 export async function updateActivity(
     supabase: SupabaseClient<Database>,
     activityId: string,
     input: UpdateActivityInput,
+    options?: { isAdmin?: boolean }
 ) {
-    const { data: userData } = await supabase.auth.getUser();
-
-    if (!userData.user) throw new Error("Unauthorized");
-
-    const { data: vendor, error: vendorError } = await supabase
-        .from("vendors")
-        .select("id")
-        .eq("owner_user_id", userData.user.id)
-        .maybeSingle();
-    
-    if (vendorError) throw new Error(vendorError.message);
-    if (!vendor) throw new Error("User is not associated with a vendor");
+    const userId = await getCurrentUserIdOrThrow(supabase);
 
     const payload: Record<string, unknown> = {};
     if (input.title !== undefined) payload.title = input.title.trim();
@@ -163,40 +175,79 @@ export async function updateActivity(
     if (input.image_url !== undefined) payload.image_url = input.image_url;
     if (input.status !== undefined) payload.status = input.status;
 
+    // Admins can update any activity without vendor ownership check
+    if (options?.isAdmin) {
+        const { data, error } = await supabase
+            .from("activities")
+            .update(payload)
+            .eq("id", activityId)
+            .select("*")
+            .single();
+
+        if (error) throw new Error(error.message);
+
+        await applyActivityLocationPoint(supabase, data.id, input);
+
+        const { data: activity, error: refetchError } = await supabase
+            .from("activities")
+            .select("*")
+            .eq("id", data.id)
+            .single();
+        if (refetchError) throw new Error(refetchError.message);
+        return activity;
+    }
+
+    // Non-admins must own the vendor associated with the activity
+    const vendorId = await getOwnedVendorIdOrThrow(supabase, userId);
+
     const { data, error } = await supabase
-    .from("activities")
-    .update(payload)
-    .eq("id", activityId)
-    .eq("vendor_id", vendor.id)
-    .select("*")
-    .single();
+        .from("activities")
+        .update(payload)
+        .eq("id", activityId)
+        .eq("vendor_id", vendorId)
+        .select("*")
+        .single();
 
     if (error) throw new Error(error.message);
-    return data;
+
+    await applyActivityLocationPoint(supabase, data.id, input);
+
+    const { data: activity, error: refetchError } = await supabase
+        .from("activities")
+        .select("*")
+        .eq("id", data.id)
+        .single()
+    if (refetchError) throw new Error(refetchError.message);
+    return activity;
 }
 
 export async function deleteActivity(
     supabase: SupabaseClient<Database>,
-    activityId: string
+    activityId: string,
+    options?: { isAdmin?: boolean }
 ) {
-    const { data: userData } = await supabase.auth.getUser();
+    const userId = await getCurrentUserIdOrThrow(supabase);
 
-    if (!userData.user) throw new Error("Unauthorized");
+    // Admins can delete any activity without vendor ownership check
+    if (options?.isAdmin) {
+        const { data, error } = await supabase
+            .from("activities")
+            .delete()
+            .eq("id", activityId)
+            .select("*")
+            .single();
 
-    const { data: vendor, error: vendorError } = await supabase
-        .from("vendors")
-        .select("id")
-        .eq("owner_user_id", userData.user.id)
-        .maybeSingle();
+        if (error) throw new Error(error.message);
+        return data;
+    }
 
-    if (vendorError) throw new Error(vendorError.message);
-    if (!vendor) throw new Error("User is not associated with a vendor");
+    const vendorId = await getOwnedVendorIdOrThrow(supabase, userId);
 
     const { data, error } = await supabase
         .from("activities")
         .delete()
         .eq("id", activityId)
-        .eq("vendor_id", vendor.id)
+        .eq("vendor_id", vendorId)
         .select("*")
         .single();
 
@@ -204,7 +255,5 @@ export async function deleteActivity(
     return data;
 }
 
-
-
-
+  
 

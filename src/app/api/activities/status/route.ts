@@ -32,8 +32,9 @@ export async function POST(req: Request) {
   }
 
   try {
-    // Use updateActivity service which validates vendor ownership
-    const data = await updateActivity(supabase, id, { status: status as "draft" | "published" });
+    // Use updateActivity service which validates vendor ownership (unless admin)
+    const isAdmin = role === "admin";
+    const data = await updateActivity(supabase, id, { status: status as "draft" | "published" }, { isAdmin });
     return NextResponse.json({ id: data.id, status: data.status });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to update status";

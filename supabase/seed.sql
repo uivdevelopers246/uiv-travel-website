@@ -163,4 +163,79 @@ from (values
 ) as a(vendor_name, title, description, location, category, duration_hours, price_per_person, max_capacity, image_url)
 join public.vendors v on v.name = a.vendor_name;
 
+-- ECO Lifestyle & Lodge (UnitedIV Accommodation Partner Intake Form V2): business + listing #1
+update public.vendors v
+set
+  owner_full_name = 'Kyle Taylor',
+  business_phone = '1-246-433-9450',
+  personal_phone = null,
+  contact_email = 'reception@ecolifestylelodge.com',
+  is_incorporated = true,
+  country_of_incorporation = 'Barbados',
+  business_registration_number = '64091'
+from auth.users u
+where u.email = 'vendor2@uiv.com'
+  and v.owner_user_id = u.id;
+
+insert into public.accommodations (
+  vendor_id,
+  name,
+  accommodation_type,
+  bedroom_count,
+  bed_count,
+  bathroom_count,
+  max_guest_capacity,
+  price_min_usd,
+  price_max_usd,
+  check_in_time,
+  check_out_time,
+  suitable_for_children,
+  wheelchair_accessible,
+  smoking_allowed,
+  pets_allowed,
+  beach_access_or_view,
+  transportation_provided,
+  amenities_complete,
+  amenities,
+  address,
+  parish,
+  transportation_notes,
+  pickup_notes,
+  status
+)
+select
+  v.id,
+  'ECO Lifestyle & Lodge',
+  'Hotel',
+  10,
+  11,
+  10,
+  21,
+  340,
+  415,
+  '3pm',
+  '11am',
+  false,
+  false,
+  false,
+  false,
+  true,
+  false,
+  true,
+  '{}'::text[],
+  'Tent Bay',
+  'St Joseph',
+  'Additional cost',
+  null,
+  'published'
+from public.vendors v
+join auth.users u on u.id = v.owner_user_id
+where u.email = 'vendor2@uiv.com'
+  and not exists (
+    select 1
+    from public.accommodations acc
+    where acc.vendor_id = v.id
+      and acc.name = 'ECO Lifestyle & Lodge'
+  );
+
 drop function public.seed_user(text, text);

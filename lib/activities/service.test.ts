@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createActivity, listActivities, updateActivity, deleteActivity, getActivityById } from "./service";
 
+
 function makeMockSupabase() {
     const query: any = {
         select: vi.fn().mockReturnThis(),
@@ -44,6 +45,7 @@ function makeMockSupabaseForCreateActivity() {
               error: null,
           }),
       },
+      rpc: vi.fn().mockResolvedValue({ data: null, error: null}),
   };
 
   return { supabase, activitiesQuery, vendorsQuery };
@@ -72,6 +74,7 @@ function makeMockSupabaseForUpdateDelete() {
         error: null,
       }),
     },
+    rpc: vi.fn().mockResolvedValue({ data: null, error: null}),
   };
 
   return { supabase, activitiesQuery, vendorsQuery };
@@ -87,7 +90,7 @@ describe("activities service", () => {
       error: null,
     });
     
-    activitiesQuery.single.mockResolvedValueOnce({
+    const createdRow = {
       data: {
         id: "a1",
         vendor_id: "v1",
@@ -106,7 +109,8 @@ describe("activities service", () => {
         updated_at: new Date().toISOString(),
       },
       error: null,
-    });
+    };
+    activitiesQuery.single.mockResolvedValueOnce(createdRow).mockResolvedValueOnce(createdRow);
     
     const created = await createActivity(supabase, {
       title: "Snorkeling Tour",
@@ -134,9 +138,49 @@ describe("activities service", () => {
     );
     expect(created.id).toBe("a1");
     expect(created.vendor_id).toBe("v1");
+    expect(supabase.rpc).not.toHaveBeenCalled();
   });
 
-
+  it("createActivity: calls set_activity_location_point when latitude and longitude are provided", async () => {
+    const { supabase, activitiesQuery, vendorsQuery } = makeMockSupabaseForCreateActivity();
+    vendorsQuery.maybeSingle.mockResolvedValueOnce({
+      data: { id: "v1" },
+      error: null,
+    });
+    const createdRow = {
+      data: {
+        id: "a1",
+        vendor_id: "v1",
+        title: "Beach Day",
+        description: null,
+        location: null,
+        category: "nature",
+        duration_hours: null,
+        price_per_person: null,
+        max_capacity: null,
+        rating: null,
+        image_url: null,
+        is_featured: false,
+        status: "draft",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      error: null,
+    };
+    activitiesQuery.single.mockResolvedValueOnce(createdRow).mockResolvedValueOnce(createdRow);
+    await createActivity(supabase, {
+      title: "Beach Day",
+      category: "nature",
+      latitude: 13.1,
+      longitude: -59.6,
+    });
+    expect(supabase.rpc).toHaveBeenCalledTimes(1);
+    expect(supabase.rpc).toHaveBeenCalledWith("set_activity_location_point", {
+      p_activity_id: "a1",
+      p_lng: -59.6,
+      p_lat: 13.1,
+    });
+  });
 
   it("createActivity: throws when insert fails", async () => {
     const { supabase, activitiesQuery, vendorsQuery } = makeMockSupabaseForCreateActivity();
@@ -385,7 +429,7 @@ it("createActivity: throws when user has no vendor", async () => {
       error: null,
     });
 
-    activitiesQuery.single.mockResolvedValueOnce({
+    const updateRow = {
       data: {
         id: "a1",
         vendor_id: "v1",
@@ -403,8 +447,11 @@ it("createActivity: throws when user has no vendor", async () => {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       },
-      error: null,
-    });
+    }
+
+
+    // update returns refetched row, so select is called after update
+    activitiesQuery.single.mockResolvedValueOnce(updateRow).mockResolvedValueOnce(updateRow);
 
     const updated = await updateActivity(supabase, "a1", {
       title: "Updated Title",
@@ -424,8 +471,166 @@ it("createActivity: throws when user has no vendor", async () => {
     expect(updated.id).toBe("a1");
     expect(updated.title).toBe("Updated Title");
     expect(updated.description).toBe("Updated description");
+    expect(supabase.rpc).not.toHaveBeenCalled();
   });
 
+  it("updateActivity: calls set_activity_location_point when latitude and longitude are provided", async () => {
+    const { supabase, activitiesQuery, vendorsQuery } = makeMockSupabaseForUpdateDelete();
+
+    vendorsQuery.maybeSingle.mockResolvedValueOnce({
+      data: { id: "v1" },
+      error: null,
+    });
+
+    const updateRow = {
+      data: {
+        id: "a1",
+        vendor_id: "v1",
+        title: "Snorkeling",
+        description: null,
+        location: null,
+        category: "water-sports",
+        duration_hours: null,
+        price_per_person: null,
+        max_capacity: null,
+        rating: null,
+        image_url: null,
+        is_featured: false,
+        status: "draft",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      error: null,
+    };
+    activitiesQuery.single.mockResolvedValueOnce(updateRow).mockResolvedValueOnce(updateRow);
+
+    await updateActivity(supabase, "a1", {
+      latitude: 13.2,
+      longitude: -59.5,
+    });
+
+    expect(supabase.rpc).toHaveBeenCalledTimes(1);
+    expect(supabase.rpc).toHaveBeenCalledWith("set_activity_location_point", {
+      p_activity_id: "a1",
+      p_lng: -59.5,
+      p_lat: 13.2,
+    });
+  });
+
+  it("updateActivity: calls set_activity_location_point with only p_activity_id when latitude and longitude are null (clear)", async () => {
+    const { supabase, activitiesQuery, vendorsQuery } = makeMockSupabaseForUpdateDelete();
+
+    vendorsQuery.maybeSingle.mockResolvedValueOnce({
+      data: { id: "v1" },
+      error: null,
+    });
+
+    const updateRow = {
+      data: {
+        id: "a1",
+        vendor_id: "v1",
+        title: "Snorkeling",
+        description: null,
+        location: null,
+        category: "water-sports",
+        duration_hours: null,
+        price_per_person: null,
+        max_capacity: null,
+        rating: null,
+        image_url: null,
+        is_featured: false,
+        status: "draft",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      error: null,
+    };
+    activitiesQuery.single.mockResolvedValueOnce(updateRow).mockResolvedValueOnce(updateRow);
+
+    await updateActivity(supabase, "a1", {
+      latitude: null,
+      longitude: null,
+    });
+
+    expect(supabase.rpc).toHaveBeenCalledTimes(1);
+    expect(supabase.rpc).toHaveBeenCalledWith("set_activity_location_point", {
+      p_activity_id: "a1",
+    });
+  });
+
+  it("updateActivity: throws when only one of latitude or longitude is provided", async () => {
+    const { supabase, activitiesQuery, vendorsQuery } = makeMockSupabaseForUpdateDelete();
+
+    vendorsQuery.maybeSingle.mockResolvedValueOnce({
+      data: { id: "v1" },
+      error: null,
+    });
+
+    const updateRow = {
+      data: {
+        id: "a1",
+        vendor_id: "v1",
+        title: "Snorkeling",
+        description: null,
+        location: null,
+        category: "water-sports",
+        duration_hours: null,
+        price_per_person: null,
+        max_capacity: null,
+        rating: null,
+        image_url: null,
+        is_featured: false,
+        status: "draft",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      error: null,
+    };
+    activitiesQuery.single.mockResolvedValueOnce(updateRow);
+
+    await expect(
+      updateActivity(supabase, "a1", { title: "Snorkeling", latitude: 13.1 })
+    ).rejects.toThrow("Provide both latitude and longitude");
+
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("updateActivity: throws when only longitude is provided", async () => {
+    const { supabase, activitiesQuery, vendorsQuery } = makeMockSupabaseForUpdateDelete();
+
+    vendorsQuery.maybeSingle.mockResolvedValueOnce({
+      data: { id: "v1" },
+      error: null,
+    });
+
+    const updateRow = {
+      data: {
+        id: "a1",
+        vendor_id: "v1",
+        title: "Snorkeling",
+        description: null,
+        location: null,
+        category: "water-sports",
+        duration_hours: null,
+        price_per_person: null,
+        max_capacity: null,
+        rating: null,
+        image_url: null,
+        is_featured: false,
+        status: "draft",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      error: null,
+    };
+    activitiesQuery.single.mockResolvedValueOnce(updateRow);
+
+    await expect(
+      updateActivity(supabase, "a1", { title: "Snorkeling", longitude: -59.5 })
+    ).rejects.toThrow("Provide both latitude and longitude");
+
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
 
   it("updateActivity: throws when update fails", async () => {
     const { supabase, activitiesQuery, vendorsQuery } = makeMockSupabaseForUpdateDelete();
