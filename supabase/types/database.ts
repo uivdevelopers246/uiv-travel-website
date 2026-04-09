@@ -337,6 +337,75 @@ export type Database = {
           },
         ]
       }
+      cart_lines: {
+        Row: {
+          accommodation_id: string | null
+          check_in: string | null
+          check_out: string | null
+          created_at: string
+          guests: number | null
+          id: string
+          line_discount_cents: number
+          line_subtotal_cents: number
+          line_total_cents: number
+          line_type: string
+          participants: number | null
+          slot_id: string | null
+          unit_price_cents: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          accommodation_id?: string | null
+          check_in?: string | null
+          check_out?: string | null
+          created_at?: string
+          guests?: number | null
+          id?: string
+          line_discount_cents?: number
+          line_subtotal_cents: number
+          line_total_cents: number
+          line_type: string
+          participants?: number | null
+          slot_id?: string | null
+          unit_price_cents: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          accommodation_id?: string | null
+          check_in?: string | null
+          check_out?: string | null
+          created_at?: string
+          guests?: number | null
+          id?: string
+          line_discount_cents?: number
+          line_subtotal_cents?: number
+          line_total_cents?: number
+          line_type?: string
+          participants?: number | null
+          slot_id?: string | null
+          unit_price_cents?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cart_lines_accommodation_id_fkey"
+            columns: ["accommodation_id"]
+            isOneToOne: false
+            referencedRelation: "accommodations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cart_lines_slot_id_fkey"
+            columns: ["slot_id"]
+            isOneToOne: false
+            referencedRelation: "availability_slots"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       orders: {
         Row: {
           created_at: string
@@ -427,6 +496,21 @@ export type Database = {
         }
         Relationships: []
       }
+      stripe_webhook_events: {
+        Row: {
+          processed_at: string
+          stripe_event_id: string
+        }
+        Insert: {
+          processed_at?: string
+          stripe_event_id: string
+        }
+        Update: {
+          processed_at?: string
+          stripe_event_id?: string
+        }
+        Relationships: []
+      }
       vendors: {
         Row: {
           business_phone: string | null
@@ -479,6 +563,10 @@ export type Database = {
     Functions: {
       cancel_activity_booking: {
         Args: { p_booking_id: string }
+        Returns: undefined
+      },
+      cancel_activity_bookings_for_order: {
+        Args: { p_order_id: string }
         Returns: undefined
       },
       create_activity_booking_after_payment: {

@@ -15,8 +15,8 @@ create or replace function public.create_activity_booking_after_payment(
   p_participants integer,
   p_unit_price_cents integer,
   p_subtotal_cents integer,
-  p_discount_cents integer default 0,
   p_total_cents integer,
+  p_discount_cents integer default 0,
   p_status text default 'confirmed'
 )
 returns public.activity_bookings
