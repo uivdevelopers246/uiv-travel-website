@@ -8,6 +8,20 @@ insert into storage.buckets (id, name, public)
 values ('accommodation-images', 'accommodation-images', true)
 on conflict (id) do update set public = true;
 
+-- Defensive repair for remotes whose migration history is ahead of actual helper
+-- function state. Storage policies below depend on vendor_id_for_user().
+create or replace function public.vendor_id_for_user()
+returns uuid
+language sql stable
+security definer
+set search_path = pg_catalog, public
+as $$
+  select v.id
+  from public.vendors v
+  where v.owner_user_id = auth.uid()
+  limit 1;
+$$;
+
 -- -----------------------------------------------------------------------------
 -- STORAGE policies (accommodation-images bucket)
 -- -----------------------------------------------------------------------------

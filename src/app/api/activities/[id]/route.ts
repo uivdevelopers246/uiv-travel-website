@@ -110,12 +110,12 @@ export async function PATCH(
     } else if (
       typeof body.duration_hours === "number" &&
       !Number.isNaN(body.duration_hours) &&
-      body.duration_hours >= 0 &&
+      body.duration_hours > 0 &&
       body.duration_hours <= 24
     ) {
       updates.duration_hours = body.duration_hours;
     } else {
-      return badRequest("duration_hours must be between 0 and 24, or null");
+      return badRequest("duration_hours must be greater than 0 and at most 24, or null");
     }
   }
   if (typeof body?.price_per_person !== "undefined") {

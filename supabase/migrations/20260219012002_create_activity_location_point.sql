@@ -13,7 +13,7 @@ begin
     where id = p_activity_id;
   else
     update public.activities
-      set location_point = st_setsrid(st_makepoint(p_lng, p_lat), 4326)
+      set location_point = extensions.st_setsrid(extensions.st_makepoint(p_lng, p_lat), 4326)
     where id = p_activity_id;
   end if;
 end;

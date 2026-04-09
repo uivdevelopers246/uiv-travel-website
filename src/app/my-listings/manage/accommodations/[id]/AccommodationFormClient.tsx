@@ -6,8 +6,11 @@ import { createClient } from "@/lib/supabase/client";
 import { accommodationTypes, amenityOptions } from "@/lib/accommodations/constants";
 import { applyCoordinatesToPayload } from "@/lib/utils/geo";
 import {
+  ALLOWED_IMAGE_EXTENSIONS_LABEL,
   DEFAULT_IMAGE_FALLBACK,
+  formatFileSize,
   getSafeImageUrl,
+  MAX_IMAGE_SIZE_LABEL,
   validateImageFile,
 } from "@/lib/utils/image";
 import { ImageManager, LocationPickerMap, type ManagedImage } from "@/components/shared";
@@ -128,6 +131,7 @@ export function AccommodationFormClient({
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [coverImageError, setCoverImageError] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [galleryImages, setGalleryImages] = useState<ManagedImage[]>(existingImages);
   const [coordinatesTouched, setCoordinatesTouched] = useState(false);
@@ -183,6 +187,7 @@ export function AccommodationFormClient({
     event.preventDefault();
     setSaving(true);
     setMessage(null);
+    setCoverImageError(null);
 
     let imageUrl = form.image_url.trim() || null;
 
@@ -190,7 +195,7 @@ export function AccommodationFormClient({
       // Validate file using shared utility
       const validationError = validateImageFile(imageFile);
       if (validationError) {
-        setMessage({ type: "error", text: validationError });
+        setCoverImageError(validationError);
         setSaving(false);
         return;
       }
@@ -210,7 +215,7 @@ export function AccommodationFormClient({
           });
 
         if (uploadError) {
-          setMessage({ type: "error", text: uploadError.message });
+          setCoverImageError(uploadError.message);
           setSaving(false);
           return;
         }
@@ -222,7 +227,7 @@ export function AccommodationFormClient({
         imageUrl = data.publicUrl;
       } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : "Image upload failed.";
-        setMessage({ type: "error", text: msg });
+        setCoverImageError(msg);
         setSaving(false);
         return;
       }
@@ -724,12 +729,23 @@ export function AccommodationFormClient({
                   <input
                     type="file"
                     accept="image/*"
-                    onChange={e => setImageFile(e.target.files?.[0] ?? null)}
+                    onChange={e => {
+                      setCoverImageError(null);
+                      setImageFile(e.target.files?.[0] ?? null);
+                    }}
                     className="mt-2 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-[#407FC2] focus:border-transparent"
                   />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Accepted formats: {ALLOWED_IMAGE_EXTENSIONS_LABEL}. Maximum file size: {MAX_IMAGE_SIZE_LABEL}.
+                  </p>
                   {imageFile && (
                     <p className="mt-1 text-xs text-slate-500">
-                      Selected: {imageFile.name}
+                      Selected: {imageFile.name} ({formatFileSize(imageFile.size)})
+                    </p>
+                  )}
+                  {coverImageError && (
+                    <p className="mt-2 text-sm text-rose-700">
+                      {coverImageError}
                     </p>
                   )}
                 </div>
@@ -752,7 +768,6 @@ export function AccommodationFormClient({
                   storagePath={vendorId}
                   apiEndpoint={`/api/accommodations/${accommodationId}/images`}
                   onImagesChange={setGalleryImages}
-                  onError={(error) => setMessage({ type: "error", text: error })}
                   label="Gallery Images"
                 />
               </section>

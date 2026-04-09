@@ -2,7 +2,13 @@
 
 import { useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { validateImageFile, getSafeImageUrl, DEFAULT_IMAGE_FALLBACK } from "@/lib/utils/image";
+import {
+  ALLOWED_IMAGE_EXTENSIONS_LABEL,
+  DEFAULT_IMAGE_FALLBACK,
+  getSafeImageUrl,
+  MAX_IMAGE_SIZE_LABEL,
+  validateImageFile,
+} from "@/lib/utils/image";
 
 export type ManagedImage = {
   id: string;
@@ -43,6 +49,7 @@ export function ImageManager({
 }: Props) {
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canAddMore = images.length < maxImages;
@@ -59,10 +66,12 @@ export function ImageManager({
     // Validate file
     const validationError = validateImageFile(file);
     if (validationError) {
+      setError(validationError);
       onError?.(validationError);
       return;
     }
 
+    setError(null);
     setUploading(true);
 
     try {
@@ -106,6 +115,7 @@ export function ImageManager({
       onImagesChange([...images, newImage]);
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Failed to upload image";
+      setError(msg);
       onError?.(msg);
     } finally {
       setUploading(false);
@@ -115,6 +125,7 @@ export function ImageManager({
   const handleDelete = async (imageId: string) => {
     if (deletingId) return; // Prevent multiple deletes
 
+    setError(null);
     setDeletingId(imageId);
 
     try {
@@ -133,6 +144,7 @@ export function ImageManager({
       onImagesChange(images.filter((img) => img.id !== imageId));
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Failed to delete image";
+      setError(msg);
       onError?.(msg);
     } finally {
       setDeletingId(null);
@@ -214,10 +226,16 @@ export function ImageManager({
         )}
       </div>
 
+      {error && (
+        <div className="rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </div>
+      )}
+
       {/* Help text */}
       <p className="text-xs text-slate-500">
         Click the + button to add images. Hover over an image and click X to remove it.
-        Maximum {maxImages} images allowed.
+        Maximum {maxImages} images allowed. Accepted formats: {ALLOWED_IMAGE_EXTENSIONS_LABEL}. Max file size: {MAX_IMAGE_SIZE_LABEL}.
       </p>
     </div>
   );

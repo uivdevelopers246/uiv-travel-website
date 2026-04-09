@@ -29,7 +29,7 @@
     "baseline-browser-mapping": "^2.9.19",
     "eslint": "^9",
     "eslint-config-next": "16.0.3",
-    "supabase": "^2.58.5",
+    "supabase": "^2.88.1",
     "tailwindcss": "^4",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
