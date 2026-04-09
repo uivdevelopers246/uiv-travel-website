@@ -4,7 +4,7 @@
 
 -- 1) Point for map pins and distance queries (WGS84)
 alter table public.activities
-  add column if not exists location_point geometry(Point, 4326);
+  add column if not exists location_point extensions.geometry(Point, 4326);
 
 comment on column public.activities.location_point is
   'Geographic point (WGS84) for map pins and distance queries; from geocoding or pin-drop.';

@@ -79,7 +79,7 @@ create table public.accommodations (
   image_url text,
   is_featured boolean not null default false,
 
-  location_point geometry(Point, 4326),
+  location_point extensions.geometry(Point, 4326),
 
   status text not null default 'draft'
     check (status in ('draft', 'published', 'archived')),
@@ -135,7 +135,7 @@ begin
     where id = p_accommodation_id;
   else
     update public.accommodations
-      set location_point = st_setsrid(st_makepoint(p_lng, p_lat), 4326)
+      set location_point = extensions.st_setsrid(extensions.st_makepoint(p_lng, p_lat), 4326)
     where id = p_accommodation_id;
   end if;
 end;

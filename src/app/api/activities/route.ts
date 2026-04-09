@@ -58,10 +58,10 @@ export async function POST(req: Request) {
   if (body.duration_hours !== undefined && body.duration_hours !== null) {
     if (
       typeof body.duration_hours !== "number" ||
-      body.duration_hours < 0 ||
+      body.duration_hours <= 0 ||
       body.duration_hours > 24
     ) {
-      return badRequest("Duration must be between 0 and 24 hours");
+      return badRequest("Duration must be greater than 0 and at most 24 hours");
     }
   }
 

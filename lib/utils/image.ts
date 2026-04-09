@@ -101,9 +101,26 @@ export const DEFAULT_IMAGE_FALLBACK = "/images/hero/ScenicHill.JPG";
 
 /** Maximum file size for image uploads (5MB) */
 export const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
+export const MAX_IMAGE_SIZE_LABEL = "5 MB";
 
 /** Allowed image file extensions */
 export const ALLOWED_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp"] as const;
+export const ALLOWED_IMAGE_EXTENSIONS_LABEL = ALLOWED_IMAGE_EXTENSIONS
+  .map((ext) => ext.toUpperCase())
+  .join(", ");
+
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  const kilobytes = bytes / 1024;
+  if (kilobytes < 1024) {
+    return `${kilobytes.toFixed(1)} KB`;
+  }
+
+  return `${(kilobytes / 1024).toFixed(1)} MB`;
+}
 
 /**
  * Validates an image file for upload.
@@ -112,12 +129,12 @@ export const ALLOWED_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp"] as
  */
 export function validateImageFile(file: File): string | null {
   if (file.size > MAX_IMAGE_SIZE_BYTES) {
-    return "Image file is too large. Maximum size is 5MB.";
+    return `Image file is too large (${formatFileSize(file.size)}). Maximum size is ${MAX_IMAGE_SIZE_LABEL}.`;
   }
 
   const fileExt = file.name.split(".").pop()?.toLowerCase() || "";
   if (!ALLOWED_IMAGE_EXTENSIONS.includes(fileExt as typeof ALLOWED_IMAGE_EXTENSIONS[number])) {
-    return "Only image files are allowed (jpg, jpeg, png, gif, webp).";
+    return `Only image files are allowed (${ALLOWED_IMAGE_EXTENSIONS_LABEL}).`;
   }
 
   return null;
