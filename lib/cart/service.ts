@@ -437,6 +437,9 @@ export async function validateActivityCartForCheckout(
     if (!line.slot_id) {
       throw new Error("Cart line is missing a slot");
     }
+    if (line.participants == null) {
+      throw new Error("participants must be a positive integer");
+    }
     assertPositiveInteger(line.participants, "participants");
   }
 
@@ -464,10 +467,14 @@ export async function validateActivityCartForCheckout(
     pricePerPersonUsdToCents(activity.price_per_person);
 
     const confirmedBooked = bookedMap.get(line.slot_id!) ?? 0;
+    const participants = line.participants;
+    if (participants == null) {
+      throw new Error("participants must be a positive integer");
+    }
     assertWithinRemainingCapacity(
       slot.max_capacity,
       confirmedBooked,
-      line.participants,
+      participants,
     );
   }
 }

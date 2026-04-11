@@ -190,3 +190,31 @@ export async function updateOrderStatus(
   }
   return data;
 }
+
+/**
+ * Webhook fulfillment: set **`paid`** and persist **`stripe_payment_intent_id`** in one update.
+ * Use with a **service-role** client after verifying Stripe `checkout.session.completed`.
+ */
+export async function updateOrderPaidWithStripePaymentIntent(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+  stripePaymentIntentId: string,
+): Promise<Order> {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      status: "paid",
+      stripe_payment_intent_id: stripePaymentIntentId,
+    })
+    .eq("id", orderId)
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw orderServiceError("Could not mark order paid with payment intent", error);
+  }
+  if (!data) {
+    throw new Error("Order not found");
+  }
+  return data;
+}
