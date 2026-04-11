@@ -192,3 +192,23 @@ export async function cancelActivityBooking(
     throw bookingServiceError("Could not cancel activity booking", error);
   }
 }
+
+/**
+ * Cancels all **confirmed** bookings for an order (webhook rollback). RPC is granted
+ * to **`service_role` only** — use a service-role Supabase client.
+ */
+export async function cancelActivityBookingsForOrder(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+): Promise<void> {
+  const { error } = await supabase.rpc("cancel_activity_bookings_for_order", {
+    p_order_id: orderId,
+  });
+
+  if (error) {
+    throw bookingServiceError(
+      "Could not cancel activity bookings for order",
+      error,
+    );
+  }
+}

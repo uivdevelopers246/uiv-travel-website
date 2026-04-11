@@ -13,6 +13,8 @@ const BAD_REQUEST_EXACT = new Set([
   "Not enough spots left for this time slot",
   "Only activity cart lines can be updated",
   "Cart line is missing a slot",
+  "Cart is empty",
+  "Checkout is only available for activity items",
 ]);
 
 /**

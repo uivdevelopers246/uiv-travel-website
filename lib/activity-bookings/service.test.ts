@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   cancelActivityBooking,
+  cancelActivityBookingsForOrder,
   createActivityBookingAfterPayment,
   getActivityBookingById,
   listActivityBookings,
@@ -285,6 +286,31 @@ describe("activity-bookings service (reads + cancel)", () => {
 
     await expect(cancelActivityBooking(supabase, "bad")).rejects.toThrow(
       "Could not cancel activity booking: Booking not found, not owned by caller, or not cancellable",
+    );
+  });
+
+  it("cancelActivityBookingsForOrder: RPC success", async () => {
+    const { supabase } = makeMockSupabaseForCancel();
+    supabase.rpc.mockResolvedValueOnce({ error: null });
+
+    await cancelActivityBookingsForOrder(supabase, "order-uuid");
+
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      "cancel_activity_bookings_for_order",
+      { p_order_id: "order-uuid" },
+    );
+  });
+
+  it("cancelActivityBookingsForOrder: RPC error throws", async () => {
+    const { supabase } = makeMockSupabaseForCancel();
+    supabase.rpc.mockResolvedValueOnce({
+      error: { message: "order not found" },
+    });
+
+    await expect(
+      cancelActivityBookingsForOrder(supabase, "bad-order"),
+    ).rejects.toThrow(
+      "Could not cancel activity bookings for order: order not found",
     );
   });
 });

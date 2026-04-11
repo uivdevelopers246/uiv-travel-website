@@ -400,3 +400,93 @@ export async function removeCartLine(
     throw new Error("Cart line not found");
   }
 }
+
+/**
+ * Read-only checkout gate: non-empty cart; every line must be **activity** (MVP);
+ * for each line, same checks as `addOrMergeActivityLine` / `updateCartLineParticipants`
+ * (slot exists and not cancelled, published activity, price set, participants within
+ * remaining capacity vs confirmed bookings).
+ *
+ * @throws Error messages aligned with cart API mapping (`cart-route-errors.ts`).
+ */
+export async function validateActivityCartForCheckout(
+  supabase: SupabaseClient<Database>,
+): Promise<void> {
+  await requireAuthUserId(supabase);
+
+  const lines = await listCartLines(supabase);
+  if (lines.length === 0) {
+    throw new Error("Cart is empty");
+  }
+
+  for (const line of lines) {
+    if (line.line_type !== CART_LINE_TYPE_ACTIVITY) {
+      throw new Error("Checkout is only available for activity items");
+    }
+  }
+
+  const uniqueSlotIds = [
+    ...new Set(
+      lines
+        .map((l) => l.slot_id)
+        .filter((id): id is string => id != null && id !== ""),
+    ),
+  ];
+
+  for (const line of lines) {
+    if (!line.slot_id) {
+      throw new Error("Cart line is missing a slot");
+    }
+    assertPositiveInteger(line.participants, "participants");
+  }
+
+  const slotById = new Map<string, SlotRow>();
+  for (const sid of uniqueSlotIds) {
+    slotById.set(sid, await fetchSlotForCartOrThrow(supabase, sid));
+  }
+
+  const bookedMap = await sumConfirmedParticipantsBySlotIds(
+    supabase,
+    uniqueSlotIds,
+  );
+
+  for (const line of lines) {
+    const slot = slotById.get(line.slot_id!);
+    if (!slot) {
+      throw new Error("Slot not found");
+    }
+
+    const activity = await getActivityById(supabase, slot.activity_id);
+    if (!activity) {
+      throw new Error("Activity is not available for booking");
+    }
+
+    pricePerPersonUsdToCents(activity.price_per_person);
+
+    const confirmedBooked = bookedMap.get(line.slot_id!) ?? 0;
+    assertWithinRemainingCapacity(
+      slot.max_capacity,
+      confirmedBooked,
+      line.participants,
+    );
+  }
+}
+
+/**
+ * Removes all cart lines for a user. Intended for **service-role** clients after
+ * successful payment (RLS bypass); do not call from user-session code for arbitrary
+ * `userId` without an authorization boundary.
+ */
+export async function deleteAllCartLinesForUser(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("cart_lines")
+    .delete()
+    .eq("user_id", userId);
+
+  if (error) {
+    throw cartServiceError("Could not clear cart lines for user", error);
+  }
+}

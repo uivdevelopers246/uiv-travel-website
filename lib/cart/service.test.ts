@@ -12,11 +12,13 @@ import { getActivityById } from "@/lib/activities/service";
 import { sumConfirmedParticipantsBySlotIds } from "@/lib/slots/service";
 import {
   addOrMergeActivityLine,
+  deleteAllCartLinesForUser,
   listCartLines,
   listCartLinesWithPreview,
   pricePerPersonUsdToCents,
   removeCartLine,
   updateCartLineParticipants,
+  validateActivityCartForCheckout,
 } from "./service";
 import { CART_LINE_TYPE_ACTIVITY } from "./constants";
 
@@ -637,5 +639,122 @@ describe("removeCartLine", () => {
     await expect(removeCartLine(supabase as never, lineId)).rejects.toThrow(
       "Unauthorized",
     );
+  });
+});
+
+describe("validateActivityCartForCheckout", () => {
+  it("throws Unauthorized without a user", async () => {
+    const supabase: Record<string, unknown> = {
+      auth: {
+        getUser: vi.fn().mockResolvedValue({
+          data: { user: null },
+          error: null,
+        }),
+      },
+    };
+
+    await expect(
+      validateActivityCartForCheckout(supabase as never),
+    ).rejects.toThrow("Unauthorized");
+  });
+
+  it("throws when cart is empty", async () => {
+    const cartQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [], error: null }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn(() => cartQuery),
+      ...authUser(),
+    };
+
+    await expect(
+      validateActivityCartForCheckout(supabase as never),
+    ).rejects.toThrow("Cart is empty");
+  });
+
+  it("throws when cart has a non-activity line", async () => {
+    const line = baseCartLine({ line_type: "accommodation" });
+    const cartQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [line], error: null }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn(() => cartQuery),
+      ...authUser(),
+    };
+
+    await expect(
+      validateActivityCartForCheckout(supabase as never),
+    ).rejects.toThrow("Checkout is only available for activity items");
+  });
+
+  it("passes when activity lines are valid", async () => {
+    const line = baseCartLine({ participants: 2 });
+    const cartQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [line], error: null }),
+    };
+    const slotQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({
+        data: baseSlotRow(),
+        error: null,
+      }),
+    };
+
+    const supabase: Record<string, unknown> = {
+      from: vi.fn((table: string) => {
+        if (table === "cart_lines") return cartQuery;
+        if (table === "availability_slots") return slotQuery;
+        throw new Error(`unexpected table ${table}`);
+      }),
+      ...authUser(),
+    };
+
+    vi.mocked(sumConfirmedParticipantsBySlotIds).mockResolvedValue(
+      new Map([[slotId, 0]]),
+    );
+
+    await expect(
+      validateActivityCartForCheckout(supabase as never),
+    ).resolves.toBeUndefined();
+
+    expect(getActivityById).toHaveBeenCalledWith(supabase, activityId);
+  });
+});
+
+describe("deleteAllCartLinesForUser", () => {
+  it("deletes all rows for user_id", async () => {
+    const delQuery: Record<string, unknown> = {
+      delete: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ error: null }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn(() => delQuery),
+    };
+
+    await deleteAllCartLinesForUser(supabase as never, userId);
+
+    expect(supabase.from).toHaveBeenCalledWith("cart_lines");
+    expect(delQuery.delete).toHaveBeenCalled();
+    expect(delQuery.eq).toHaveBeenCalledWith("user_id", userId);
+  });
+
+  it("throws on delete error", async () => {
+    const delQuery: Record<string, unknown> = {
+      delete: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({
+        error: { message: "permission denied" },
+      }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn(() => delQuery),
+    };
+
+    await expect(
+      deleteAllCartLinesForUser(supabase as never, userId),
+    ).rejects.toThrow("Could not clear cart lines for user: permission denied");
   });
 });
