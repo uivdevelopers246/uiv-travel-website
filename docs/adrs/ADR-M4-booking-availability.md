@@ -2,12 +2,12 @@
 
 **Status:** Accepted  
 **Milestone:** M4 — Booking & Availability  
-**Date:** 2026-03-28 (updated 2026-04-03)  
+**Date:** 2026-03-28 (updated 2026-04-08)  
 **Deciders:** UIV Travel development team  
 
 **Related ADRs**
 
-- **[ADR-M4-B: Shopping Cart & Checkout](./ADR-M4-shopping-cart-and-checkout.md)** — authenticated cart, `orders`, Stripe Checkout Session, **creation of `activity_bookings` after payment** (webhook), order-level Stripe IDs, merge rules, refund-on-full-failure.
+- **[ADR-M4-B: Shopping Cart & Checkout](./ADR-M4-shopping-cart-and-checkout.md)** — authenticated cart, `orders`, Stripe Checkout Session, **creation of `activity_bookings` after payment** (webhook), **`cancel_activity_bookings_for_order`** (service-role rollback when fulfillment fails after charge), order-level Stripe IDs, merge rules, refund-on-full-failure.
 
 ---
 
@@ -198,6 +198,8 @@ create policy "admins_all_bookings" on activity_bookings
 
 **User cancel:** Authenticated users do not get a broad `UPDATE` policy. They cancel via the **`cancel_activity_booking`** `SECURITY DEFINER` RPC (sets `status` to `cancelled` for their own `confirmed` row only). Other status transitions use the service layer with a server-side client (e.g. admin JWT with `FOR ALL`) or privileged paths as documented in ADR-M4-B.
 
+**Fulfillment rollback (ADR-M4-B):** When the Stripe webhook partially inserts bookings and must **fail the whole order**, **`cancel_activity_booking`** is insufficient (it is scoped to the **caller's** row). **`cancel_activity_bookings_for_order(p_order_id)`** — `SECURITY DEFINER`, **`service_role` execute only** — cancels **`confirmed`** rows for that **`order_id`**. Canonical definition and usage are in [ADR-M4-B](./ADR-M4-shopping-cart-and-checkout.md).
+
 ---
 
 ## API Routes
@@ -211,6 +213,8 @@ create policy "admins_all_bookings" on activity_bookings
 | `GET` | `/api/activities/[id]/slots/manage` | Vendor | Full slot list for the vendor's own activity — all statuses, all dates. Used in the vendor management UI. |
 | `PATCH` | `/api/activities/[id]/slots/[slotId]` | Vendor | Update a slot. Blocked if any active bookings exist on the slot. |
 | `DELETE` | `/api/activities/[id]/slots/[slotId]` | Vendor | Cancel a slot (`is_cancelled = true`). Blocked if computed `booked_count > 0`. Hard deletes are never used. |
+
+**Public list capacity (RLS):** `listPublicSlotsForActivity` in `lib/slots/service.ts` sums confirmed `participants` on `activity_bookings`. **Anonymous** roles have no `SELECT` policy on that table today, so unauthenticated callers may see **remaining capacity overstated** until an anon-safe aggregate (policy/RPC/view) exists. Authenticated users get accurate sums where RLS permits.
 
 ### Activity Bookings
 
@@ -226,7 +230,7 @@ create policy "admins_all_bookings" on activity_bookings
 
 | Method | Route | Auth | Description |
 |--------|-------|------|-------------|
-| `POST` | `/api/webhooks/stripe` | None (signature verified) | See **ADR-M4-B**. Verifies `stripe-signature`. On successful Checkout Session / PaymentIntent completion, **idempotently** creates `activity_bookings` via **`create_activity_booking_after_payment`** per line (atomic capacity + insert). On fulfillment failure after charge: **refund full order** (MVP policy). |
+| `POST` | `/api/webhooks/stripe` | None (signature verified) | See **ADR-M4-B**. Verifies `stripe-signature`. On **`checkout.session.completed`** with paid status, **idempotently** creates `activity_bookings` via **`create_activity_booking_after_payment`** per line (sequential; atomic capacity + insert per line). On fulfillment failure after charge: **`cancel_activity_bookings_for_order`**, **refund full order** (MVP policy). |
 
 ### Shopping cart & checkout
 
@@ -265,9 +269,10 @@ supabase/migrations/
   YYYYMMDD_rls_orders.sql
   YYYYMMDD_rls_cart_lines.sql
   YYYYMMDD_reserve_slot_capacity_rpc.sql   -- `create_activity_booking_after_payment` (atomic booking RPC)
+  YYYYMMDD_cancel_activity_bookings_for_order.sql  -- ADR-M4-B: webhook rollback; service_role only
 ```
 
-Order migrations before `activity_bookings` if the booking table references `orders`. One migration per concern for clean rollback.
+Order migrations before `activity_bookings` if the booking table references `orders`. One migration per concern for clean rollback. **`cancel_activity_bookings_for_order`** is specified in ADR-M4-B (Stripe fulfillment rollback).
 
 ### Service Layer
 
@@ -279,11 +284,12 @@ lib/activity-bookings/
   service.test.ts    — Vitest
 
 lib/slots/
-  service.ts         — createSlot, listPublicSlots, listVendorSlots, updateSlot, cancelSlot
-  types.ts           — SlotDisplay, CreateSlotInput
+  service.ts         — sumConfirmedParticipantsBySlotIds, computeEndsAtIso, listPublicSlotsForActivity, listManageSlotsForActivity, createAvailabilitySlot, updateAvailabilitySlot, cancelAvailabilitySlot
+  types.ts           — AvailabilitySlot, CreateSlotInput, UpdateSlotInput, PublicSlotWithCapacity, ManageSlotRow
+  service.test.ts    — Vitest
 
-src/lib/cart/        — ADR-M4-B
-src/lib/orders/      — ADR-M4-B
+lib/cart/            — ADR-M4-B
+lib/orders/          — ADR-M4-B
 ```
 
 ### API Routes

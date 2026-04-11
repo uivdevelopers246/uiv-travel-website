@@ -15,7 +15,7 @@ UIV Travel is a Barbados-focused travel site where **vendors** list **activities
 
 ## Runtime Environments
 
-- **Server:** Next.js server (API routes, Server Components, Server Actions). Uses `createClient()` from `@/lib/supabase/server` (cookie-based Supabase client via `@supabase/ssr`).
+- **Server:** Next.js server (API routes, Server Components, Server Actions). Uses `createClient()` from `@/lib/supabase/server` (cookie-based Supabase client via `@supabase/ssr`). **Privileged server-only paths** (e.g. verified Stripe webhooks) use `createServiceRoleClient()` from `@/lib/supabase/service-role` with `SUPABASE_SERVICE_ROLE_KEY` — **never** exposed to the browser; bypasses RLS for controlled workflows only.
 - **Client:** Browser. Uses `createClient()` from `@/lib/supabase/client` (browser client). Client components fetch from API routes or use Supabase client for auth state and storage uploads.
 - **Deployment:** Assumed Vercel (signup uses `NEXT_PUBLIC_VERCEL_URL`). Supabase project is separate (hosted Supabase).
 
@@ -26,9 +26,10 @@ UIV Travel is a Barbados-focused travel site where **vendors** list **activities
 | ------------------------------------------------- | ----------------------------------------------------------- |
 | `NEXT_PUBLIC_SUPABASE_URL`                        | Supabase project URL (required at build/run)                |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`            | Anon key for browser and server Supabase clients (required) |
-| `NEXT_PUBLIC_SITE_URL` / `NEXT_PUBLIC_VERCEL_URL` | Signup redirect URL (production)                            |
-| `STRIPE_SECRET_KEY`                               | Server-only; Stripe API (Checkout Session, refunds). Planned for M4 — see `docs/adrs/ADR-M4-shopping-cart-and-checkout.md` |
-| `STRIPE_WEBHOOK_SECRET`                           | Server-only; verifies `stripe-signature` on `/api/webhooks/stripe`. Planned for M4 |
+| `NEXT_PUBLIC_SITE_URL` / `NEXT_PUBLIC_VERCEL_URL` | Public absolute origin: auth email redirects, Stripe Checkout `success_url` / `cancel_url` (`getPublicSiteUrl()` in `@/lib/stripe/server`). Prefer `NEXT_PUBLIC_SITE_URL` in production; on Vercel, `NEXT_PUBLIC_VERCEL_URL` is set (host without scheme — code prepends `https://`). Local dev defaults to `http://localhost:3000` when neither is set. |
+| `SUPABASE_SERVICE_ROLE_KEY`                       | **Server-only** (never `NEXT_PUBLIC_*`). Privileged Supabase JWT for `createServiceRoleClient()` — webhook fulfillment and other trusted bypass-RLS paths only; not for normal user requests. In the Supabase Dashboard this value may be labeled the **Secret** API key (replacing legacy **service_role**); it must **not** be the publishable key. |
+| `STRIPE_SECRET_KEY`                               | **Server-only.** Stripe API (`getStripe()` in `@/lib/stripe/server`): Checkout Session, refunds. Restricted keys need at least **Checkout Sessions (write)** and **Charges and Refunds (write)**. See `docs/adrs/ADR-M4-shopping-cart-and-checkout.md`. |
+| `STRIPE_WEBHOOK_SECRET`                           | **Server-only.** Webhook signing secret (`whsec_…`) for `stripe.webhooks.constructEvent` on `POST /api/webhooks/stripe` (`getStripeWebhookSecret()` in `@/lib/stripe/server`). Must match the Stripe **Test** or **Live** mode and endpoint used to register the webhook (CLI secret ≠ Dashboard production endpoint secret). |
 
 **Booking & checkout (M4):** See `docs/adrs/ADR-M4-booking-availability.md` (slots, `activity_bookings`, capacity RPC) and `docs/adrs/ADR-M4-shopping-cart-and-checkout.md` (cart, `orders`, Stripe webhook fulfillment). **`activity_bookings` rows are inserted only through privileged server paths** (Stripe webhook with **service role** after signature verification, or site admin); the **`authenticated`** role has **no** `INSERT` policy on that table, so the publishable key cannot mint paid bookings without payment fulfillment. **Read/cancel APIs** live under `src/app/api/activity-bookings` (consumer), `src/app/api/vendor/activity-bookings` (vendor-only list/detail), and `src/app/api/admin/activity-bookings` (admin list + PATCH to `completed`); handlers call `lib/activity-bookings/service.ts` with the cookie-based server client (RLS applies).
 
@@ -79,7 +80,10 @@ UIV Travel is a Barbados-focused travel site where **vendors** list **activities
 
 ## Background Jobs / Webhooks
 
-None yet. No workers, no webhook handlers, no cron in repo.
+- **Stripe:** `POST /api/webhooks/stripe` verifies `Stripe-Signature` with `STRIPE_WEBHOOK_SECRET`, then uses **`createServiceRoleClient()`** for DB work (orders, `create_activity_booking_after_payment`, cart clearing, idempotency in `stripe_webhook_events`). No workers or cron in repo; Stripe retries on non-2xx responses.
+  - **Route URL:** The App Router file `src/app/api/webhooks/stripe/route.ts` maps to **`/api/webhooks/stripe`** (HTTPS only in production).
+  - **Production (e.g. Vercel):** Register a **Webhook endpoint** destination in the Stripe Dashboard (**Workbench** or **Developers → Webhooks**, depending on UI) with URL `https://<your-public-host>/api/webhooks/stripe`, where `<your-public-host>` is the project’s default `*.vercel.app` domain or a **custom domain** listed under Vercel **Project → Settings → Domains**. Subscribe at minimum to **`checkout.session.completed`**. Copy the endpoint **signing secret** into `STRIPE_WEBHOOK_SECRET` for the same environment (Test vs Live must match the Dashboard mode and `STRIPE_SECRET_KEY`). Set all related env vars on Vercel **Project → Settings → Environment Variables** and redeploy if the runtime should pick up new secrets.
+  - **Local testing:** `stripe listen --forward-to localhost:3000/api/webhooks/stripe` (adjust host/port as needed); use the CLI-printed `whsec_` as `STRIPE_WEBHOOK_SECRET` for that session.
 
 ## Error Handling & Observability
 

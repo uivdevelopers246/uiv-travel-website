@@ -12,11 +12,16 @@ export async function getCurrentUserIdOrThrow(
   return userData.user.id;
 }
 
-export async function getOwnedVendorIdOrThrow(
+/**
+ * Returns `vendors.id` for the vendor whose `owner_user_id` matches the caller,
+ * or matches `forUserId` when provided (e.g. after `getCurrentUserIdOrThrow`).
+ */
+export async function getVendorIdForCurrentUser(
   supabase: SupabaseClient<Database>,
-  ownerUserId?: string,
+  forUserId?: string,
 ) {
-  const resolvedOwnerUserId = ownerUserId ?? (await getCurrentUserIdOrThrow(supabase));
+  const resolvedOwnerUserId =
+    forUserId ?? (await getCurrentUserIdOrThrow(supabase));
 
   const { data: vendor, error: vendorError } = await supabase
     .from("vendors")

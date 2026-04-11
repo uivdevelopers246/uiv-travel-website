@@ -20,6 +20,7 @@
     ],
     "baseUrl": ".",
     "paths": {
+      "@/api-shared/*": ["./src/app/api/_shared/*"],
       "@/*": ["./src/*"],
       "@/lib/*": ["./lib/*"],
       "@/supabase/types/*": ["./supabase/types/*"]

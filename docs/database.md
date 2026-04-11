@@ -1,6 +1,6 @@
 ## Overview
 
-The database is Supabase Postgres in the `public` schema, with PostGIS in `extensions`. It backs a Barbados travel app: **profiles** (1:1 with auth users), **vendors** (one per owner, with optional business profile columns), **site_admins** (admin users), **activities**, and **accommodations** (vendor-owned listings with optional map pins). **M4** adds **`orders`**, **`availability_slots`**, and **`activity_bookings`** for paid activity checkout and slot capacity (see ADRs in `docs/adrs/`). RLS is enabled on all application tables; policies evolved across migrations (see Migration Workflow). Column-level grants on `activities` and `accommodations` restrict which columns authenticated users can write. `location_point` on activities and accommodations is set or cleared only via **`set_activity_location_point`** and **`set_accommodation_location_point`** RPCs using user-provided coordinates (no geocoding in migrations). **`activity_bookings`:** ordinary **`authenticated` users have no `INSERT` policy**; rows are created by the **Stripe webhook** using the **service role** (and by site admins via `FOR ALL`), per ADR-M4-A / ADR-M4-B.
+The database is Supabase Postgres in the `public` schema, with PostGIS in `extensions`. It backs a Barbados travel app: **profiles** (1:1 with auth users), **vendors** (one per owner, with optional business profile columns), **site_admins** (admin users), **activities**, and **accommodations** (vendor-owned listings with optional map pins). **M4** adds **`orders`**, **`cart_lines`**, **`stripe_webhook_events`**, **`availability_slots`**, and **`activity_bookings`** for paid activity checkout, cart persistence, webhook idempotency, and slot capacity (see ADRs in `docs/adrs/`). RLS is enabled on all application tables; policies evolved across migrations (see Migration Workflow). Column-level grants on `activities` and `accommodations` restrict which columns authenticated users can write. `location_point` on activities and accommodations is set or cleared only via **`set_activity_location_point`** and **`set_accommodation_location_point`** RPCs using user-provided coordinates (no geocoding in migrations). **`activity_bookings`:** ordinary **`authenticated` users have no `INSERT` policy**; rows are created by the **Stripe webhook** using the **service role** (and by site admins via `FOR ALL`), per ADR-M4-A / ADR-M4-B. **`stripe_webhook_events`** is for **service-role-only** idempotency (RLS on, no policies for JWT roles); do not query it from the browser.
 
 ## Core Tables
 
@@ -80,13 +80,21 @@ Policies below reflect the consolidated vendors/activities migration (`202601290
 - **Security definer:** `is_site_admin()`, `is_vendor_user()`, `vendor_id_for_user()` and trigger functions `handle_new_user()`, `handle_audit_fields()` are `security definer` so they run with definer rights (e.g. read `site_admins`/`vendors` for RLS). `is_vendor_owner(v_id)` is not security definer; it runs as invoker and relies on RLS.
 - **RPCs:** `set_activity_location_point` and `set_accommodation_location_point` are revoked from `public` and granted to `authenticated`. Neither RPC checks ownership in SQL; RLS on the target table applies to the underlying UPDATE, so only vendor owners or admins can change rows they are allowed to update.
 
-### M4: `availability_slots`, `activity_bookings`, `orders`
+### M4: `availability_slots`, `activity_bookings`, `orders`, `cart_lines`, `stripe_webhook_events`
 
 | Table | Notes |
 |-------|--------|
 | **`availability_slots`** | Vendor/admin manage slots; public **select** for non-cancelled slots tied to **published** activities (see `20260403120400_rls_availability_slots.sql`). |
 | **`activity_bookings`** | **Select:** booking owner (`user_id`), vendor owner (`is_vendor_owner(vendor_id)`), site admin. **`INSERT`:** not allowed for **`authenticated`** — Stripe webhook uses **service role** with **`create_activity_booking_after_payment`** (atomic capacity + insert), or admin `FOR ALL` for direct inserts. **User cancel:** `cancel_activity_booking` RPC (`SECURITY DEFINER`). |
-| **`orders`** | RLS enabled in migration; detailed policies may follow in `rls_orders` (ADR-M4-B). |
+| **`orders`** | Checkout aggregate (amounts in cents, Stripe ids, status). **RLS** (`20260403120900_rls_orders.sql`): **`authenticated`** may **SELECT**, **INSERT**, **UPDATE** rows where `user_id = auth.uid()`; **no DELETE** policy for users. **Service role** bypasses RLS for webhooks. |
+| **`cart_lines`** | Per-user cart lines; activity lines use `slot_id` → `availability_slots` (no `activity_id` on row). Price fields are snapshots. **Partial unique** on `(user_id, slot_id)` where `line_type = 'activity'` (one merged line per slot). Activity lines require `slot_id` and `participants >= 1`; nullable **Phase 2** columns: `accommodation_id`, `check_in` / `check_out` (`date`), `guests`. **RLS** (`20260403120800_rls_cart_lines.sql`): **`authenticated`** **FOR ALL** on own rows (`user_id = auth.uid()`). |
+| **`stripe_webhook_events`** | **`stripe_event_id`** (PK), **`processed_at`**. RLS enabled with **no** `anon` / `authenticated` policies — only **service role** (bypasses RLS) should insert/select for idempotency. Not intended for client access. |
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|-------|--------|--------|--------|--------|
+| **`orders`** | **authenticated:** own rows (`user_id = auth.uid()`). | **authenticated:** with check own `user_id`. | **authenticated:** using/with check own `user_id`. | (No policy; default deny.) |
+| **`cart_lines`** | **authenticated:** own rows. | **authenticated:** with check own `user_id`. | **authenticated:** using/with check own `user_id`. | **authenticated:** own rows. |
+| **`stripe_webhook_events`** | RLS on; no JWT policies (service role only in practice). | Same. | Same. | Same. |
 
 ## Database Functions (RPC + helpers)
 
@@ -98,6 +106,7 @@ Policies below reflect the consolidated vendors/activities migration (`202601290
 | **set_accommodation_location_point** | Set or clear an accommodation’s geographic point. | `p_accommodation_id` uuid; `p_lng`, `p_lat` double precision. | Defaults null. | `authenticated` only. | Same clear/set semantics as activities; targets `accommodations.location_point`. |
 | **create_activity_booking_after_payment** | In one transaction: lock slot `FOR UPDATE`, sum `confirmed` participants vs `max_capacity`, verify slot matches `activity_id`/`vendor_id`, insert `activity_bookings`, return row. | Slot, activity, user, vendor, order ids; `p_participants`; cent columns; optional `p_discount_cents` (default 0), `p_status` (default `confirmed`). | See migration. | **`service_role` only** (not `authenticated`). | `SECURITY DEFINER`; prevents overbooking between check and insert. |
 | **cancel_activity_booking** | User sets own `confirmed` booking to `cancelled`. | `p_booking_id` uuid. | — | `authenticated`, `service_role`. | `SECURITY DEFINER`; triggers `updated_at` on the row. |
+| **cancel_activity_bookings_for_order** | Webhook rollback: sets all **`confirmed`** `activity_bookings` for an order to **`cancelled`**. | `p_order_id` uuid. | — | **`service_role` only** (not `authenticated`). | `SECURITY DEFINER`; `search_path` pinned; `REVOKE ALL` from `PUBLIC`. Use after partial fulfillment failure per ADR-M4-B. |
 
 ### RLS helper functions (used in policies)
 
@@ -141,6 +150,9 @@ Policies below reflect the consolidated vendors/activities migration (`202601290
 | idx_accommodations_status | accommodations | status | Filter published/draft/archived. |
 | idx_accommodations_vendor_created_at | accommodations | vendor_id, created_at DESC | Vendor listings by newest. |
 | idx_accommodations_location_point | accommodations | location_point (GIST) | Spatial queries. |
+| cart_lines_user_id_idx | cart_lines | user_id | List a user’s cart lines. |
+| cart_lines_user_id_slot_id_activity_key | cart_lines | user_id, slot_id (partial unique, `line_type = 'activity'`) | One merged activity line per slot (ADR-M4-B). |
+| (PK) | stripe_webhook_events | stripe_event_id | Webhook idempotency key. |
 
 Unique: `vendors.owner_user_id` (one vendor per user).
 
@@ -170,6 +182,11 @@ Migrations live under `supabase/migrations/` and are applied in filename order (
 18. `20260403120400_rls_availability_slots.sql` — RLS on `availability_slots`.
 19. `20260403120500_rls_activity_bookings.sql` — RLS on `activity_bookings`; `cancel_activity_booking` RPC.
 20. `20260403120600_activity_bookings_webhook_only_insert.sql` — Drops legacy `authenticated` INSERT policy on `activity_bookings` if present.
+21. `20260403120700_create_cart_lines.sql` — `cart_lines` table (constraints, partial unique index, `updated_at` trigger), RLS enabled.
+22. `20260403120800_rls_cart_lines.sql` — RLS policies on `cart_lines` (authenticated CRUD on own rows).
+23. `20260403120900_rls_orders.sql` — RLS policies on `orders` (authenticated select/insert/update own rows; no user delete).
+24. `20260403121000_stripe_webhook_events.sql` — `stripe_webhook_events` table; RLS enabled, no JWT policies.
+25. `20260403121100_cancel_activity_bookings_for_order.sql` — `cancel_activity_bookings_for_order` RPC; execute granted to `service_role` only.
 
 ## Common Query Patterns (from the codebase)
 

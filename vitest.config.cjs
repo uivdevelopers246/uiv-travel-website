@@ -5,7 +5,11 @@ const path = require("path");
 module.exports = {
   resolve: {
     alias: [
-      // IMPORTANT: put the more specific alias first
+      // IMPORTANT: put the more specific aliases first
+      {
+        find: /^@\/api-shared\/(.*)$/,
+        replacement: path.resolve(__dirname, "src/app/api/_shared/$1"),
+      },
       { find: /^@\/lib\/(.*)$/, replacement: path.resolve(__dirname, "lib/$1") },
       { find: /^@\/(.*)$/, replacement: path.resolve(__dirname, "src/$1") },
     ],
