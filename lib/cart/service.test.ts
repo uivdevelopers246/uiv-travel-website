@@ -723,6 +723,112 @@ describe("validateActivityCartForCheckout", () => {
 
     expect(getActivityById).toHaveBeenCalledWith(supabase, activityId);
   });
+
+  it("throws when a cart line is missing slot_id", async () => {
+    const line = baseCartLine({ slot_id: null });
+    const cartQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [line], error: null }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn(() => cartQuery),
+      ...authUser(),
+    };
+
+    await expect(
+      validateActivityCartForCheckout(supabase as never),
+    ).rejects.toThrow("Cart line is missing a slot");
+  });
+
+  it("throws when the slot is cancelled", async () => {
+    const line = baseCartLine({ participants: 2 });
+    const cartQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [line], error: null }),
+    };
+    const slotQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({
+        data: baseSlotRow({ is_cancelled: true }),
+        error: null,
+      }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn((table: string) => {
+        if (table === "cart_lines") return cartQuery;
+        if (table === "availability_slots") return slotQuery;
+        throw new Error(`unexpected table ${table}`);
+      }),
+      ...authUser(),
+    };
+
+    await expect(
+      validateActivityCartForCheckout(supabase as never),
+    ).rejects.toThrow("This slot is no longer available");
+  });
+
+  it("throws when the activity is not published or missing", async () => {
+    const line = baseCartLine({ participants: 2 });
+    const cartQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [line], error: null }),
+    };
+    const slotQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({
+        data: baseSlotRow(),
+        error: null,
+      }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn((table: string) => {
+        if (table === "cart_lines") return cartQuery;
+        if (table === "availability_slots") return slotQuery;
+        throw new Error(`unexpected table ${table}`);
+      }),
+      ...authUser(),
+    };
+
+    vi.mocked(getActivityById).mockResolvedValueOnce(null);
+
+    await expect(
+      validateActivityCartForCheckout(supabase as never),
+    ).rejects.toThrow("Activity is not available for booking");
+  });
+
+  it("throws when remaining capacity is exceeded", async () => {
+    const line = baseCartLine({ participants: 4 });
+    const cartQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [line], error: null }),
+    };
+    const slotQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({
+        data: baseSlotRow({ max_capacity: 5 }),
+        error: null,
+      }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn((table: string) => {
+        if (table === "cart_lines") return cartQuery;
+        if (table === "availability_slots") return slotQuery;
+        throw new Error(`unexpected table ${table}`);
+      }),
+      ...authUser(),
+    };
+
+    vi.mocked(sumConfirmedParticipantsBySlotIds).mockResolvedValue(
+      new Map([[slotId, 4]]),
+    );
+
+    await expect(
+      validateActivityCartForCheckout(supabase as never),
+    ).rejects.toThrow("Not enough spots left for this time slot");
+  });
 });
 
 describe("deleteAllCartLinesForUser", () => {
