@@ -181,9 +181,9 @@ Thin routes; logic in **`lib/cart/`**, **`lib/orders/`**, **`lib/activity-bookin
 
 ## Environment and operations
 
-- **`STRIPE_SECRET_KEY`**, **`STRIPE_WEBHOOK_SECRET`** — server-only; document in **`docs/architecture.md`** (existing env table).
+- **`STRIPE_SECRET_KEY`**, **`STRIPE_WEBHOOK_SECRET`** — server-only; document in **`docs/architecture.md`** (existing env table). **Vercel / production:** set env vars on the project, redeploy after secret changes; webhook URL is **`https://<public-host>/api/webhooks/stripe`** (see **Background Jobs / Webhooks** in `docs/architecture.md`).
 - **Local dev:** Stripe CLI **`stripe listen --forward-to …/api/webhooks/stripe`**.
-- **Production:** Register webhook URL in Stripe Dashboard; use **signing secret** from the same endpoint.
+- **Production:** Register a **Webhook endpoint** in Stripe (**Workbench** or **Developers → Webhooks**); subscribe to **`checkout.session.completed`**; use the endpoint **signing secret** (`whsec_`) for `STRIPE_WEBHOOK_SECRET` in the matching Test/Live mode.
 
 ---
 
