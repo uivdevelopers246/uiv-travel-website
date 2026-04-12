@@ -36,7 +36,7 @@ export function AccommodationCard({ accommodation }: Props) {
             <span>{accommodation.parish ?? accommodation.address ?? "Barbados"}</span>
             {accommodation.vendors?.name && <span>{accommodation.vendors.name}</span>}
           </div>
-          <h3 className="mt-3 text-xl font-semibold text-slate-900">
+          <h3 className="mt-3 min-h-[3.5rem] text-xl font-semibold text-slate-900 line-clamp-2">
             {accommodation.name}
           </h3>
           <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-500">
