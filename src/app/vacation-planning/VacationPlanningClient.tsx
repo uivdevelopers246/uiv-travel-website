@@ -94,41 +94,6 @@ function summarizeValues(
     .map(([value]) => labelMap?.[value] ?? formatLabel(value));
 }
 
-function StatCard({
-  label,
-  value,
-  tone = "default",
-}: {
-  label: string;
-  value: string;
-  tone?: "default" | "accent";
-}) {
-  return (
-    <div
-      className={`rounded-[28px] border p-5 shadow-[0_18px_55px_rgba(25,48,89,0.08)] ${
-        tone === "accent"
-          ? "border-[#193059] bg-[#193059] text-white"
-          : "border-[#d9e7f3] bg-white text-[#193059]"
-      }`}
-    >
-      <p
-        className={`text-xs font-semibold uppercase tracking-[0.26em] ${
-          tone === "accent" ? "text-[#FBCA1A]" : "text-[#407FC2]"
-        }`}
-        style={{ fontFamily: "var(--font-source-sans)" }}
-      >
-        {label}
-      </p>
-      <p
-        className="mt-3 text-3xl font-bold"
-        style={{ fontFamily: "var(--font-playfair)" }}
-      >
-        {value}
-      </p>
-    </div>
-  );
-}
-
 function BrowseButton({
   active,
   title,
@@ -513,36 +478,6 @@ export function VacationPlanningClient({ activities, accommodations }: Props) {
                 onClick={() => scrollToBrowse("activities")}
               />
             </div>
-
-            <div className="mt-5 grid grid-cols-2 gap-3">
-              <StatCard label="Published Stays" value={String(accommodations.length)} />
-              <StatCard
-                label="Published Activities"
-                value={String(activities.length)}
-              />
-              <div className="col-span-2">
-                <StatCard
-                  label="Starting From"
-                  value={
-                    accommodationStartingPrice != null
-                      ? formatPrice(accommodationStartingPrice, "/night")
-                      : activityStartingPrice != null
-                        ? formatPrice(activityStartingPrice, "/person")
-                        : "Contact for rates"
-                  }
-                  tone="accent"
-                />
-              </div>
-            </div>
-
-            <div className="mt-5 rounded-[28px] border border-[#d8e5f2] bg-white p-5 shadow-[0_18px_45px_rgba(25,48,89,0.08)]">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#407FC2]">
-                Travel Planning
-              </p>
-              <p className="mt-2 text-sm leading-6 text-slate-600">
-                Choose stays or activities above, then continue into the full Barbados listings below.
-              </p>
-            </div>
           </div>
 
           <div className="hidden items-center gap-10 lg:grid lg:grid-cols-[1.02fr_0.98fr]">
@@ -581,25 +516,6 @@ export function VacationPlanningClient({ activities, accommodations }: Props) {
                   title="Browse Activities"
                   description="Jump to experiences, categories, and pricing."
                   onClick={() => scrollToBrowse("activities")}
-                />
-              </div>
-
-              <div className="mt-8 grid gap-4 sm:grid-cols-3">
-                <StatCard label="Published Stays" value={String(accommodations.length)} />
-                <StatCard
-                  label="Published Activities"
-                  value={String(activities.length)}
-                />
-                <StatCard
-                  label="Starting From"
-                  value={
-                    accommodationStartingPrice != null
-                      ? formatPrice(accommodationStartingPrice, "/night")
-                      : activityStartingPrice != null
-                        ? formatPrice(activityStartingPrice, "/person")
-                        : "Contact for rates"
-                  }
-                  tone="accent"
                 />
               </div>
             </div>
@@ -665,15 +581,6 @@ export function VacationPlanningClient({ activities, accommodations }: Props) {
                     </div>
                   </div>
                 </div>
-              </div>
-
-              <div className="mt-4 rounded-[28px] border border-[#d8e5f2] bg-white px-5 py-4 shadow-[0_18px_45px_rgba(25,48,89,0.12)]">
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#407FC2]">
-                  Travel Planning
-                </p>
-                <p className="mt-2 text-sm leading-6 text-slate-600">
-                  Browse one featured visual with highlights for both where to stay and what to do, then jump into the full listings below.
-                </p>
               </div>
             </div>
           </div>
