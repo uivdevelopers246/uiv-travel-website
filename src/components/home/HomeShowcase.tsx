@@ -10,12 +10,6 @@ import { DEFAULT_IMAGE_FALLBACK, getSafeImageUrl } from "@/lib/utils/image";
 
 const ROTATION_INTERVAL_MS = 5000;
 const SHOWCASE_PANEL_HEIGHT = "h-[640px] sm:h-[680px]";
-const TITLE_CLAMP_STYLE = {
-  display: "-webkit-box",
-  WebkitLineClamp: 2,
-  WebkitBoxOrient: "vertical" as const,
-  overflow: "hidden",
-};
 const META_ITEM_COUNT = 3;
 const DESCRIPTION_CLAMP_STYLE = {
   display: "-webkit-box",
@@ -192,10 +186,9 @@ function ShowcasePanel({
 
         <div className="mt-auto">
           <h3
-            className="max-w-[24rem] text-[2.25rem] leading-[0.95] font-bold text-white drop-shadow-[0_10px_24px_rgba(0,0,0,0.28)] sm:text-[2.8rem]"
+            className="max-w-[24rem] text-[2.25rem] leading-[1.1] font-bold text-white drop-shadow-[0_10px_24px_rgba(0,0,0,0.28)] sm:text-[2.8rem]"
             style={{
               fontFamily: "var(--font-playfair)",
-              ...TITLE_CLAMP_STYLE,
             }}
           >
             {activeItem.title}

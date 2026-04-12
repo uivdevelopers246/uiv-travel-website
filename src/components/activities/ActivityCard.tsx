@@ -26,7 +26,7 @@ export function ActivityCard({ activity }: Props) {
             <span>{activity.category.replace("-", " ")}</span>
             {activity.vendors?.name && <span>{activity.vendors.name}</span>}
           </div>
-          <h3 className="mt-3 text-xl font-semibold text-slate-900">
+          <h3 className="mt-3 min-h-[3.5rem] text-xl font-semibold text-slate-900 line-clamp-2">
             {activity.title}
           </h3>
           <p className="mt-2 text-sm text-slate-600 line-clamp-3">
