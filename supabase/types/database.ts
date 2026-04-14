@@ -211,6 +211,7 @@ export type Database = {
           activity_id: string
           created_at: string
           discount_cents: number
+          expires_at: string | null
           id: string
           order_id: string | null
           participants: number
@@ -227,6 +228,7 @@ export type Database = {
           activity_id: string
           created_at?: string
           discount_cents?: number
+          expires_at?: string | null
           id?: string
           order_id?: string | null
           participants: number
@@ -243,6 +245,7 @@ export type Database = {
           activity_id?: string
           created_at?: string
           discount_cents?: number
+          expires_at?: string | null
           id?: string
           order_id?: string | null
           participants?: number
@@ -413,8 +416,11 @@ export type Database = {
           discount_cents: number
           id: string
           status: string
+          stripe_approval_payment_intent_id: string | null
           stripe_checkout_session_id: string | null
+          stripe_customer_id: string | null
           stripe_payment_intent_id: string | null
+          stripe_setup_intent_id: string | null
           subtotal_cents: number
           total_cents: number
           updated_at: string
@@ -426,8 +432,11 @@ export type Database = {
           discount_cents?: number
           id?: string
           status?: string
+          stripe_approval_payment_intent_id?: string | null
           stripe_checkout_session_id?: string | null
+          stripe_customer_id?: string | null
           stripe_payment_intent_id?: string | null
+          stripe_setup_intent_id?: string | null
           subtotal_cents: number
           total_cents: number
           updated_at?: string
@@ -439,8 +448,11 @@ export type Database = {
           discount_cents?: number
           id?: string
           status?: string
+          stripe_approval_payment_intent_id?: string | null
           stripe_checkout_session_id?: string | null
+          stripe_customer_id?: string | null
           stripe_payment_intent_id?: string | null
+          stripe_setup_intent_id?: string | null
           subtotal_cents?: number
           total_cents?: number
           updated_at?: string
@@ -573,6 +585,7 @@ export type Database = {
         Args: {
           p_activity_id: string
           p_discount_cents?: number
+          p_expires_at?: string | null
           p_order_id: string
           p_participants: number
           p_slot_id: string
@@ -584,6 +597,14 @@ export type Database = {
           p_vendor_id: string
         }
         Returns: Database["public"]["Tables"]["activity_bookings"]["Row"]
+      },
+      decline_activity_bookings_for_order: {
+        Args: { p_order_id: string }
+        Returns: undefined
+      },
+      expire_pending_activity_bookings: {
+        Args: never
+        Returns: number
       },
       is_site_admin: { Args: never; Returns: boolean }
       is_vendor_owner: { Args: { v_id: string }; Returns: boolean }

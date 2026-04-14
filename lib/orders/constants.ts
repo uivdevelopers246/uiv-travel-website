@@ -1,10 +1,14 @@
 /** Matches `orders.status` CHECK constraint. */
 export const ORDER_STATUSES = [
   "awaiting_payment",
+  "awaiting_vendor_approval",
+  "payment_pending",
   "paid",
   "failed",
   "cancelled",
   "refunded",
+  "declined",
+  "expired",
 ] as const;
 
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
