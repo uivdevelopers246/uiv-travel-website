@@ -26,6 +26,7 @@ vi.mock("stripe", () => ({
 import {
   createCheckoutSetupSessionForOrder,
   fulfillCheckoutSetupSessionCompleted,
+  getStripe,
 } from "./server";
 
 function baseOrder(overrides: Partial<Order> = {}): Order {
@@ -123,6 +124,46 @@ describe("createCheckoutSetupSessionForOrder", () => {
         stripeCustomerId: "cus_test",
       }),
     ).rejects.toThrow("Checkout requires at least one activity line");
+  });
+
+  it("passes metadata.order_id on the session and on setup_intent_data for webhook correlation", async () => {
+    const line = {
+      id: "line-1",
+      user_id: "user-1",
+      line_type: CART_LINE_TYPE_ACTIVITY,
+      slot_id: "slot-1",
+      participants: 2,
+      unit_price_cents: 5000,
+      line_subtotal_cents: 10000,
+      line_discount_cents: 0,
+      line_total_cents: 10000,
+      accommodation_id: null,
+      check_in: null,
+      check_out: null,
+      guests: null,
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z",
+    };
+
+    await createCheckoutSetupSessionForOrder({
+      order: baseOrder({ id: "order-xyz" }),
+      lines: [line],
+      siteUrl: "http://localhost:3000",
+      stripeCustomerId: "cus_test",
+    });
+
+    const stripe = getStripe();
+    const createMock = stripe.checkout.sessions.create as ReturnType<typeof vi.fn>;
+    expect(createMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "setup",
+        metadata: { order_id: "order-xyz", flow: "m4c_setup" },
+        setup_intent_data: {
+          metadata: { order_id: "order-xyz", flow: "m4c_setup" },
+        },
+        client_reference_id: "order-xyz",
+      }),
+    );
   });
 });
 

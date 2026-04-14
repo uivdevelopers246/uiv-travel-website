@@ -12,6 +12,7 @@ import { bookingPendingApprovalExpiresAtIso } from "@/lib/activity-bookings/sla"
 import { CART_LINE_TYPE_ACTIVITY } from "@/lib/cart/constants";
 import { deleteAllCartLinesForUser } from "@/lib/cart/service";
 import type { CartLine } from "@/lib/cart/types";
+import { STRIPE_METADATA_ORDER_ID_KEY } from "@/lib/orders/constants";
 import {
   findOrderByStripeApprovalPaymentIntentId,
   getOrderById,
@@ -70,11 +71,19 @@ export const STRIPE_METADATA_PURPOSE = "purpose";
 /** Value for {@link STRIPE_METADATA_PURPOSE} on vendor-approval capture PaymentIntents. */
 export const STRIPE_PURPOSE_BOOKING_APPROVAL = "booking_approval";
 
-function stripeId(value: string | Stripe.Customer | null | undefined): string | null {
+function stripeId(
+  value: string | Stripe.Customer | Stripe.DeletedCustomer | null | undefined,
+): string | null {
   if (value == null) {
     return null;
   }
   return typeof value === "string" ? value : value.id;
+}
+
+/** Trims `metadata.order_id` (see {@link STRIPE_METADATA_ORDER_ID_KEY}) from Stripe objects. */
+function metadataOrderId(meta: Stripe.Metadata | null | undefined): string | undefined {
+  const raw = meta?.[STRIPE_METADATA_ORDER_ID_KEY];
+  return typeof raw === "string" ? raw.trim() : undefined;
 }
 
 /**
@@ -118,7 +127,7 @@ export async function ensureStripeCustomerForOrder(
   const customer = await stripe.customers.create({
     metadata: {
       user_id: order.user_id,
-      order_id: order.id,
+      [STRIPE_METADATA_ORDER_ID_KEY]: order.id,
     },
   });
 
@@ -161,15 +170,21 @@ export async function createCheckoutSetupSessionForOrder(
     throw new Error("Cart line totals do not match order total");
   }
 
+  const sessionMetadata: Record<string, string> = {
+    [STRIPE_METADATA_ORDER_ID_KEY]: order.id,
+    flow: "m4c_setup",
+  };
+
   return getStripe().checkout.sessions.create({
     mode: "setup",
     currency: order.currency,
     customer: stripeCustomerId,
-    success_url: `${base}/?checkout=setup_success&order_id=${encodeURIComponent(order.id)}`,
+    success_url: `${base}/?checkout=setup_success&${STRIPE_METADATA_ORDER_ID_KEY}=${encodeURIComponent(order.id)}`,
     cancel_url: `${base}/?checkout=cancelled`,
-    metadata: {
-      order_id: order.id,
-      flow: "m4c_setup",
+    metadata: sessionMetadata,
+    /** Ensures `setup_intent.succeeded` carries the same `metadata.order_id` as the Checkout Session. */
+    setup_intent_data: {
+      metadata: sessionMetadata,
     },
     client_reference_id: order.id,
   });
@@ -188,7 +203,7 @@ export async function createSetupIntentForOrder(input: {
     customer: input.stripeCustomerId,
     usage: "off_session",
     metadata: {
-      order_id: input.order.id,
+      [STRIPE_METADATA_ORDER_ID_KEY]: input.order.id,
       flow: "m4c_setup",
     },
   });
@@ -484,9 +499,11 @@ export async function fulfillCheckoutSetupSessionCompleted(
     return { status: "ignored", reason: "mode_not_setup" };
   }
 
-  const orderId = session.metadata?.order_id?.trim();
+  const orderId = metadataOrderId(session.metadata);
   if (!orderId) {
-    throw new Error("checkout.session.completed (setup) missing metadata.order_id");
+    throw new Error(
+      `checkout.session.completed (setup) missing metadata.${STRIPE_METADATA_ORDER_ID_KEY}`,
+    );
   }
 
   const setupIntentId = setupIntentIdFromSession(session);
@@ -524,9 +541,9 @@ export async function fulfillSetupIntentSucceeded(
   }
 
   const si = event.data.object as Stripe.SetupIntent;
-  const orderId = si.metadata?.order_id?.trim();
+  const orderId = metadataOrderId(si.metadata);
   if (!orderId) {
-    throw new Error("setup_intent.succeeded missing metadata.order_id");
+    throw new Error(`setup_intent.succeeded missing metadata.${STRIPE_METADATA_ORDER_ID_KEY}`);
   }
 
   const customerId = stripeId(si.customer);
@@ -560,7 +577,7 @@ export async function fulfillApprovalPaymentIntentSucceeded(
 
   const pi = event.data.object as Stripe.PaymentIntent;
   const purpose = pi.metadata?.[STRIPE_METADATA_PURPOSE]?.trim();
-  const metaOrderId = pi.metadata?.order_id?.trim() ?? "";
+  const metaOrderId = metadataOrderId(pi.metadata) ?? "";
 
   let order: Order | null =
     purpose === STRIPE_PURPOSE_BOOKING_APPROVAL && metaOrderId !== ""
@@ -610,7 +627,7 @@ export async function fulfillApprovalPaymentIntentFailed(
 
   const pi = event.data.object as Stripe.PaymentIntent;
   const purpose = pi.metadata?.[STRIPE_METADATA_PURPOSE]?.trim();
-  const metaOrderId = pi.metadata?.order_id?.trim() ?? "";
+  const metaOrderId = metadataOrderId(pi.metadata) ?? "";
 
   let order: Order | null =
     purpose === STRIPE_PURPOSE_BOOKING_APPROVAL && metaOrderId !== ""

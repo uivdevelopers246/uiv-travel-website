@@ -56,7 +56,11 @@ export function computeOrderTotalsFromCartLines(
   return { subtotal_cents, discount_cents, total_cents };
 }
 
-export async function findAwaitingPaymentOrderForUser(
+/**
+ * M4-C: finds the user’s open checkout order — **`awaiting_payment`** means “cart snapshot
+ * persisted, Stripe setup not completed yet” (not “charge pending at checkout”).
+ */
+export async function findCheckoutSetupOrderForUser(
   supabase: SupabaseClient<Database>,
 ): Promise<Order | null> {
   const userId = await requireAuthUserId(supabase);
@@ -71,12 +75,17 @@ export async function findAwaitingPaymentOrderForUser(
     .maybeSingle();
 
   if (error) {
-    throw orderServiceError("Could not find awaiting_payment order", error);
+    throw orderServiceError("Could not find checkout setup order", error);
   }
   return data;
 }
 
-export async function upsertAwaitingPaymentOrderFromCart(
+/**
+ * M4-C: creates or refreshes totals on the **`awaiting_payment`** order used for hosted
+ * Checkout **`mode: setup`**. Webhooks transition **`awaiting_payment` → `awaiting_vendor_approval`**
+ * after `metadata.order_id` correlates the completed setup to this row.
+ */
+export async function upsertCheckoutSetupOrderFromCart(
   supabase: SupabaseClient<Database>,
 ): Promise<Order> {
   const userId = await requireAuthUserId(supabase);
@@ -88,7 +97,7 @@ export async function upsertAwaitingPaymentOrderFromCart(
 
   const totals = computeOrderTotalsFromCartLines(lines);
 
-  const existing = await findAwaitingPaymentOrderForUser(supabase);
+  const existing = await findCheckoutSetupOrderForUser(supabase);
 
   if (existing) {
     const { data, error } = await supabase

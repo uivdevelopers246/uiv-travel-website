@@ -3,7 +3,10 @@ import {
   listCartLines,
   validateActivityCartForCheckout,
 } from "@/lib/cart/service";
-import { upsertAwaitingPaymentOrderFromCart, updateOrderStripeCheckoutSession } from "@/lib/orders/service";
+import {
+  updateOrderStripeCheckoutSession,
+  upsertCheckoutSetupOrderFromCart,
+} from "@/lib/orders/service";
 import {
   createCheckoutSetupSessionForOrder,
   ensureStripeCustomerForOrder,
@@ -48,7 +51,7 @@ export async function POST() {
 
   try {
     await validateActivityCartForCheckout(supabase);
-    const order = await upsertAwaitingPaymentOrderFromCart(supabase);
+    const order = await upsertCheckoutSetupOrderFromCart(supabase);
     const lines = await listCartLines(supabase);
     const siteUrl = getPublicSiteUrl();
     const session = await createCheckoutSetupSessionForOrder({
@@ -65,7 +68,10 @@ export async function POST() {
     if (!session.url) {
       return serverError("Something went wrong. Please try again.");
     }
-    return NextResponse.json({ url: session.url });
+    return NextResponse.json({
+      url: session.url,
+      order_id: order.id,
+    });
   } catch (error: unknown) {
     return handleCheckoutPostError(error);
   }
