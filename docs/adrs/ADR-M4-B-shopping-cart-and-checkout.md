@@ -4,7 +4,7 @@
 **Milestone:** M4 — Booking & Availability  
 **Date:** 2026-04-01 (updated 2026-04-09)  
 **Deciders:** UIV Travel development team  
-**Related:** [ADR-M4-A: Booking & Availability](./ADR-M4-booking-availability.md) — slots, `activity_bookings`, `create_activity_booking_after_payment`, **`cancel_activity_bookings_for_order`** (fulfillment rollback).
+**Related:** [ADR-M4-A: Booking & Availability](./ADR-M4-booking-availability.md) — slots, `activity_bookings`, `create_activity_booking_after_payment`, **`cancel_activity_bookings_for_order`** (fulfillment rollback). **[ADR-M4-C: Pending-approval checkout & payment on confirmation](./ADR-M4-C-pending-approval-checkout-and-payment.md)** — product direction to approve before charge (SetupIntent, SLA); **supersedes this ADR’s upfront-payment flow** when implemented.
 
 ---
 
