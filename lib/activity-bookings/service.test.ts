@@ -103,6 +103,7 @@ describe("activity-bookings service (writes)", () => {
         p_discount_cents: 0,
         p_total_cents: 10000,
         p_status: "confirmed",
+        p_expires_at: null,
       },
     );
     expect(row).toEqual(inserted);

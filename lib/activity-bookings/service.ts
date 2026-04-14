@@ -36,6 +36,8 @@ export type CreateActivityBookingAfterPaymentInput = {
   discount_cents?: number;
   /** Default: `confirmed`. */
   status?: ActivityBookingStatus;
+  /** Required when `status` is `pending_approval` (M4-C). */
+  expires_at?: string | null;
 };
 
 export type ListActivityBookingsOptions = {
@@ -160,6 +162,7 @@ export async function createActivityBookingAfterPayment(
     p_discount_cents: discount_cents,
     p_total_cents: input.total_cents,
     p_status: status,
+    p_expires_at: input.expires_at ?? null,
   });
 
   if (error) {
@@ -208,6 +211,28 @@ export async function cancelActivityBookingsForOrder(
   if (error) {
     throw bookingServiceError(
       "Could not cancel activity bookings for order",
+      error,
+    );
+  }
+}
+
+/**
+ * M4-C webhook: after approval **`payment_intent.succeeded`**, flip **`pending_approval`** rows to
+ * **`confirmed`** and clear **`expires_at`**. Service-role client recommended.
+ */
+export async function confirmPendingActivityBookingsForOrder(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("activity_bookings")
+    .update({ status: "confirmed", expires_at: null })
+    .eq("order_id", orderId)
+    .eq("status", "pending_approval");
+
+  if (error) {
+    throw bookingServiceError(
+      "Could not confirm pending activity bookings for order",
       error,
     );
   }

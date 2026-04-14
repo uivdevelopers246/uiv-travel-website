@@ -4,7 +4,11 @@ import {
   validateActivityCartForCheckout,
 } from "@/lib/cart/service";
 import { upsertAwaitingPaymentOrderFromCart, updateOrderStripeCheckoutSession } from "@/lib/orders/service";
-import { createCheckoutSessionForOrder, getPublicSiteUrl } from "@/lib/stripe/server";
+import {
+  createCheckoutSetupSessionForOrder,
+  ensureStripeCustomerForOrder,
+  getPublicSiteUrl,
+} from "@/lib/stripe/server";
 import { createClient } from "@/lib/supabase/server";
 import { handleCartRouteError } from "@/api-shared/cart-route-errors";
 import {
@@ -46,11 +50,14 @@ export async function POST() {
     await validateActivityCartForCheckout(supabase);
     const order = await upsertAwaitingPaymentOrderFromCart(supabase);
     const lines = await listCartLines(supabase);
-    const session = await createCheckoutSessionForOrder({
+    const siteUrl = getPublicSiteUrl();
+    const session = await createCheckoutSetupSessionForOrder({
       order,
       lines,
-      siteUrl: getPublicSiteUrl(),
+      siteUrl,
+      stripeCustomerId: await ensureStripeCustomerForOrder(supabase, order),
     });
+
     await updateOrderStripeCheckoutSession(supabase, {
       orderId: order.id,
       stripeCheckoutSessionId: session.id,

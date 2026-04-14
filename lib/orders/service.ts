@@ -192,10 +192,87 @@ export async function updateOrderStatus(
 }
 
 /**
- * Webhook fulfillment: set **`paid`** and persist **`stripe_payment_intent_id`** in one update.
- * Use with a **service-role** client after verifying Stripe `checkout.session.completed`.
+ * M4-C: atomically move **`awaiting_payment` → `awaiting_vendor_approval`** after SetupIntent /
+ * Checkout setup success. Returns **`null`** if the row was not in **`awaiting_payment`** (race or replay).
  */
-export async function updateOrderPaidWithStripePaymentIntent(
+export async function updateOrderAwaitingVendorApprovalFromSetup(
+  supabase: SupabaseClient<Database>,
+  input: {
+    orderId: string;
+    stripeCustomerId: string;
+    stripeSetupIntentId: string;
+  },
+): Promise<Order | null> {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      status: "awaiting_vendor_approval",
+      stripe_customer_id: input.stripeCustomerId,
+      stripe_setup_intent_id: input.stripeSetupIntentId,
+    })
+    .eq("id", input.orderId)
+    .eq("status", "awaiting_payment")
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw orderServiceError(
+      "Could not transition order to awaiting_vendor_approval",
+      error,
+    );
+  }
+  return data;
+}
+
+/**
+ * M4-C: rollback a failed setup fulfillment (no charge). Clears setup correlation fields.
+ */
+export async function revertOrderToAwaitingPaymentAfterSetupFailure(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+): Promise<Order> {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      status: "awaiting_payment",
+      stripe_setup_intent_id: null,
+    })
+    .eq("id", orderId)
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw orderServiceError(
+      "Could not revert order after setup fulfillment failure",
+      error,
+    );
+  }
+  if (!data) {
+    throw new Error("Order not found");
+  }
+  return data;
+}
+
+export async function findOrderByStripeApprovalPaymentIntentId(
+  supabase: SupabaseClient<Database>,
+  stripeApprovalPaymentIntentId: string,
+): Promise<Order | null> {
+  const { data, error } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("stripe_approval_payment_intent_id", stripeApprovalPaymentIntentId)
+    .maybeSingle();
+
+  if (error) {
+    throw orderServiceError("Could not find order by approval payment intent", error);
+  }
+  return data;
+}
+
+/**
+ * M4-C: after vendor-approval capture succeeds (`payment_intent.succeeded` with approval metadata).
+ */
+export async function updateOrderPaidAfterApprovalCapture(
   supabase: SupabaseClient<Database>,
   orderId: string,
   stripePaymentIntentId: string,
@@ -211,10 +288,42 @@ export async function updateOrderPaidWithStripePaymentIntent(
     .maybeSingle();
 
   if (error) {
-    throw orderServiceError("Could not mark order paid with payment intent", error);
+    throw orderServiceError("Could not mark order paid after approval capture", error);
   }
   if (!data) {
     throw new Error("Order not found");
   }
   return data;
+}
+
+/**
+ * M4-C: record the approval PaymentIntent id when the vendor approves (before confirm). Used for
+ * webhook correlation and idempotency.
+ */
+export async function updateOrderStripeApprovalPaymentIntentId(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+  stripeApprovalPaymentIntentId: string,
+): Promise<Order> {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({ stripe_approval_payment_intent_id: stripeApprovalPaymentIntentId })
+    .eq("id", orderId)
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw orderServiceError("Could not store approval payment intent on order", error);
+  }
+  if (!data) {
+    throw new Error("Order not found");
+  }
+  return data;
+}
+
+export async function updateOrderStatusPaymentPending(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+): Promise<Order> {
+  return updateOrderStatus(supabase, orderId, "payment_pending");
 }
