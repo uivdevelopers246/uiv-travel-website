@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getActivityById } from "@/lib/activities/service";
-import { sumConfirmedParticipantsBySlotIds } from "@/lib/slots/service";
+import { slotPlatformParticipantsBookedBySlotIds } from "@/lib/slots/service";
 import type { Database } from "@/supabase/types/database";
 import { CART_LINE_TYPE_ACTIVITY } from "@/lib/cart/constants";
 import type {
@@ -69,15 +69,16 @@ function buildActivityLineSnapshots(
 }
 
 /**
- * Enforces remaining capacity vs **confirmed** bookings only.
- * Cart lines do not reserve inventory; checkout remains the final gate.
+ * Remaining = max_capacity − off_platform_participants − platform bookings
+ * (confirmed + non-expired pending_approval). Checkout RPC re-validates.
  */
 function assertWithinRemainingCapacity(
   maxCapacity: number,
-  confirmedBooked: number,
+  offPlatformParticipants: number,
+  platformBooked: number,
   requestedParticipants: number,
 ): void {
-  const remaining = maxCapacity - confirmedBooked;
+  const remaining = maxCapacity - offPlatformParticipants - platformBooked;
   if (requestedParticipants > remaining) {
     throw new Error("Not enough spots left for this time slot");
   }
@@ -181,6 +182,7 @@ export async function listCartLinesWithPreview(
       slot_starts_at: "",
       slot_ends_at: "",
       max_capacity: 0,
+      off_platform_participants: 0,
       booked_participants: 0,
       remaining_capacity: 0,
     }));
@@ -188,7 +190,7 @@ export async function listCartLinesWithPreview(
 
   const { data: slots, error: slotsError } = await supabase
     .from("availability_slots")
-    .select("id, activity_id, starts_at, ends_at, max_capacity")
+    .select("id, activity_id, starts_at, ends_at, max_capacity, off_platform_participants")
     .in("id", slotIds);
 
   if (slotsError) {
@@ -216,7 +218,7 @@ export async function listCartLinesWithPreview(
     }
   }
 
-  const bookedMap = await sumConfirmedParticipantsBySlotIds(
+  const bookedMap = await slotPlatformParticipantsBookedBySlotIds(
     supabase,
     slotIds,
   );
@@ -225,7 +227,8 @@ export async function listCartLinesWithPreview(
     const slot = line.slot_id ? slotMap.get(line.slot_id) : undefined;
     const booked = line.slot_id ? (bookedMap.get(line.slot_id) ?? 0) : 0;
     const maxCap = slot?.max_capacity ?? 0;
-    const remaining = Math.max(0, maxCap - booked);
+    const off = slot?.off_platform_participants ?? 0;
+    const remaining = Math.max(0, maxCap - off - booked);
     const activityTitle =
       slot != null ? (titleByActivityId.get(slot.activity_id) ?? "") : "";
 
@@ -235,6 +238,7 @@ export async function listCartLinesWithPreview(
       slot_starts_at: slot?.starts_at ?? "",
       slot_ends_at: slot?.ends_at ?? "",
       max_capacity: maxCap,
+      off_platform_participants: off,
       booked_participants: booked,
       remaining_capacity: remaining,
     };
@@ -257,10 +261,11 @@ export async function addOrMergeActivityLine(
 
   const unitPriceCents = pricePerPersonUsdToCents(activity.price_per_person);
 
-  const bookedMap = await sumConfirmedParticipantsBySlotIds(supabase, [
+  const bookedMap = await slotPlatformParticipantsBookedBySlotIds(supabase, [
     input.slot_id,
   ]);
-  const confirmedBooked = bookedMap.get(input.slot_id) ?? 0;
+  const platformBooked = bookedMap.get(input.slot_id) ?? 0;
+  const offPlatform = slot.off_platform_participants ?? 0;
 
   const existing = await findExistingActivityLineForSlot(
     supabase,
@@ -272,7 +277,8 @@ export async function addOrMergeActivityLine(
   assertPositiveInteger(newTotal, "participants");
   assertWithinRemainingCapacity(
     slot.max_capacity,
-    confirmedBooked,
+    offPlatform,
+    platformBooked,
     newTotal,
   );
 
@@ -348,14 +354,16 @@ export async function updateCartLineParticipants(
 
   const unitPriceCents = pricePerPersonUsdToCents(activity.price_per_person);
 
-  const bookedMap = await sumConfirmedParticipantsBySlotIds(supabase, [
+  const bookedMap = await slotPlatformParticipantsBookedBySlotIds(supabase, [
     line.slot_id,
   ]);
-  const confirmedBooked = bookedMap.get(line.slot_id) ?? 0;
+  const platformBooked = bookedMap.get(line.slot_id) ?? 0;
+  const offPlatform = slot.off_platform_participants ?? 0;
 
   assertWithinRemainingCapacity(
     slot.max_capacity,
-    confirmedBooked,
+    offPlatform,
+    platformBooked,
     input.participants,
   );
 
@@ -448,7 +456,7 @@ export async function validateActivityCartForCheckout(
     slotById.set(sid, await fetchSlotForCartOrThrow(supabase, sid));
   }
 
-  const bookedMap = await sumConfirmedParticipantsBySlotIds(
+  const bookedMap = await slotPlatformParticipantsBookedBySlotIds(
     supabase,
     uniqueSlotIds,
   );
@@ -466,14 +474,16 @@ export async function validateActivityCartForCheckout(
 
     pricePerPersonUsdToCents(activity.price_per_person);
 
-    const confirmedBooked = bookedMap.get(line.slot_id!) ?? 0;
+    const platformBooked = bookedMap.get(line.slot_id!) ?? 0;
+    const offPlatform = slot.off_platform_participants ?? 0;
     const participants = line.participants;
     if (participants == null) {
       throw new Error("participants must be a positive integer");
     }
     assertWithinRemainingCapacity(
       slot.max_capacity,
-      confirmedBooked,
+      offPlatform,
+      platformBooked,
       participants,
     );
   }

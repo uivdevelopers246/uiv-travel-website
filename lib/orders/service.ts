@@ -262,26 +262,11 @@ export async function revertOrderToAwaitingPaymentAfterSetupFailure(
   return data;
 }
 
-export async function findOrderByStripeApprovalPaymentIntentId(
-  supabase: SupabaseClient<Database>,
-  stripeApprovalPaymentIntentId: string,
-): Promise<Order | null> {
-  const { data, error } = await supabase
-    .from("orders")
-    .select("*")
-    .eq("stripe_approval_payment_intent_id", stripeApprovalPaymentIntentId)
-    .maybeSingle();
-
-  if (error) {
-    throw orderServiceError("Could not find order by approval payment intent", error);
-  }
-  return data;
-}
-
 /**
- * M4-C: after vendor-approval capture succeeds (`payment_intent.succeeded` with approval metadata).
+ * M4-C: after the **single settlement** `payment_intent.succeeded` (charge sum of confirmed lines).
+ * Not used until settlement capture is implemented.
  */
-export async function updateOrderPaidAfterApprovalCapture(
+export async function updateOrderPaidAfterSettlementCapture(
   supabase: SupabaseClient<Database>,
   orderId: string,
   stripePaymentIntentId: string,
@@ -297,32 +282,7 @@ export async function updateOrderPaidAfterApprovalCapture(
     .maybeSingle();
 
   if (error) {
-    throw orderServiceError("Could not mark order paid after approval capture", error);
-  }
-  if (!data) {
-    throw new Error("Order not found");
-  }
-  return data;
-}
-
-/**
- * M4-C: record the approval PaymentIntent id when the vendor approves (before confirm). Used for
- * webhook correlation and idempotency.
- */
-export async function updateOrderStripeApprovalPaymentIntentId(
-  supabase: SupabaseClient<Database>,
-  orderId: string,
-  stripeApprovalPaymentIntentId: string,
-): Promise<Order> {
-  const { data, error } = await supabase
-    .from("orders")
-    .update({ stripe_approval_payment_intent_id: stripeApprovalPaymentIntentId })
-    .eq("id", orderId)
-    .select("*")
-    .maybeSingle();
-
-  if (error) {
-    throw orderServiceError("Could not store approval payment intent on order", error);
+    throw orderServiceError("Could not mark order paid after settlement capture", error);
   }
   if (!data) {
     throw new Error("Order not found");

@@ -1,7 +1,6 @@
 /**
- * Stripe metadata key for correlating Checkout Sessions, SetupIntents, and approval
- * PaymentIntents to `orders.id` (M4-C). Use this key consistently so webhook handlers can
- * resolve `metadata.order_id` to a row.
+ * Stripe metadata key for correlating Checkout Sessions, SetupIntents, and (later) settlement
+ * PaymentIntents to `orders.id` (M4-C).
  */
 export const STRIPE_METADATA_ORDER_ID_KEY = "order_id" as const;
 

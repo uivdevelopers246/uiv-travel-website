@@ -5,11 +5,11 @@ vi.mock("@/lib/activities/service", () => ({
 }));
 
 vi.mock("@/lib/slots/service", () => ({
-  sumConfirmedParticipantsBySlotIds: vi.fn(),
+  slotPlatformParticipantsBookedBySlotIds: vi.fn(),
 }));
 
 import { getActivityById } from "@/lib/activities/service";
-import { sumConfirmedParticipantsBySlotIds } from "@/lib/slots/service";
+import { slotPlatformParticipantsBookedBySlotIds } from "@/lib/slots/service";
 import {
   addOrMergeActivityLine,
   deleteAllCartLinesForUser,
@@ -51,6 +51,7 @@ function baseSlotRow(overrides: Partial<Record<string, unknown>> = {}) {
     starts_at: "2026-04-06T12:00:00.000Z",
     ends_at: "2026-04-06T14:00:00.000Z",
     max_capacity: 10,
+    off_platform_participants: 0,
     is_cancelled: false,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
@@ -92,8 +93,8 @@ function authUser() {
 
 beforeEach(() => {
   vi.mocked(getActivityById).mockReset();
-  vi.mocked(sumConfirmedParticipantsBySlotIds).mockReset();
-  vi.mocked(sumConfirmedParticipantsBySlotIds).mockResolvedValue(new Map());
+  vi.mocked(slotPlatformParticipantsBookedBySlotIds).mockReset();
+  vi.mocked(slotPlatformParticipantsBookedBySlotIds).mockResolvedValue(new Map());
   vi.mocked(getActivityById).mockResolvedValue(publicActivity);
 });
 
@@ -229,7 +230,7 @@ describe("listCartLinesWithPreview", () => {
       ...authUser(),
     };
 
-    vi.mocked(sumConfirmedParticipantsBySlotIds).mockResolvedValue(
+    vi.mocked(slotPlatformParticipantsBookedBySlotIds).mockResolvedValue(
       new Map([[slotId, 3]]),
     );
 
@@ -244,7 +245,7 @@ describe("listCartLinesWithPreview", () => {
       booked_participants: 3,
       remaining_capacity: 7,
     });
-    expect(sumConfirmedParticipantsBySlotIds).toHaveBeenCalledWith(
+    expect(slotPlatformParticipantsBookedBySlotIds).toHaveBeenCalledWith(
       supabase,
       [slotId],
     );
@@ -287,7 +288,7 @@ describe("addOrMergeActivityLine", () => {
       ...authUser(),
     };
 
-    vi.mocked(sumConfirmedParticipantsBySlotIds).mockResolvedValue(
+    vi.mocked(slotPlatformParticipantsBookedBySlotIds).mockResolvedValue(
       new Map([[slotId, 0]]),
     );
 
@@ -355,7 +356,7 @@ describe("addOrMergeActivityLine", () => {
       ...authUser(),
     };
 
-    vi.mocked(sumConfirmedParticipantsBySlotIds).mockResolvedValue(
+    vi.mocked(slotPlatformParticipantsBookedBySlotIds).mockResolvedValue(
       new Map([[slotId, 0]]),
     );
 
@@ -468,7 +469,7 @@ describe("addOrMergeActivityLine", () => {
       ...authUser(),
     };
 
-    vi.mocked(sumConfirmedParticipantsBySlotIds).mockResolvedValue(
+    vi.mocked(slotPlatformParticipantsBookedBySlotIds).mockResolvedValue(
       new Map([[slotId, 4]]),
     );
 
@@ -533,7 +534,7 @@ describe("updateCartLineParticipants", () => {
       ...authUser(),
     };
 
-    vi.mocked(sumConfirmedParticipantsBySlotIds).mockResolvedValue(
+    vi.mocked(slotPlatformParticipantsBookedBySlotIds).mockResolvedValue(
       new Map([[slotId, 0]]),
     );
 
@@ -713,7 +714,7 @@ describe("validateActivityCartForCheckout", () => {
       ...authUser(),
     };
 
-    vi.mocked(sumConfirmedParticipantsBySlotIds).mockResolvedValue(
+    vi.mocked(slotPlatformParticipantsBookedBySlotIds).mockResolvedValue(
       new Map([[slotId, 0]]),
     );
 
@@ -821,7 +822,7 @@ describe("validateActivityCartForCheckout", () => {
       ...authUser(),
     };
 
-    vi.mocked(sumConfirmedParticipantsBySlotIds).mockResolvedValue(
+    vi.mocked(slotPlatformParticipantsBookedBySlotIds).mockResolvedValue(
       new Map([[slotId, 4]]),
     );
 

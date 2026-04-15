@@ -4,7 +4,6 @@ import Stripe from "stripe";
 import {
   type ActivityBooking,
   cancelActivityBookingsForOrder,
-  confirmPendingActivityBookingsForOrder,
   createActivityBookingAfterPayment,
   listActivityBookings,
 } from "@/lib/activity-bookings/service";
@@ -14,13 +13,10 @@ import { deleteAllCartLinesForUser } from "@/lib/cart/service";
 import type { CartLine } from "@/lib/cart/types";
 import { STRIPE_METADATA_ORDER_ID_KEY } from "@/lib/orders/constants";
 import {
-  findOrderByStripeApprovalPaymentIntentId,
   getOrderById,
   revertOrderToAwaitingPaymentAfterSetupFailure,
   updateOrderAwaitingVendorApprovalFromSetup,
-  updateOrderPaidAfterApprovalCapture,
   updateOrderStatus,
-  updateOrderStatusPaymentPending,
 } from "@/lib/orders/service";
 import type { Order } from "@/lib/orders/types";
 import type { Database } from "@/supabase/types/database";
@@ -64,12 +60,6 @@ export function getPublicSiteUrl(): string {
 
   return url.startsWith("http") ? url : `https://${url}`;
 }
-
-/** `metadata.purpose` on approval PaymentIntents (M4-C). */
-export const STRIPE_METADATA_PURPOSE = "purpose";
-
-/** Value for {@link STRIPE_METADATA_PURPOSE} on vendor-approval capture PaymentIntents. */
-export const STRIPE_PURPOSE_BOOKING_APPROVAL = "booking_approval";
 
 function stripeId(
   value: string | Stripe.Customer | Stripe.DeletedCustomer | null | undefined,
@@ -149,7 +139,7 @@ export async function ensureStripeCustomerForOrder(
 
 /**
  * M4-C: Stripe Checkout **`mode: setup`** to collect and save a payment method for a later
- * off-session charge on vendor approval.
+ * single settlement charge (after all order lines are approved/declined/expired).
  */
 export async function createCheckoutSetupSessionForOrder(
   input: CreateCheckoutSetupSessionForOrderInput & { stripeCustomerId: string },
@@ -319,17 +309,6 @@ export type FulfillCheckoutSetupSessionCompletedResult =
   | { status: "ignored"; reason: "mode_not_setup" };
 
 export type FulfillSetupIntentSucceededResult = FulfillCheckoutSetupSessionCompletedResult;
-
-export type FulfillPaymentIntentSucceededResult =
-  | { status: "duplicate_event" }
-  | { status: "already_fulfilled" }
-  | { status: "ignored"; reason: "metadata" | "not_approval_intent" }
-  | { status: "success" };
-
-export type FulfillPaymentIntentPaymentFailedResult =
-  | { status: "duplicate_event" }
-  | { status: "ignored"; reason: "metadata" }
-  | { status: "success" };
 
 type M4cSetupFulfillmentCoreResult =
   | { status: "success" }
@@ -557,93 +536,4 @@ export async function fulfillSetupIntentSucceeded(
     setupIntentId: si.id,
     checkoutSessionId: null,
   });
-}
-
-/**
- * M4-C: vendor-approval capture — **`payment_intent.succeeded`** with
- * **`metadata.purpose=booking_approval`** (or match on **`stripe_approval_payment_intent_id`**).
- */
-export async function fulfillApprovalPaymentIntentSucceeded(
-  event: Stripe.Event,
-  supabase: SupabaseClient<Database>,
-): Promise<FulfillPaymentIntentSucceededResult> {
-  if (event.type !== "payment_intent.succeeded") {
-    return { status: "ignored", reason: "not_approval_intent" };
-  }
-
-  if (await stripeWebhookEventExists(supabase, event.id)) {
-    return { status: "duplicate_event" };
-  }
-
-  const pi = event.data.object as Stripe.PaymentIntent;
-  const purpose = pi.metadata?.[STRIPE_METADATA_PURPOSE]?.trim();
-  const metaOrderId = metadataOrderId(pi.metadata) ?? "";
-
-  let order: Order | null =
-    purpose === STRIPE_PURPOSE_BOOKING_APPROVAL && metaOrderId !== ""
-      ? await getOrderById(supabase, metaOrderId)
-      : null;
-
-  if (!order && typeof pi.id === "string") {
-    order = await findOrderByStripeApprovalPaymentIntentId(supabase, pi.id);
-  }
-
-  if (!order) {
-    await insertStripeWebhookEvent(supabase, event.id);
-    return { status: "ignored", reason: "metadata" };
-  }
-
-  if (purpose === STRIPE_PURPOSE_BOOKING_APPROVAL && metaOrderId !== "" && metaOrderId !== order.id) {
-    await insertStripeWebhookEvent(supabase, event.id);
-    return { status: "ignored", reason: "metadata" };
-  }
-
-  if (order.status === "paid" && order.stripe_payment_intent_id === pi.id) {
-    await insertStripeWebhookEvent(supabase, event.id);
-    return { status: "already_fulfilled" };
-  }
-
-  await confirmPendingActivityBookingsForOrder(supabase, order.id);
-  await updateOrderPaidAfterApprovalCapture(supabase, order.id, pi.id);
-
-  await insertStripeWebhookEvent(supabase, event.id);
-  return { status: "success" };
-}
-
-/**
- * M4-C: approval capture failed — move order to **`payment_pending`** for retry / ops follow-up.
- */
-export async function fulfillApprovalPaymentIntentFailed(
-  event: Stripe.Event,
-  supabase: SupabaseClient<Database>,
-): Promise<FulfillPaymentIntentPaymentFailedResult> {
-  if (event.type !== "payment_intent.payment_failed") {
-    return { status: "ignored", reason: "metadata" };
-  }
-
-  if (await stripeWebhookEventExists(supabase, event.id)) {
-    return { status: "duplicate_event" };
-  }
-
-  const pi = event.data.object as Stripe.PaymentIntent;
-  const purpose = pi.metadata?.[STRIPE_METADATA_PURPOSE]?.trim();
-  const metaOrderId = metadataOrderId(pi.metadata) ?? "";
-
-  let order: Order | null =
-    purpose === STRIPE_PURPOSE_BOOKING_APPROVAL && metaOrderId !== ""
-      ? await getOrderById(supabase, metaOrderId)
-      : null;
-
-  if (!order && typeof pi.id === "string") {
-    order = await findOrderByStripeApprovalPaymentIntentId(supabase, pi.id);
-  }
-
-  if (!order) {
-    await insertStripeWebhookEvent(supabase, event.id);
-    return { status: "ignored", reason: "metadata" };
-  }
-
-  await updateOrderStatusPaymentPending(supabase, order.id);
-  await insertStripeWebhookEvent(supabase, event.id);
-  return { status: "success" };
 }

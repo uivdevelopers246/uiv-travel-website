@@ -2,7 +2,7 @@
 
 **Status:** Accepted  
 **Milestone:** M4 — Booking & Availability (amendment)  
-**Date:** 2026-04-13  
+**Date:** 2026-04-13 (amended 2026-04-15)  
 **Deciders:** UIV Travel development team  
 
 **Related**
@@ -16,7 +16,9 @@
 
 The original M4 checkout model ([ADR-M4-B](./ADR-M4-shopping-cart-and-checkout.md)) charges the customer **up front** via Stripe Checkout (`mode: "payment"`), then creates **`activity_bookings`** on **`checkout.session.completed`** when **`payment_status === 'paid'`**. Capacity is enforced **after** capture; the cart does not reserve inventory.
 
-Stakeholders now require **vendor (or site admin) approval before any charge**, so operators can avoid **double-booking** slots that may still be sold elsewhere (other platforms, phone, etc.). Users should **not** pay for bookings that cannot be fulfilled; **refunds should be rare**—declines should mean **no payment**, not refund-after-capture.
+Stakeholders require **vendor (or site admin) approval before any charge**, so operators can avoid **double-booking** slots that may still be sold elsewhere (other platforms, phone, etc.). Users should **not** pay for bookings that cannot be fulfilled; **refunds should be rare**—declines should mean **no payment**, not refund-after-capture.
+
+**Vendor payouts** (platform → vendor) are **out of scope** for this ADR; they are handled in a separate process. This ADR only covers **collecting payment from the customer** in Stripe for **approved** activity lines.
 
 Accommodation checkout may follow the same pattern later; this ADR states **activity-first** requirements and keeps **accommodation** as a forward-compatible extension.
 
@@ -26,19 +28,29 @@ Accommodation checkout may follow the same pattern later; this ADR states **acti
 
 1. **No charge at “checkout request” time.** The customer completes a **payment-method collection** flow only (Stripe **SetupIntent** or Stripe Checkout **`mode: 'setup'`**), attaching a **PaymentMethod** to a Stripe **Customer** for **off_session** use. **Zero** `PaymentIntent` amount is due at this step for the booking request itself.
 
-2. **Booking requests are created in a pending state** after the SetupIntent succeeds (server-verified via webhook or client return + server confirmation—implementation detail). **`activity_bookings`** rows (or an equivalent pending request aggregate—see Consequences) represent **requested** inventory and **reserve capacity** while the request is valid.
+2. **Booking requests are created in a pending state** after setup succeeds (server-verified via webhook). **`activity_bookings`** rows represent **requested** inventory and **reserve capacity** while the request is valid.
 
-3. **Charge occurs only when a vendor or site admin confirms** (fully or partially—see § Partial confirmation). The platform creates a **PaymentIntent** for the **confirmed amount** and confirms/captures it using the saved PaymentMethod. **Payment success** is the moment ledger/revenue is recognized for that confirmation.
+3. **Vendors (or site admins) approve or decline line items** within the SLA. **MVP:** approval is **binary**—no editing of amounts or participant counts at approve time.
 
-4. **Approval SLA (MVP): 24 hours** from request creation. The SLA duration is defined by a **single shared constant** (e.g. `BOOKING_APPROVAL_SLA_HOURS` or `BOOKING_APPROVAL_SLA_MS`) in application code so it can change without hunting literals. **Expiry** releases reserved capacity and cancels the request without charging.
+4. **One customer charge per order (settlement).** The platform creates **one** `PaymentIntent` **only after every line on the order has reached a terminal state** (`confirmed`, `declined`, or `expired`) and **no** line is still `pending_approval`. The charge amount is the **sum of `total_cents` (or equivalent) for lines in `confirmed`** only. **`payment_intent.succeeded`** on that single intent is the revenue signal for the order.
 
-5. **Decline or expiry:** **No charge** and **no refund path**—there was no successful capture for that request. Stripe objects for “save card” remain governed by Stripe retention and product policy.
+5. **Approval SLA (MVP): 24 hours** from request creation. The SLA duration is defined by a **single shared constant** in application code. **Expiry** releases reserved capacity without charging.
 
-6. **Roles:** **Vendor owners** approve or decline requests for their activities. **Site admins** are **super-users**: they may perform the same approval actions as the vendor where product rules allow.
+6. **Decline or expiry before settlement:** **No charge** for those lines. If **no** line ends `confirmed`, the order is **not** charged.
 
-7. **Strict capacity:** **`pending_approval`** (within SLA, not expired) **and** **`confirmed`** bookings **both** count toward slot capacity. Goal: minimize conflict and deliver predictable UX (no silent overbooking).
+7. **Roles:** **Vendor owners** approve or decline requests for their activities. **Site admins** may perform the same actions where product rules allow.
 
-8. **Correlation:** Continue to anchor checkout/booking requests to **`orders`** (and **`metadata.order_id`** on Stripe objects where applicable) so support and idempotency remain coherent. Exact **`orders.status`** enum extensions are an implementation detail; new states such as **`awaiting_vendor_approval`**, **`payment_pending`**, **`completed`**, **`declined`**, **`expired`** may be introduced as needed—align with `lib/orders` and migrations.
+8. **Strict capacity (platform + off-platform):** For each **`availability_slots`** row, let **`platform_booked`** be the sum of **`participants`** on **`activity_bookings`** for that slot where **`status`** is **`confirmed`** or **`pending_approval`** (within SLA, not expired). Let **`off_platform_participants`** be a non-negative integer on the slot (vendor-reported seats sold outside this platform). **Invariant:** **`platform_booked + off_platform_participants ≤ max_capacity`**. The UI may show **remaining** for the platform as **`max_capacity - off_platform_participants - platform_booked`**; only **`off_platform_participants`** is stored as vendor input for off-platform usage.
+
+9. **Lowering `max_capacity`:** A vendor (or admin) may decrease **`max_capacity`** only when the new value is still **≥ `platform_booked + off_platform_participants`** after the edit—i.e. they cannot set a cap below seats already committed on-platform plus declared off-platform usage.
+
+10. **Approve / decline granularity:** **Per booking line** (each **`activity_bookings`** row). Vendors and admins confirm or decline individual lines; bulk actions on an order may exist as convenience but are not the only path.
+
+11. **Correlation:** Anchor checkout and settlement to **`orders`** and **`metadata.order_id`** on Stripe objects where applicable.
+
+12. **Failed settlement charge (MVP):** **Single** retry/cancel path (e.g. order **`payment_pending`**); no per-vendor PaymentIntent complexity.
+
+13. **Refunds:** Expected to be **rare** (e.g. short-notice vendor cancellation). **Partial refunds** may be added later; not required for MVP.
 
 ---
 
@@ -47,29 +59,31 @@ Accommodation checkout may follow the same pattern later; this ADR states **acti
 | Phase | Stripe object | Purpose |
 |--------|----------------|--------|
 | Customer saves card | **SetupIntent** (or Checkout **setup** mode) | Collect and attach **PaymentMethod**; **no charge**. |
-| Approval | **PaymentIntent** (`confirm: true`, **`off_session: true`** when allowed) | Charge **only** the **approved** amount. |
+| Settlement | **One** `PaymentIntent` per order (`off_session` when allowed) | Charge **sum of confirmed line totals** after all lines are terminal. |
 
-- **Primary “payment completed” signal for revenue:** **`payment_intent.succeeded`** (and/or **`charge.succeeded`**) on the **approval-time** PaymentIntent—not **`checkout.session.completed`** with **`payment_status: paid`** for the old upfront flow once migration is complete.
-- **SetupIntent webhooks** (e.g. **`setup_intent.succeeded`**) support idempotent transition from “user finished card flow” to “pending booking request persisted.”
-- **Idempotency:** Keep **`stripe_webhook_events`** (or equivalent) for all processed Stripe event ids; approval-time charges must also be **idempotent** on the application side (e.g. one charge per approved request revision).
+- **Primary “payment completed” signal for revenue:** **`payment_intent.succeeded`** on the **settlement** PaymentIntent (not Checkout `payment_status: paid` from the old upfront flow).
+- **SetupIntent / Checkout setup** webhooks: idempotent transition to **pending** bookings and order **`awaiting_vendor_approval`**.
+- **Idempotency:** **`stripe_webhook_events`** for processed Stripe event ids; settlement charge id stored on **`orders.stripe_payment_intent_id`**.
 
-**SCA / 3DS:** Saving a card may require customer authentication. **Off-session** charges after approval can fail if the bank requires **step-up** authentication. MVP should document at least one **recovery path** (e.g. email link to complete payment, or cancel approval with notification)—exact UX is product follow-up.
+**SCA / 3DS:** Document recovery (email link, retry, cancel) for failed off-session settlement; exact UX is follow-up.
 
 ---
 
 ## Data & capacity rules (target)
 
-- **Capacity formula:** Sum **`participants`** (or equivalent) for bookings tied to the slot where **`status`** is in **`{ pending_approval, confirmed }`** (names illustrative) **and** pending rows are **not expired** by SLA. **Declined**, **cancelled**, and **expired** rows do not consume capacity.
-- **Partial confirmation:** If the product allows a vendor to confirm **fewer** participants or **fewer** lines than requested, the **PaymentIntent amount** MUST match **only** the confirmed portion; unconfirmed inventory is released.
-- **RLS & inserts:** Today, **`authenticated`** cannot insert **`activity_bookings`** ([ADR-M4-A](./ADR-M4-booking-availability.md)). Pending-request inserts will continue to require **privileged** paths (**service role** and/or **`SECURITY DEFINER` RPCs**) so browsers cannot mint bookings without server rules. Exact policies will be updated in migrations when this ADR is implemented.
+- **Platform capacity usage:** Sum **`participants`** for bookings where **`status`** is **`confirmed`** or **`pending_approval`** (not expired by SLA). **Declined**, **cancelled**, and **expired** rows do not consume capacity (subject to RPC definitions). Totals for enforcement and for slot edits should use the same definition the **`slot_platform_participants_booked`** (or equivalent) RPC returns so RLS and **`SECURITY DEFINER`** paths stay consistent.
+- **Off-platform field:** **`availability_slots.off_platform_participants`** — vendor-maintained; included in **`platform_booked + off_platform_participants ≤ max_capacity`** checks (booking creation and slot PATCH validation).
+- **Remaining (UI):** Derived as **`max_capacity - off_platform_participants - platform_booked`**; not persisted as the sole stored “remaining” value.
+- **Slot reschedule / cancel:** While **`platform_booked > 0`**, the slot must not be rescheduled or soft-cancelled (pending and confirmed both block, matching **`platform_booked`**).
+- **RLS & inserts:** **`authenticated`** cannot insert **`activity_bookings`** arbitrarily; pending rows use privileged paths (**service role** / **`SECURITY DEFINER` RPCs**).
 
 ---
 
 ## Operational & API expectations (non-binding)
 
-- **Vendor dashboard:** List **booking requests** (pending), actions **Approve** / **Decline** (and partial approve if supported).
-- **Jobs:** A scheduled or queue-driven process **expires** requests past SLA, updates status, and **releases** capacity—no Stripe capture on expiry.
-- **Notifications:** Email/push when request is submitted, approved, declined, or expired—align with notification milestones elsewhere (e.g. M6).
+- **Vendor dashboard:** List **booking requests** (pending), actions **Approve** / **Decline**.
+- **Jobs:** Expire **`pending_approval`** past SLA; **no** Stripe capture on expiry.
+- **Notifications:** Align with product milestones (e.g. M6).
 
 ---
 
@@ -77,31 +91,31 @@ Accommodation checkout may follow the same pattern later; this ADR states **acti
 
 **Positive**
 
-- No charge until commitment is mutual; fewer refunds and clearer UX when a slot cannot be honored.
+- No charge until line items are resolved; **one** Stripe charge per order; simpler reconciliation than per-vendor PaymentIntents.
 - **24-hour SLA** fits **SetupIntent** (no reliance on short-lived **authorization holds** as with manual capture).
 - **Strict pending + confirmed** capacity reduces double-booking across channels **for inventory managed inside this system**.
 
 **Tradeoffs**
 
-- **Implementation complexity** vs M4-B: SetupIntent flow, approval APIs, expiry job, new order/booking states, Stripe webhooks beyond **`checkout.session.completed`**.
-- **Failed off-session charge** after approval requires explicit handling (retry, customer action, or release).
-- External bookings (phone / other apps) are **not** visible to this system—operators must still align offline inventory; this ADR only enforces consistency **within** the platform’s booking data.
+- **Time to capture** may wait until the **last** line resolves (within SLA).
+- **Implementation complexity** vs M4-B: setup flow, approval APIs, expiry job, webhooks.
 
 **Supersedes (product direction)**
 
-- Upfront **Checkout Session `mode: payment`** as the **primary** path for activity booking requests, and “**create bookings only after paid webhook**” as the **only** path, are **replaced** by this document for the approved MVP. Code may migrate incrementally; until then, M4-B remains the implemented reference.
+- Upfront **Checkout Session `mode: payment`** as the **primary** path for activity booking requests is **replaced** by this document for the approved MVP. Per-vendor approval-time PaymentIntents are **not** part of the target design.
 
 ---
 
 ## Implementation checklist (for future PRs; not exhaustive)
 
 - [ ] Shared SLA constant + expiry job  
-- [ ] Stripe Customer + SetupIntent (or Checkout setup) wiring; store PM and correlate `order_id`  
-- [ ] Pending booking/request rows + RPCs for capacity with **`pending_approval` + `confirmed`**  
-- [ ] Vendor/admin approve → create PaymentIntent for confirmed amount; handle webhooks idempotently  
+- [ ] Stripe Customer + Checkout setup; correlate `order_id`  
+- [ ] Pending `activity_bookings` + capacity RPCs  
+- [ ] Approve/decline APIs: **DB only** (confirm/decline per vendor or admin); **no** charge on approve  
+- [ ] **Settlement:** one `PaymentIntent` when all lines terminal; amount = sum of confirmed lines; webhook → `paid`  
 - [ ] Decline / expiry paths without capture  
-- [ ] Update **`docs/architecture.md`** env/webhook table (new Stripe events if any)  
-- [ ] Adjust or add Vitest coverage in **`lib/`** services  
+- [ ] Update **`docs/architecture.md`** webhook table  
+- [ ] Vitest coverage in **`lib/`** services  
 
 ---
 

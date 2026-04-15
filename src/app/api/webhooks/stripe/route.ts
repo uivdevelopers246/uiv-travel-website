@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 import {
-  fulfillApprovalPaymentIntentFailed,
-  fulfillApprovalPaymentIntentSucceeded,
   fulfillCheckoutSetupSessionCompleted,
   fulfillSetupIntentSucceeded,
   parseAndVerifyStripeWebhook,
@@ -38,37 +36,6 @@ function setupIntentSucceededResponse(
   return checkoutSessionCompletedResponse(result);
 }
 
-function paymentIntentSucceededResponse(
-  result: Awaited<ReturnType<typeof fulfillApprovalPaymentIntentSucceeded>>,
-): NextResponse {
-  switch (result.status) {
-    case "duplicate_event":
-    case "already_fulfilled":
-    case "success":
-    case "ignored":
-      return NextResponse.json({ received: true });
-    default: {
-      const _exhaustive: never = result;
-      return _exhaustive;
-    }
-  }
-}
-
-function paymentIntentFailedResponse(
-  result: Awaited<ReturnType<typeof fulfillApprovalPaymentIntentFailed>>,
-): NextResponse {
-  switch (result.status) {
-    case "duplicate_event":
-    case "success":
-    case "ignored":
-      return NextResponse.json({ received: true });
-    default: {
-      const _exhaustive: never = result;
-      return _exhaustive;
-    }
-  }
-}
-
 export async function POST(request: Request) {
   let event: Stripe.Event;
   try {
@@ -88,14 +55,6 @@ export async function POST(request: Request) {
       case "setup_intent.succeeded": {
         const result = await fulfillSetupIntentSucceeded(event, supabase);
         return setupIntentSucceededResponse(result);
-      }
-      case "payment_intent.succeeded": {
-        const result = await fulfillApprovalPaymentIntentSucceeded(event, supabase);
-        return paymentIntentSucceededResponse(result);
-      }
-      case "payment_intent.payment_failed": {
-        const result = await fulfillApprovalPaymentIntentFailed(event, supabase);
-        return paymentIntentFailedResponse(result);
       }
       default:
         return NextResponse.json({ received: true });

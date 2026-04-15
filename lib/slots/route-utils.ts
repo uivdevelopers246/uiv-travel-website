@@ -25,8 +25,9 @@ export function mapSlotRouteError(error: unknown): NextResponse {
     return notFound(message);
   }
   if (
-    message ===
-    "Cannot modify or cancel this slot because it has confirmed bookings."
+    message.startsWith("Cannot reschedule this slot while it has platform bookings") ||
+    message.startsWith("Cannot cancel this slot while it has platform bookings") ||
+    message.startsWith("max_capacity must be at least platform bookings")
   ) {
     return badRequest(message);
   }
@@ -38,6 +39,7 @@ export function mapSlotRouteError(error: unknown): NextResponse {
   }
   if (
     message.includes("max_capacity") ||
+    message.includes("off_platform_participants") ||
     message.includes("starts_at") ||
     message.includes("duration_hours")
   ) {
@@ -110,7 +112,28 @@ export function parseUpdateSlotBody(
     input.max_capacity = cap;
   }
 
-  if (input.starts_at === undefined && input.max_capacity === undefined) {
+  if (Object.prototype.hasOwnProperty.call(body, "off_platform_participants")) {
+    const off = body.off_platform_participants;
+    if (
+      typeof off !== "number" ||
+      !Number.isInteger(off) ||
+      off < 0
+    ) {
+      return {
+        ok: false,
+        response: badRequest(
+          "off_platform_participants must be a non-negative integer",
+        ),
+      };
+    }
+    input.off_platform_participants = off;
+  }
+
+  if (
+    input.starts_at === undefined &&
+    input.max_capacity === undefined &&
+    input.off_platform_participants === undefined
+  ) {
     return { ok: false, response: badRequest("No updates provided") };
   }
 
