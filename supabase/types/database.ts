@@ -418,6 +418,7 @@ export type Database = {
           currency: string
           discount_cents: number
           id: string
+          settlement_charge_attempt_count: number
           status: string
           stripe_checkout_session_id: string | null
           stripe_customer_id: string | null
@@ -433,6 +434,7 @@ export type Database = {
           currency?: string
           discount_cents?: number
           id?: string
+          settlement_charge_attempt_count?: number
           status?: string
           stripe_checkout_session_id?: string | null
           stripe_customer_id?: string | null
@@ -449,6 +451,7 @@ export type Database = {
           discount_cents?: number
           id?: string
           status?: string
+          settlement_charge_attempt_count?: number
           stripe_checkout_session_id?: string | null
           stripe_customer_id?: string | null
           stripe_payment_intent_id?: string | null

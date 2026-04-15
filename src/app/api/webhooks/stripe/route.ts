@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 import {
   fulfillCheckoutSetupSessionCompleted,
+  fulfillSettlementPaymentIntentPaymentFailed,
+  fulfillSettlementPaymentIntentSucceeded,
   fulfillSetupIntentSucceeded,
   parseAndVerifyStripeWebhook,
 } from "@/lib/stripe/server";
@@ -36,6 +38,41 @@ function setupIntentSucceededResponse(
   return checkoutSessionCompletedResponse(result);
 }
 
+function settlementPaymentIntentSucceededResponse(
+  result: Awaited<ReturnType<typeof fulfillSettlementPaymentIntentSucceeded>>,
+): NextResponse {
+  switch (result.status) {
+    case "duplicate_event":
+    case "already_paid":
+    case "success":
+    case "ignored":
+    case "amount_mismatch":
+      return NextResponse.json({ received: true });
+    default: {
+      const _exhaustive: never = result;
+      return _exhaustive;
+    }
+  }
+}
+
+function settlementPaymentIntentFailedResponse(
+  result: Awaited<ReturnType<typeof fulfillSettlementPaymentIntentPaymentFailed>>,
+): NextResponse {
+  switch (result.status) {
+    case "duplicate_event":
+    case "already_paid":
+    case "retry_scheduled":
+    case "terminal_failed":
+    case "stale_intent":
+    case "ignored":
+      return NextResponse.json({ received: true });
+    default: {
+      const _exhaustive: never = result;
+      return _exhaustive;
+    }
+  }
+}
+
 export async function POST(request: Request) {
   let event: Stripe.Event;
   try {
@@ -55,6 +92,14 @@ export async function POST(request: Request) {
       case "setup_intent.succeeded": {
         const result = await fulfillSetupIntentSucceeded(event, supabase);
         return setupIntentSucceededResponse(result);
+      }
+      case "payment_intent.succeeded": {
+        const result = await fulfillSettlementPaymentIntentSucceeded(event, supabase);
+        return settlementPaymentIntentSucceededResponse(result);
+      }
+      case "payment_intent.payment_failed": {
+        const result = await fulfillSettlementPaymentIntentPaymentFailed(event, supabase);
+        return settlementPaymentIntentFailedResponse(result);
       }
       default:
         return NextResponse.json({ received: true });

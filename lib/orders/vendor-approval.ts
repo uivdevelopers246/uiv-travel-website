@@ -15,6 +15,7 @@ import { createServiceRoleClient } from "@/lib/supabase/service-role";
 import type { Database } from "@/supabase/types/database";
 import { getOrderById, updateOrderStatus } from "@/lib/orders/service";
 import type { Order } from "@/lib/orders/types";
+import { tryBeginSettlementChargeForOrder } from "@/lib/orders/settlement";
 
 export type ApproveActivityOrderResult = { confirmedCount: number };
 
@@ -36,6 +37,18 @@ function orderAllowsVendorApproval(order: Order): boolean {
  * When no **`pending_approval`** rows remain and every booking is declined/expired/cancelled,
  * sets the order to **`declined`**.
  */
+/**
+ * After booking rows change (approve/decline) or after a sweep expires **`pending_approval`** lines:
+ * sync all-declined orders, then start settlement when every line is terminal with **`confirmed`** totals.
+ */
+export async function syncOrderM4cAfterBookingChange(
+  supabaseService: SupabaseClient<Database>,
+  orderId: string,
+): Promise<void> {
+  await syncOrderDeclinedWhenNoPendingHoldsRemain(supabaseService, orderId);
+  await tryBeginSettlementChargeForOrder(supabaseService, orderId);
+}
+
 export async function syncOrderDeclinedWhenNoPendingHoldsRemain(
   supabaseService: SupabaseClient<Database>,
   orderId: string,
@@ -116,7 +129,7 @@ export async function approveActivityBookingAsVendor(
   if (n === 0) {
     throw new Error("Could not confirm booking");
   }
-  await syncOrderDeclinedWhenNoPendingHoldsRemain(service, booking.order_id);
+  await syncOrderM4cAfterBookingChange(service, booking.order_id);
 }
 
 /**
@@ -150,7 +163,7 @@ export async function declineActivityBookingAsVendor(
   if (n === 0) {
     throw new Error("Could not decline booking");
   }
-  await syncOrderDeclinedWhenNoPendingHoldsRemain(service, booking.order_id);
+  await syncOrderM4cAfterBookingChange(service, booking.order_id);
 }
 
 /**
@@ -182,7 +195,7 @@ export async function approveActivityBookingAsAdmin(
   if (n === 0) {
     throw new Error("Could not confirm booking");
   }
-  await syncOrderDeclinedWhenNoPendingHoldsRemain(service, booking.order_id);
+  await syncOrderM4cAfterBookingChange(service, booking.order_id);
 }
 
 /**
@@ -207,7 +220,7 @@ export async function declineActivityBookingAsAdmin(
   if (n === 0) {
     throw new Error("Could not decline booking");
   }
-  await syncOrderDeclinedWhenNoPendingHoldsRemain(service, booking.order_id);
+  await syncOrderM4cAfterBookingChange(service, booking.order_id);
 }
 
 /**
@@ -237,7 +250,7 @@ export async function approveActivityOrderAsAdmin(
     service,
     orderId,
   );
-  await syncOrderDeclinedWhenNoPendingHoldsRemain(service, orderId);
+  await syncOrderM4cAfterBookingChange(service, orderId);
   return { confirmedCount };
 }
 
@@ -268,7 +281,7 @@ export async function declineActivityOrderAsVendor(
     orderId,
     vendorId,
   );
-  await syncOrderDeclinedWhenNoPendingHoldsRemain(service, orderId);
+  await syncOrderM4cAfterBookingChange(service, orderId);
   return { declinedCount };
 }
 

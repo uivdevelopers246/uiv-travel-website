@@ -11,11 +11,18 @@ import { bookingPendingApprovalExpiresAtIso } from "@/lib/activity-bookings/sla"
 import { CART_LINE_TYPE_ACTIVITY } from "@/lib/cart/constants";
 import { deleteAllCartLinesForUser } from "@/lib/cart/service";
 import type { CartLine } from "@/lib/cart/types";
-import { STRIPE_METADATA_ORDER_ID_KEY } from "@/lib/orders/constants";
 import {
+  STRIPE_METADATA_FLOW_M4C_SETTLEMENT,
+  STRIPE_METADATA_ORDER_ID_KEY,
+} from "@/lib/orders/constants";
+import { computeConfirmedSettlementTotalCents } from "@/lib/orders/settlement-utils";
+import {
+  attachSettlementRetryPaymentIntent,
   getOrderById,
+  markOrderFailedAfterSettlementExhausted,
   revertOrderToAwaitingPaymentAfterSetupFailure,
   updateOrderAwaitingVendorApprovalFromSetup,
+  updateOrderPaidAfterSettlementCapture,
   updateOrderStatus,
 } from "@/lib/orders/service";
 import type { Order } from "@/lib/orders/types";
@@ -536,4 +543,230 @@ export async function fulfillSetupIntentSucceeded(
     setupIntentId: si.id,
     checkoutSessionId: null,
   });
+}
+
+export type CreateSettlementPaymentIntentForOrderInput = {
+  order: Order;
+  amountCents: number;
+  idempotencyKey: string;
+};
+
+/**
+ * M4-C: single off-session **`PaymentIntent`** using the saved payment method from the order’s
+ * **`SetupIntent`** (see ADR-M4-C).
+ */
+export async function createSettlementPaymentIntentForOrder(
+  input: CreateSettlementPaymentIntentForOrderInput,
+): Promise<Stripe.PaymentIntent> {
+  if (input.amountCents < 1) {
+    throw new Error("Settlement amount must be at least 1 cent");
+  }
+  const stripe = getStripe();
+  const setupIntent = await stripe.setupIntents.retrieve(
+    input.order.stripe_setup_intent_id!,
+  );
+  const paymentMethodId =
+    typeof setupIntent.payment_method === "string"
+      ? setupIntent.payment_method
+      : setupIntent.payment_method?.id;
+  if (!paymentMethodId) {
+    throw new Error("SetupIntent has no payment_method for settlement");
+  }
+
+  return stripe.paymentIntents.create(
+    {
+      amount: input.amountCents,
+      currency: input.order.currency,
+      customer: input.order.stripe_customer_id!,
+      payment_method: paymentMethodId,
+      off_session: true,
+      confirm: true,
+      metadata: {
+        [STRIPE_METADATA_ORDER_ID_KEY]: input.order.id,
+        flow: STRIPE_METADATA_FLOW_M4C_SETTLEMENT,
+      },
+    },
+    { idempotencyKey: input.idempotencyKey },
+  );
+}
+
+export type FulfillSettlementPaymentIntentSucceededResult =
+  | { status: "duplicate_event" }
+  | { status: "already_paid" }
+  | { status: "ignored"; reason: "not_settlement_flow" }
+  | { status: "amount_mismatch" }
+  | { status: "success" };
+
+/**
+ * M4-C: **`payment_intent.succeeded`** for the settlement charge — idempotent via
+ * **`orders.stripe_payment_intent_id`** / **`stripe_webhook_events`**.
+ */
+export async function fulfillSettlementPaymentIntentSucceeded(
+  event: Stripe.Event,
+  supabase: SupabaseClient<Database>,
+): Promise<FulfillSettlementPaymentIntentSucceededResult> {
+  if (event.type !== "payment_intent.succeeded") {
+    throw new Error(
+      "fulfillSettlementPaymentIntentSucceeded expects payment_intent.succeeded",
+    );
+  }
+
+  if (await stripeWebhookEventExists(supabase, event.id)) {
+    return { status: "duplicate_event" };
+  }
+
+  const pi = event.data.object as Stripe.PaymentIntent;
+  if (pi.metadata?.flow !== STRIPE_METADATA_FLOW_M4C_SETTLEMENT) {
+    await insertStripeWebhookEvent(supabase, event.id);
+    return { status: "ignored", reason: "not_settlement_flow" };
+  }
+
+  const orderId = metadataOrderId(pi.metadata);
+  if (!orderId) {
+    throw new Error(
+      `payment_intent.succeeded missing metadata.${STRIPE_METADATA_ORDER_ID_KEY}`,
+    );
+  }
+
+  const order = await getOrderById(supabase, orderId);
+  if (!order) {
+    await insertStripeWebhookEvent(supabase, event.id);
+    throw new Error("Order not found for settlement success");
+  }
+
+  if (order.status === "paid") {
+    await insertStripeWebhookEvent(supabase, event.id);
+    return { status: "already_paid" };
+  }
+
+  const bookings = await listActivityBookings(supabase, { orderId, limit: 500 });
+  const expectedCents = computeConfirmedSettlementTotalCents(bookings);
+  if (pi.amount !== expectedCents) {
+    await insertStripeWebhookEvent(supabase, event.id);
+    return { status: "amount_mismatch" };
+  }
+  if (pi.currency.toLowerCase() !== order.currency.toLowerCase()) {
+    await insertStripeWebhookEvent(supabase, event.id);
+    return { status: "amount_mismatch" };
+  }
+
+  try {
+    await updateOrderPaidAfterSettlementCapture(supabase, orderId, pi.id);
+  } catch {
+    const fresh = await getOrderById(supabase, orderId);
+    if (fresh?.status === "paid") {
+      await insertStripeWebhookEvent(supabase, event.id);
+      return { status: "already_paid" };
+    }
+    throw new Error("Could not transition order to paid after settlement");
+  }
+
+  await insertStripeWebhookEvent(supabase, event.id);
+  return { status: "success" };
+}
+
+export type FulfillSettlementPaymentIntentPaymentFailedResult =
+  | { status: "duplicate_event" }
+  | { status: "already_paid" }
+  | {
+      status: "ignored";
+      reason:
+        | "not_settlement_flow"
+        | "unexpected_attempt_count"
+        | "order_not_payment_pending";
+    }
+  | { status: "stale_intent" }
+  | { status: "retry_scheduled" }
+  | { status: "terminal_failed" };
+
+/**
+ * M4-C: **`payment_intent.payment_failed`** — one automatic retry, then **`failed`** + cancel
+ * confirmed bookings.
+ */
+export async function fulfillSettlementPaymentIntentPaymentFailed(
+  event: Stripe.Event,
+  supabase: SupabaseClient<Database>,
+): Promise<FulfillSettlementPaymentIntentPaymentFailedResult> {
+  if (event.type !== "payment_intent.payment_failed") {
+    throw new Error(
+      "fulfillSettlementPaymentIntentPaymentFailed expects payment_intent.payment_failed",
+    );
+  }
+
+  if (await stripeWebhookEventExists(supabase, event.id)) {
+    return { status: "duplicate_event" };
+  }
+
+  const pi = event.data.object as Stripe.PaymentIntent;
+  if (pi.metadata?.flow !== STRIPE_METADATA_FLOW_M4C_SETTLEMENT) {
+    await insertStripeWebhookEvent(supabase, event.id);
+    return { status: "ignored", reason: "not_settlement_flow" };
+  }
+
+  const orderId = metadataOrderId(pi.metadata);
+  if (!orderId) {
+    throw new Error(
+      `payment_intent.payment_failed missing metadata.${STRIPE_METADATA_ORDER_ID_KEY}`,
+    );
+  }
+
+  const order = await getOrderById(supabase, orderId);
+  if (!order) {
+    await insertStripeWebhookEvent(supabase, event.id);
+    throw new Error("Order not found for settlement failure");
+  }
+
+  if (order.status === "paid") {
+    await insertStripeWebhookEvent(supabase, event.id);
+    return { status: "already_paid" };
+  }
+
+  if (order.stripe_payment_intent_id !== pi.id) {
+    await insertStripeWebhookEvent(supabase, event.id);
+    return { status: "stale_intent" };
+  }
+
+  if (order.status !== "payment_pending") {
+    await insertStripeWebhookEvent(supabase, event.id);
+    return { status: "ignored", reason: "order_not_payment_pending" };
+  }
+
+  const attempt = order.settlement_charge_attempt_count;
+  if (attempt === 1) {
+    const bookings = await listActivityBookings(supabase, { orderId, limit: 500 });
+    const amountCents = computeConfirmedSettlementTotalCents(bookings);
+    const retryPi = await createSettlementPaymentIntentForOrder({
+      order,
+      amountCents,
+      idempotencyKey: `m4c-settlement-${orderId}-2`,
+    });
+    const attached = await attachSettlementRetryPaymentIntent(supabase, {
+      orderId,
+      priorStripePaymentIntentId: pi.id,
+      newStripePaymentIntentId: retryPi.id,
+    });
+    if (!attached) {
+      await getStripe().paymentIntents.cancel(retryPi.id);
+    }
+    await insertStripeWebhookEvent(supabase, event.id);
+    return { status: "retry_scheduled" };
+  }
+
+  if (attempt === 2) {
+    await cancelActivityBookingsForOrder(supabase, orderId);
+    const marked = await markOrderFailedAfterSettlementExhausted(
+      supabase,
+      orderId,
+      pi.id,
+    );
+    if (!marked) {
+      await insertStripeWebhookEvent(supabase, event.id);
+      return { status: "stale_intent" };
+    }
+    await insertStripeWebhookEvent(supabase, event.id);
+    return { status: "terminal_failed" };
+  }
+
+  await insertStripeWebhookEvent(supabase, event.id);
+  return { status: "ignored", reason: "unexpected_attempt_count" };
 }

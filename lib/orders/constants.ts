@@ -4,6 +4,9 @@
  */
 export const STRIPE_METADATA_ORDER_ID_KEY = "order_id" as const;
 
+/** Stripe PaymentIntent metadata for M4-C off-session settlement charge. */
+export const STRIPE_METADATA_FLOW_M4C_SETTLEMENT = "m4c_settlement" as const;
+
 /** Matches `orders.status` CHECK constraint. */
 export const ORDER_STATUSES = [
   "awaiting_payment",

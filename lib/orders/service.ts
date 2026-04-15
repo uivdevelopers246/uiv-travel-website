@@ -278,6 +278,7 @@ export async function updateOrderPaidAfterSettlementCapture(
       stripe_payment_intent_id: stripePaymentIntentId,
     })
     .eq("id", orderId)
+    .in("status", ["awaiting_vendor_approval", "payment_pending"])
     .select("*")
     .maybeSingle();
 
@@ -285,7 +286,7 @@ export async function updateOrderPaidAfterSettlementCapture(
     throw orderServiceError("Could not mark order paid after settlement capture", error);
   }
   if (!data) {
-    throw new Error("Order not found");
+    throw new Error("Order not found or not eligible for settlement paid transition");
   }
   return data;
 }
@@ -295,4 +296,88 @@ export async function updateOrderStatusPaymentPending(
   orderId: string,
 ): Promise<Order> {
   return updateOrderStatus(supabase, orderId, "payment_pending");
+}
+
+/**
+ * M4-C: first settlement PI created off-session — move to **`payment_pending`** and record attempt **1**.
+ * Returns **`null`** if another writer already attached a PI (idempotent loss).
+ */
+export async function attachFirstSettlementPaymentIntent(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+  stripePaymentIntentId: string,
+): Promise<Order | null> {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      status: "payment_pending",
+      stripe_payment_intent_id: stripePaymentIntentId,
+      settlement_charge_attempt_count: 1,
+    })
+    .eq("id", orderId)
+    .eq("status", "awaiting_vendor_approval")
+    .is("stripe_payment_intent_id", null)
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw orderServiceError("Could not attach settlement PaymentIntent", error);
+  }
+  return data;
+}
+
+/**
+ * M4-C: single retry PI after first **`payment_failed`** — attempt count **2** must match prior PI id.
+ */
+export async function attachSettlementRetryPaymentIntent(
+  supabase: SupabaseClient<Database>,
+  input: {
+    orderId: string;
+    priorStripePaymentIntentId: string;
+    newStripePaymentIntentId: string;
+  },
+): Promise<Order | null> {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      stripe_payment_intent_id: input.newStripePaymentIntentId,
+      settlement_charge_attempt_count: 2,
+    })
+    .eq("id", input.orderId)
+    .eq("status", "payment_pending")
+    .eq("stripe_payment_intent_id", input.priorStripePaymentIntentId)
+    .eq("settlement_charge_attempt_count", 1)
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw orderServiceError("Could not attach settlement retry PaymentIntent", error);
+  }
+  return data;
+}
+
+/**
+ * M4-C: both settlement attempts failed — order **`failed`** (bookings cancelled separately).
+ */
+export async function markOrderFailedAfterSettlementExhausted(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+  failedStripePaymentIntentId: string,
+): Promise<Order | null> {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      status: "failed",
+    })
+    .eq("id", orderId)
+    .eq("status", "payment_pending")
+    .eq("stripe_payment_intent_id", failedStripePaymentIntentId)
+    .eq("settlement_charge_attempt_count", 2)
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw orderServiceError("Could not mark order failed after settlement exhaustion", error);
+  }
+  return data;
 }

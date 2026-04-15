@@ -66,6 +66,7 @@ function baseOrder(overrides: Partial<Order> = {}): Order {
     stripe_payment_intent_id: null,
     stripe_customer_id: null,
     stripe_setup_intent_id: null,
+    settlement_charge_attempt_count: 0,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-02T00:00:00.000Z",
     ...overrides,
