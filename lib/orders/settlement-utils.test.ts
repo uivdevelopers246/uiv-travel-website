@@ -15,6 +15,16 @@ describe("computeConfirmedSettlementTotalCents", () => {
       ]),
     ).toBe(1250);
   });
+
+  it("rounds fractional sums to the nearest cent", () => {
+    expect(
+      computeConfirmedSettlementTotalCents([
+        { status: "confirmed", total_cents: 100 },
+        { status: "confirmed", total_cents: 100 },
+        { status: "confirmed", total_cents: 100.4 },
+      ]),
+    ).toBe(300);
+  });
 });
 
 describe("orderBookingsFullyResolvedForSettlement", () => {
@@ -36,6 +46,15 @@ describe("orderBookingsFullyResolvedForSettlement", () => {
       orderBookingsFullyResolvedForSettlement([
         { status: "confirmed" },
         { status: "declined" },
+      ]),
+    ).toBe(true);
+  });
+
+  it("is true when lines are expired or cancelled (no pending_approval)", () => {
+    expect(
+      orderBookingsFullyResolvedForSettlement([
+        { status: "expired" },
+        { status: "cancelled" },
       ]),
     ).toBe(true);
   });
