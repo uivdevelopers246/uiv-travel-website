@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/pending-approval-expiry",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 21 * * *"
     }
   ]
 }
