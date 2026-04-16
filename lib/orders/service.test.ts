@@ -9,11 +9,11 @@ import { CART_LINE_TYPE_ACTIVITY } from "@/lib/cart/constants";
 import type { CartLine } from "@/lib/cart/types";
 import {
   computeOrderTotalsFromCartLines,
-  findAwaitingPaymentOrderForUser,
+  findCheckoutSetupOrderForUser,
   getOrderById,
   updateOrderStatus,
   updateOrderStripeCheckoutSession,
-  upsertAwaitingPaymentOrderFromCart,
+  upsertCheckoutSetupOrderFromCart,
 } from "./service";
 import type { Order } from "./types";
 
@@ -64,6 +64,9 @@ function baseOrder(overrides: Partial<Order> = {}): Order {
     total_cents: 10000,
     stripe_checkout_session_id: null,
     stripe_payment_intent_id: null,
+    stripe_customer_id: null,
+    stripe_setup_intent_id: null,
+    settlement_charge_attempt_count: 0,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-02T00:00:00.000Z",
     ...overrides,
@@ -108,7 +111,7 @@ describe("computeOrderTotalsFromCartLines", () => {
   });
 });
 
-describe("findAwaitingPaymentOrderForUser", () => {
+describe("findCheckoutSetupOrderForUser", () => {
   it("returns null when no awaiting_payment row exists", async () => {
     const ordersQuery: Record<string, unknown> = {
       select: vi.fn().mockReturnThis(),
@@ -122,7 +125,7 @@ describe("findAwaitingPaymentOrderForUser", () => {
       ...authUser(),
     };
 
-    const row = await findAwaitingPaymentOrderForUser(supabase as never);
+    const row = await findCheckoutSetupOrderForUser(supabase as never);
     expect(row).toBeNull();
     expect(ordersQuery.order).toHaveBeenCalledWith("updated_at", {
       ascending: false,
@@ -144,7 +147,7 @@ describe("findAwaitingPaymentOrderForUser", () => {
       ...authUser(),
     };
 
-    const row = await findAwaitingPaymentOrderForUser(supabase as never);
+    const row = await findCheckoutSetupOrderForUser(supabase as never);
     expect(row).toEqual(order);
   });
 
@@ -159,13 +162,13 @@ describe("findAwaitingPaymentOrderForUser", () => {
       },
     };
 
-    await expect(findAwaitingPaymentOrderForUser(supabase as never)).rejects.toThrow(
+    await expect(findCheckoutSetupOrderForUser(supabase as never)).rejects.toThrow(
       "Unauthorized",
     );
   });
 });
 
-describe("upsertAwaitingPaymentOrderFromCart", () => {
+describe("upsertCheckoutSetupOrderFromCart", () => {
   it("inserts a new awaiting_payment order when none exists", async () => {
     const line = baseCartLine();
     vi.mocked(listCartLines).mockResolvedValue([line]);
@@ -197,7 +200,7 @@ describe("upsertAwaitingPaymentOrderFromCart", () => {
       ...authUser(),
     };
 
-    const row = await upsertAwaitingPaymentOrderFromCart(supabase as never);
+    const row = await upsertCheckoutSetupOrderFromCart(supabase as never);
     expect(row).toEqual(inserted);
     expect(insertQuery.insert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -248,7 +251,7 @@ describe("upsertAwaitingPaymentOrderFromCart", () => {
       ...authUser(),
     };
 
-    const row = await upsertAwaitingPaymentOrderFromCart(supabase as never);
+    const row = await upsertCheckoutSetupOrderFromCart(supabase as never);
     expect(row).toEqual(updated);
     expect(updateQuery.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -268,7 +271,7 @@ describe("upsertAwaitingPaymentOrderFromCart", () => {
       ...authUser(),
     };
 
-    await expect(upsertAwaitingPaymentOrderFromCart(supabase as never)).rejects.toThrow(
+    await expect(upsertCheckoutSetupOrderFromCart(supabase as never)).rejects.toThrow(
       "Cart is empty",
     );
   });
@@ -284,7 +287,7 @@ describe("upsertAwaitingPaymentOrderFromCart", () => {
       },
     };
 
-    await expect(upsertAwaitingPaymentOrderFromCart(supabase as never)).rejects.toThrow(
+    await expect(upsertCheckoutSetupOrderFromCart(supabase as never)).rejects.toThrow(
       "Unauthorized",
     );
     expect(listCartLines).not.toHaveBeenCalled();

@@ -79,6 +79,37 @@ export async function sumConfirmedParticipantsBySlotIds(
   return map;
 }
 
+/**
+ * Confirmed + non-expired **`pending_approval`** participants per slot (ADR-M4-C capacity).
+ * Uses **`slot_platform_participants_booked`** RPC so totals are correct under RLS.
+ */
+export async function slotPlatformParticipantsBookedBySlotIds(
+  supabase: SupabaseClient<Database>,
+  slotIds: string[],
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (slotIds.length === 0) {
+    return map;
+  }
+
+  const { data, error } = await supabase.rpc("slot_platform_participants_booked", {
+    p_slot_ids: slotIds,
+  });
+
+  if (error) {
+    throw slotServiceError(
+      "Could not load platform booking totals for slots",
+      error,
+    );
+  }
+
+  for (const row of data ?? []) {
+    const r = row as { slot_id: string; booked: number };
+    map.set(r.slot_id, r.booked);
+  }
+  return map;
+}
+
 export type ListPublicSlotsOptions = {
   /**
    * Clock for filtering `starts_at > now`. Defaults to `new Date()`.
@@ -89,8 +120,7 @@ export type ListPublicSlotsOptions = {
 
 /**
  * Lists bookable upcoming slots for a **published** activity with remaining capacity.
- * Accurate `booked_participants` / `remaining_capacity` for anonymous users may require a
- * future RLS or RPC change: `activity_bookings` has no anon SELECT policy today.
+ * Uses **`slot_platform_participants_booked`** so totals include all platform bookings under RLS.
  */
 export async function listPublicSlotsForActivity(
   supabase: SupabaseClient<Database>,
@@ -106,7 +136,7 @@ export async function listPublicSlotsForActivity(
 
   const { data: rows, error } = await supabase
     .from("availability_slots")
-    .select("id, activity_id, starts_at, ends_at, max_capacity")
+    .select("id, activity_id, starts_at, ends_at, max_capacity, off_platform_participants")
     .eq("activity_id", activityId)
     .eq("is_cancelled", false)
     .gt("starts_at", nowIso)
@@ -118,12 +148,13 @@ export async function listPublicSlotsForActivity(
 
   const slots = rows ?? [];
   const slotIds = slots.map((s) => s.id);
-  const sums = await sumConfirmedParticipantsBySlotIds(supabase, slotIds);
+  const sums = await slotPlatformParticipantsBookedBySlotIds(supabase, slotIds);
 
   const result: PublicSlotWithCapacity[] = [];
   for (const s of slots) {
     const booked = sums.get(s.id) ?? 0;
-    const remaining = s.max_capacity - booked;
+    const off = s.off_platform_participants ?? 0;
+    const remaining = s.max_capacity - off - booked;
     if (remaining > 0) {
       result.push({
         id: s.id,
@@ -131,6 +162,7 @@ export async function listPublicSlotsForActivity(
         starts_at: s.starts_at,
         ends_at: s.ends_at,
         max_capacity: s.max_capacity,
+        off_platform_participants: off,
         booked_participants: booked,
         remaining_capacity: remaining,
       });
@@ -185,7 +217,7 @@ export async function listManageSlotsForActivity(
 
   const list = (slots ?? []) as AvailabilitySlot[];
   const slotIds = list.map((s) => s.id);
-  const sums = await sumConfirmedParticipantsBySlotIds(supabase, slotIds);
+  const sums = await slotPlatformParticipantsBookedBySlotIds(supabase, slotIds);
 
   return list.map((s) => ({
     ...s,
@@ -286,11 +318,11 @@ async function assertVendorOrAdminCanManageSlot(
   }
 }
 
-async function getConfirmedBookedParticipants(
+async function getPlatformBookedParticipantsForSlot(
   supabase: SupabaseClient<Database>,
   slotId: string,
 ): Promise<number> {
-  const sums = await sumConfirmedParticipantsBySlotIds(supabase, [slotId]);
+  const sums = await slotPlatformParticipantsBookedBySlotIds(supabase, [slotId]);
   return sums.get(slotId) ?? 0;
 }
 
@@ -306,12 +338,10 @@ export async function updateAvailabilitySlot(
   const slot = await loadSlotForActivityOrThrow(supabase, activityId, slotId);
   await assertVendorOrAdminCanManageSlot(supabase, slot, options);
 
-  const booked = await getConfirmedBookedParticipants(supabase, slotId);
-  if (booked > 0) {
-    throw new Error(
-      "Cannot modify or cancel this slot because it has confirmed bookings.",
-    );
-  }
+  const platformBooked = await getPlatformBookedParticipantsForSlot(
+    supabase,
+    slotId,
+  );
 
   const payload: Record<string, unknown> = {};
 
@@ -322,7 +352,44 @@ export async function updateAvailabilitySlot(
     payload.max_capacity = input.max_capacity;
   }
 
+  if (input.off_platform_participants !== undefined) {
+    if (
+      !Number.isInteger(input.off_platform_participants) ||
+      input.off_platform_participants < 0
+    ) {
+      throw new Error(
+        "off_platform_participants must be a non-negative integer",
+      );
+    }
+    payload.off_platform_participants = input.off_platform_participants;
+  }
+
+  const nextMax =
+    typeof payload.max_capacity === "number"
+      ? payload.max_capacity
+      : slot.max_capacity;
+  const nextOff =
+    typeof payload.off_platform_participants === "number"
+      ? payload.off_platform_participants
+      : slot.off_platform_participants;
+
+  if (
+    input.max_capacity !== undefined ||
+    input.off_platform_participants !== undefined
+  ) {
+    if (platformBooked + nextOff > nextMax) {
+      throw new Error(
+        "max_capacity must be at least platform bookings plus off_platform_participants.",
+      );
+    }
+  }
+
   if (input.starts_at !== undefined) {
+    if (platformBooked > 0) {
+      throw new Error(
+        "Cannot reschedule this slot while it has platform bookings (confirmed or pending approval).",
+      );
+    }
     const { data: activity, error: actError } = await supabase
       .from("activities")
       .select("duration_hours")
@@ -376,10 +443,13 @@ export async function cancelAvailabilitySlot(
   const slot = await loadSlotForActivityOrThrow(supabase, activityId, slotId);
   await assertVendorOrAdminCanManageSlot(supabase, slot, options);
 
-  const bookedCancel = await getConfirmedBookedParticipants(supabase, slotId);
-  if (bookedCancel > 0) {
+  const platformBooked = await getPlatformBookedParticipantsForSlot(
+    supabase,
+    slotId,
+  );
+  if (platformBooked > 0) {
     throw new Error(
-      "Cannot modify or cancel this slot because it has confirmed bookings.",
+      "Cannot cancel this slot while it has platform bookings (confirmed or pending approval).",
     );
   }
 

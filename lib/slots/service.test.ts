@@ -15,6 +15,22 @@ import {
   updateAvailabilitySlot,
 } from "./service";
 
+/** Mocks `slot_platform_participants_booked` for tests that use `supabase.rpc`. */
+function rpcSlotBookedMock(bookedBySlotId: Record<string, number>) {
+  return vi.fn(
+    (name: string, args: { p_slot_ids: string[] }) => {
+      if (name !== "slot_platform_participants_booked") {
+        return Promise.resolve({ data: null, error: null });
+      }
+      const data = args.p_slot_ids.map((id) => ({
+        slot_id: id,
+        booked: bookedBySlotId[id] ?? 0,
+      }));
+      return Promise.resolve({ data, error: null });
+    },
+  );
+}
+
 const activityId = "act-1";
 const vendorId = "vendor-1";
 const userId = "user-1";
@@ -50,10 +66,10 @@ function makePublicSlotsQueries(
     starts_at: string;
     ends_at: string;
     max_capacity: number;
+    off_platform_participants?: number;
   }>,
-  bookingRows: Array<{ slot_id: string; participants: number }>,
+  bookedBySlotId: Record<string, number>,
 ) {
-  const bookingsQuery = makeBookingsSumQuery();
   const slotsQuery: Record<string, unknown> = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
@@ -61,20 +77,21 @@ function makePublicSlotsQueries(
     order: vi.fn(),
   };
 
+  const rows = slotsRows.map((r) => ({
+    ...r,
+    off_platform_participants: r.off_platform_participants ?? 0,
+  }));
+
   const supabase: Record<string, unknown> = {
     from: vi.fn((table: string) =>
-      table === "availability_slots" ? slotsQuery : bookingsQuery,
+      table === "availability_slots" ? slotsQuery : {},
     ),
+    rpc: rpcSlotBookedMock(bookedBySlotId),
   };
 
-  slotsQuery.order = vi
-    .fn()
-    .mockResolvedValue({ data: slotsRows, error: null });
-  bookingsQuery.in = vi
-    .fn()
-    .mockResolvedValue({ data: bookingRows, error: null });
+  slotsQuery.order = vi.fn().mockResolvedValue({ data: rows, error: null });
 
-  return { supabase, slotsQuery, bookingsQuery };
+  return { supabase, slotsQuery };
 }
 
 function authAndVendorSupabase() {
@@ -169,6 +186,7 @@ describe("listPublicSlotsForActivity", () => {
           starts_at: "2026-04-07T10:00:00.000Z",
           ends_at: "2026-04-07T12:00:00.000Z",
           max_capacity: 10,
+          off_platform_participants: 0,
         },
         {
           id: "slot-full",
@@ -176,12 +194,10 @@ describe("listPublicSlotsForActivity", () => {
           starts_at: "2026-04-08T10:00:00.000Z",
           ends_at: "2026-04-08T12:00:00.000Z",
           max_capacity: 5,
+          off_platform_participants: 0,
         },
       ],
-      [
-        { slot_id: "slot-open", participants: 3 },
-        { slot_id: "slot-full", participants: 5 },
-      ],
+      { "slot-open": 3, "slot-full": 5 },
     );
 
     const rows = await listPublicSlotsForActivity(supabase as any, activityId, {
@@ -191,6 +207,7 @@ describe("listPublicSlotsForActivity", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       id: "slot-open",
+      off_platform_participants: 0,
       booked_participants: 3,
       remaining_capacity: 7,
     });
@@ -198,10 +215,6 @@ describe("listPublicSlotsForActivity", () => {
 
   it("uses injected now for starts_at lower bound", async () => {
     vi.mocked(getActivityById).mockResolvedValueOnce(publicActivity as any);
-    const bookingsQuery = makeBookingsSumQuery();
-    bookingsQuery.in = vi
-      .fn()
-      .mockResolvedValue({ data: [], error: null });
     const slotsQuery: Record<string, unknown> = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
@@ -210,8 +223,9 @@ describe("listPublicSlotsForActivity", () => {
     };
     const supabase = {
       from: vi.fn((table: string) =>
-        table === "availability_slots" ? slotsQuery : bookingsQuery,
+        table === "availability_slots" ? slotsQuery : {},
       ),
+      rpc: rpcSlotBookedMock({}),
     };
     slotsQuery.order = vi
       .fn()
@@ -225,7 +239,6 @@ describe("listPublicSlotsForActivity", () => {
 
   it("throws when slot query fails", async () => {
     vi.mocked(getActivityById).mockResolvedValueOnce(publicActivity as any);
-    const bookingsQuery = makeBookingsSumQuery();
     const slotsQuery: Record<string, unknown> = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
@@ -234,8 +247,9 @@ describe("listPublicSlotsForActivity", () => {
     };
     const supabase = {
       from: vi.fn((table: string) =>
-        table === "availability_slots" ? slotsQuery : bookingsQuery,
+        table === "availability_slots" ? slotsQuery : {},
       ),
+      rpc: rpcSlotBookedMock({}),
     };
 
     await expect(
@@ -275,10 +289,11 @@ describe("listManageSlotsForActivity", () => {
       eq: vi.fn().mockReturnThis(),
       order: vi.fn().mockResolvedValue({ data: opts.slots, error: null }),
     };
-    const bookingsQuery = makeBookingsSumQuery();
-    bookingsQuery.in = vi
-      .fn()
-      .mockResolvedValue({ data: opts.bookings ?? [], error: null });
+    const bookedBySlotId: Record<string, number> = {};
+    for (const b of opts.bookings ?? []) {
+      bookedBySlotId[b.slot_id] =
+        (bookedBySlotId[b.slot_id] ?? 0) + b.participants;
+    }
 
     const supabase = {
       ...authAndVendorSupabase(),
@@ -286,8 +301,9 @@ describe("listManageSlotsForActivity", () => {
         if (table === "activities") return activitiesQuery;
         if (table === "vendors") return vendorsQuery;
         if (table === "availability_slots") return slotsQuery;
-        return bookingsQuery;
+        return {};
       }),
+      rpc: rpcSlotBookedMock(bookedBySlotId),
     };
 
     return { supabase, activitiesQuery, vendorsQuery, slotsQuery };
@@ -350,18 +366,15 @@ describe("listManageSlotsForActivity", () => {
       eq: vi.fn().mockReturnThis(),
       order: vi.fn().mockResolvedValue({ data: [], error: null }),
     };
-    const bookingsQuery = makeBookingsSumQuery();
-    bookingsQuery.in = vi
-      .fn()
-      .mockResolvedValue({ data: [], error: null });
 
     const supabase = {
       ...authAndVendorSupabase(),
       from: vi.fn((table: string) => {
         if (table === "activities") return activitiesQuery;
         if (table === "availability_slots") return slotsQuery;
-        return bookingsQuery;
+        return {};
       }),
+      rpc: rpcSlotBookedMock({}),
     };
 
     await listManageSlotsForActivity(supabase as any, activityId, {
@@ -481,12 +494,13 @@ describe("updateAvailabilitySlot", () => {
     starts_at: "2026-07-01T10:00:00.000Z",
     ends_at: "2026-07-01T12:00:00.000Z",
     max_capacity: 10,
+    off_platform_participants: 0,
     is_cancelled: false,
     created_at: "t0",
     updated_at: "t0",
   };
 
-  it("throws when confirmed bookings exist", async () => {
+  it("throws when max_capacity is below platform bookings plus off_platform", async () => {
     const loadQuery: Record<string, unknown> = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
@@ -502,27 +516,59 @@ describe("updateAvailabilitySlot", () => {
         error: null,
       }),
     };
-    const bookingsQuery = makeBookingsSumQuery();
-    bookingsQuery.in = vi.fn().mockResolvedValue({
-      data: [{ slot_id: "slot-1", participants: 2 }],
-      error: null,
-    });
 
     const supabase = {
       ...authAndVendorSupabase(),
       from: vi.fn((table: string) => {
         if (table === "availability_slots") return loadQuery;
         if (table === "vendors") return vendorsQuery;
-        return bookingsQuery;
+        return {};
       }),
+      rpc: rpcSlotBookedMock({ "slot-1": 2 }),
     };
 
     await expect(
       updateAvailabilitySlot(supabase as any, activityId, "slot-1", {
-        max_capacity: 12,
+        max_capacity: 1,
       }),
     ).rejects.toThrow(
-      "Cannot modify or cancel this slot because it has confirmed bookings.",
+      "max_capacity must be at least platform bookings plus off_platform_participants.",
+    );
+  });
+
+  it("throws when rescheduling while platform bookings exist", async () => {
+    const loadQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi
+        .fn()
+        .mockResolvedValue({ data: baseSlot, error: null }),
+    };
+    const vendorsQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({
+        data: { id: vendorId },
+        error: null,
+      }),
+    };
+
+    const supabase = {
+      ...authAndVendorSupabase(),
+      from: vi.fn((table: string) => {
+        if (table === "availability_slots") return loadQuery;
+        if (table === "vendors") return vendorsQuery;
+        return {};
+      }),
+      rpc: rpcSlotBookedMock({ "slot-1": 2 }),
+    };
+
+    await expect(
+      updateAvailabilitySlot(supabase as any, activityId, "slot-1", {
+        starts_at: "2026-08-01T15:00:00.000Z",
+      }),
+    ).rejects.toThrow(
+      "Cannot reschedule this slot while it has platform bookings (confirmed or pending approval).",
     );
   });
 
@@ -542,8 +588,6 @@ describe("updateAvailabilitySlot", () => {
         error: null,
       }),
     };
-    const bookingsQuery = makeBookingsSumQuery();
-    bookingsQuery.in = vi.fn().mockResolvedValue({ data: [], error: null });
 
     const updateChain: Record<string, unknown> = {
       update: vi.fn().mockReturnThis(),
@@ -560,14 +604,14 @@ describe("updateAvailabilitySlot", () => {
     const supabase = {
       ...authAndVendorSupabase(),
       from: vi.fn((table: string) => {
-        if (table === "activity_bookings") return bookingsQuery;
         if (table === "vendors") return vendorsQuery;
         if (table === "availability_slots") {
           slotsCalls += 1;
           return slotsCalls === 1 ? loadQuery : updateChain;
         }
-        return loadQuery;
+        return {};
       }),
+      rpc: rpcSlotBookedMock({ "slot-1": 0 }),
     };
 
     const row = await updateAvailabilitySlot(
@@ -596,8 +640,6 @@ describe("updateAvailabilitySlot", () => {
         error: null,
       }),
     };
-    const bookingsQuery = makeBookingsSumQuery();
-    bookingsQuery.in = vi.fn().mockResolvedValue({ data: [], error: null });
 
     const activitiesDurationQuery: Record<string, unknown> = {
       select: vi.fn().mockReturnThis(),
@@ -629,15 +671,15 @@ describe("updateAvailabilitySlot", () => {
     const supabase = {
       ...authAndVendorSupabase(),
       from: vi.fn((table: string) => {
-        if (table === "activity_bookings") return bookingsQuery;
         if (table === "vendors") return vendorsQuery;
         if (table === "activities") return activitiesDurationQuery;
         if (table === "availability_slots") {
           slotsCalls += 1;
           return slotsCalls === 1 ? loadQuery : updateChain;
         }
-        return loadQuery;
+        return {};
       }),
+      rpc: rpcSlotBookedMock({ "slot-1": 0 }),
     };
 
     const row = await updateAvailabilitySlot(
@@ -670,8 +712,6 @@ describe("updateAvailabilitySlot", () => {
         error: null,
       }),
     };
-    const bookingsQuery = makeBookingsSumQuery();
-    bookingsQuery.in = vi.fn().mockResolvedValue({ data: [], error: null });
     const activitiesDurationQuery: Record<string, unknown> = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
@@ -691,15 +731,15 @@ describe("updateAvailabilitySlot", () => {
     const supabase = {
       ...authAndVendorSupabase(),
       from: vi.fn((table: string) => {
-        if (table === "activity_bookings") return bookingsQuery;
         if (table === "vendors") return vendorsQuery;
         if (table === "activities") return activitiesDurationQuery;
         if (table === "availability_slots") {
           slotsCalls += 1;
           return slotsCalls === 1 ? loadQuery : updateChain;
         }
-        return loadQuery;
+        return {};
       }),
+      rpc: rpcSlotBookedMock({ "slot-1": 0 }),
     };
 
     await expect(
@@ -728,8 +768,6 @@ describe("updateAvailabilitySlot", () => {
         error: null,
       }),
     };
-    const bookingsQuery = makeBookingsSumQuery();
-    bookingsQuery.in = vi.fn().mockResolvedValue({ data: [], error: null });
     const activitiesDurationQuery: Record<string, unknown> = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
@@ -740,15 +778,15 @@ describe("updateAvailabilitySlot", () => {
     const supabase = {
       ...authAndVendorSupabase(),
       from: vi.fn((table: string) => {
-        if (table === "activity_bookings") return bookingsQuery;
         if (table === "vendors") return vendorsQuery;
         if (table === "activities") return activitiesDurationQuery;
         if (table === "availability_slots") {
           slotsCalls += 1;
           return slotsCalls === 1 ? loadQuery : {};
         }
-        return loadQuery;
+        return {};
       }),
+      rpc: rpcSlotBookedMock({ "slot-1": 0 }),
     };
 
     await expect(
@@ -774,8 +812,6 @@ describe("updateAvailabilitySlot", () => {
         error: null,
       }),
     };
-    const bookingsQuery = makeBookingsSumQuery();
-    bookingsQuery.in = vi.fn().mockResolvedValue({ data: [], error: null });
     const activitiesDurationQuery: Record<string, unknown> = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
@@ -789,15 +825,15 @@ describe("updateAvailabilitySlot", () => {
     const supabase = {
       ...authAndVendorSupabase(),
       from: vi.fn((table: string) => {
-        if (table === "activity_bookings") return bookingsQuery;
         if (table === "vendors") return vendorsQuery;
         if (table === "activities") return activitiesDurationQuery;
         if (table === "availability_slots") {
           slotsCalls += 1;
           return slotsCalls === 1 ? loadQuery : {};
         }
-        return loadQuery;
+        return {};
       }),
+      rpc: rpcSlotBookedMock({ "slot-1": 0 }),
     };
 
     await expect(
@@ -818,12 +854,13 @@ describe("cancelAvailabilitySlot", () => {
     starts_at: "2026-07-01T10:00:00.000Z",
     ends_at: "2026-07-01T12:00:00.000Z",
     max_capacity: 10,
+    off_platform_participants: 0,
     is_cancelled: false,
     created_at: "t0",
     updated_at: "t0",
   };
 
-  it("throws when confirmed bookings exist", async () => {
+  it("throws when platform bookings exist", async () => {
     const loadQuery: Record<string, unknown> = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
@@ -839,29 +876,25 @@ describe("cancelAvailabilitySlot", () => {
         error: null,
       }),
     };
-    const bookingsQuery = makeBookingsSumQuery();
-    bookingsQuery.in = vi.fn().mockResolvedValue({
-      data: [{ slot_id: "slot-1", participants: 1 }],
-      error: null,
-    });
 
     const supabase = {
       ...authAndVendorSupabase(),
       from: vi.fn((table: string) => {
         if (table === "availability_slots") return loadQuery;
         if (table === "vendors") return vendorsQuery;
-        return bookingsQuery;
+        return {};
       }),
+      rpc: rpcSlotBookedMock({ "slot-1": 1 }),
     };
 
     await expect(
       cancelAvailabilitySlot(supabase as any, activityId, "slot-1"),
     ).rejects.toThrow(
-      "Cannot modify or cancel this slot because it has confirmed bookings.",
+      "Cannot cancel this slot while it has platform bookings (confirmed or pending approval).",
     );
   });
 
-  it("sets is_cancelled when no confirmed bookings", async () => {
+  it("sets is_cancelled when no platform bookings", async () => {
     const loadQuery: Record<string, unknown> = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
@@ -877,8 +910,6 @@ describe("cancelAvailabilitySlot", () => {
         error: null,
       }),
     };
-    const bookingsQuery = makeBookingsSumQuery();
-    bookingsQuery.in = vi.fn().mockResolvedValue({ data: [], error: null });
 
     const cancelChain: Record<string, unknown> = {
       update: vi.fn().mockReturnThis(),
@@ -895,14 +926,14 @@ describe("cancelAvailabilitySlot", () => {
     const supabase = {
       ...authAndVendorSupabase(),
       from: vi.fn((table: string) => {
-        if (table === "activity_bookings") return bookingsQuery;
         if (table === "vendors") return vendorsQuery;
         if (table === "availability_slots") {
           slotsCalls += 1;
           return slotsCalls === 1 ? loadQuery : cancelChain;
         }
-        return loadQuery;
+        return {};
       }),
+      rpc: rpcSlotBookedMock({ "slot-1": 0 }),
     };
 
     const row = await cancelAvailabilitySlot(

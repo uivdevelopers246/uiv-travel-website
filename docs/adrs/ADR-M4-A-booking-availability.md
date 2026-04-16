@@ -8,6 +8,7 @@
 **Related ADRs**
 
 - **[ADR-M4-B: Shopping Cart & Checkout](./ADR-M4-shopping-cart-and-checkout.md)** — authenticated cart, `orders`, Stripe Checkout Session, **creation of `activity_bookings` after payment** (webhook), **`cancel_activity_bookings_for_order`** (service-role rollback when fulfillment fails after charge), order-level Stripe IDs, merge rules, refund-on-full-failure.
+- **[ADR-M4-C: Pending-approval checkout & payment on confirmation](./ADR-M4-C-pending-approval-checkout-and-payment.md)** — **pending approval before charge**, SetupIntent, SLA, **strict capacity** (`pending_approval` + `confirmed`); **amends** booking-creation and capacity rules here when implemented.
 
 ---
 

@@ -1,10 +1,23 @@
+/**
+ * Stripe metadata key for correlating Checkout Sessions, SetupIntents, and (later) settlement
+ * PaymentIntents to `orders.id` (M4-C).
+ */
+export const STRIPE_METADATA_ORDER_ID_KEY = "order_id" as const;
+
+/** Stripe PaymentIntent metadata for M4-C off-session settlement charge. */
+export const STRIPE_METADATA_FLOW_M4C_SETTLEMENT = "m4c_settlement" as const;
+
 /** Matches `orders.status` CHECK constraint. */
 export const ORDER_STATUSES = [
   "awaiting_payment",
+  "awaiting_vendor_approval",
+  "payment_pending",
   "paid",
   "failed",
   "cancelled",
   "refunded",
+  "declined",
+  "expired",
 ] as const;
 
 export type OrderStatus = (typeof ORDER_STATUSES)[number];

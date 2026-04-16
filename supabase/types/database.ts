@@ -211,6 +211,7 @@ export type Database = {
           activity_id: string
           created_at: string
           discount_cents: number
+          expires_at: string | null
           id: string
           order_id: string | null
           participants: number
@@ -227,6 +228,7 @@ export type Database = {
           activity_id: string
           created_at?: string
           discount_cents?: number
+          expires_at?: string | null
           id?: string
           order_id?: string | null
           participants: number
@@ -243,6 +245,7 @@ export type Database = {
           activity_id?: string
           created_at?: string
           discount_cents?: number
+          expires_at?: string | null
           id?: string
           order_id?: string | null
           participants?: number
@@ -294,6 +297,7 @@ export type Database = {
           id: string
           is_cancelled: boolean
           max_capacity: number
+          off_platform_participants: number
           starts_at: string
           updated_at: string
           vendor_id: string
@@ -305,6 +309,7 @@ export type Database = {
           id?: string
           is_cancelled?: boolean
           max_capacity: number
+          off_platform_participants?: number
           starts_at: string
           updated_at?: string
           vendor_id: string
@@ -316,6 +321,7 @@ export type Database = {
           id?: string
           is_cancelled?: boolean
           max_capacity?: number
+          off_platform_participants?: number
           starts_at?: string
           updated_at?: string
           vendor_id?: string
@@ -412,9 +418,12 @@ export type Database = {
           currency: string
           discount_cents: number
           id: string
+          settlement_charge_attempt_count: number
           status: string
           stripe_checkout_session_id: string | null
+          stripe_customer_id: string | null
           stripe_payment_intent_id: string | null
+          stripe_setup_intent_id: string | null
           subtotal_cents: number
           total_cents: number
           updated_at: string
@@ -425,9 +434,12 @@ export type Database = {
           currency?: string
           discount_cents?: number
           id?: string
+          settlement_charge_attempt_count?: number
           status?: string
           stripe_checkout_session_id?: string | null
+          stripe_customer_id?: string | null
           stripe_payment_intent_id?: string | null
+          stripe_setup_intent_id?: string | null
           subtotal_cents: number
           total_cents: number
           updated_at?: string
@@ -439,8 +451,11 @@ export type Database = {
           discount_cents?: number
           id?: string
           status?: string
+          settlement_charge_attempt_count?: number
           stripe_checkout_session_id?: string | null
+          stripe_customer_id?: string | null
           stripe_payment_intent_id?: string | null
+          stripe_setup_intent_id?: string | null
           subtotal_cents?: number
           total_cents?: number
           updated_at?: string
@@ -569,10 +584,23 @@ export type Database = {
         Args: { p_order_id: string }
         Returns: undefined
       },
+      confirm_all_pending_activity_bookings_for_order: {
+        Args: { p_order_id: string }
+        Returns: number
+      },
+      confirm_pending_activity_booking_as_admin: {
+        Args: { p_booking_id: string }
+        Returns: number
+      },
+      confirm_pending_activity_booking_for_vendor: {
+        Args: { p_booking_id: string; p_vendor_id: string }
+        Returns: number
+      },
       create_activity_booking_after_payment: {
         Args: {
           p_activity_id: string
           p_discount_cents?: number
+          p_expires_at?: string | null
           p_order_id: string
           p_participants: number
           p_slot_id: string
@@ -585,9 +613,33 @@ export type Database = {
         }
         Returns: Database["public"]["Tables"]["activity_bookings"]["Row"]
       },
+      decline_activity_bookings_for_order: {
+        Args: { p_order_id: string }
+        Returns: undefined
+      },
+      decline_pending_activity_booking_as_admin: {
+        Args: { p_booking_id: string }
+        Returns: number
+      },
+      decline_pending_activity_booking_for_vendor: {
+        Args: { p_booking_id: string; p_vendor_id: string }
+        Returns: number
+      },
+      decline_pending_activity_bookings_for_vendor_on_order: {
+        Args: { p_order_id: string; p_vendor_id: string }
+        Returns: number
+      },
+      expire_pending_activity_bookings: {
+        Args: never
+        Returns: number
+      },
       is_site_admin: { Args: never; Returns: boolean }
       is_vendor_owner: { Args: { v_id: string }; Returns: boolean }
       is_vendor_user: { Args: never; Returns: boolean }
+      slot_platform_participants_booked: {
+        Args: { p_slot_ids: string[] }
+        Returns: { booked: number; slot_id: string }[]
+      },
       set_accommodation_location_point: {
         Args: { p_accommodation_id: string; p_lat?: number; p_lng?: number }
         Returns: undefined

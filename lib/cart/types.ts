@@ -27,6 +27,9 @@ export type CartLineWithPreview = CartLine & {
   slot_starts_at: string;
   slot_ends_at: string;
   max_capacity: number;
+  /** Vendor-reported seats booked outside this platform (same slot row). */
+  off_platform_participants: number;
+  /** Confirmed + non-expired pending_approval on this platform. */
   booked_participants: number;
   remaining_capacity: number;
 };

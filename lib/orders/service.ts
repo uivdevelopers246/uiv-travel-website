@@ -56,7 +56,11 @@ export function computeOrderTotalsFromCartLines(
   return { subtotal_cents, discount_cents, total_cents };
 }
 
-export async function findAwaitingPaymentOrderForUser(
+/**
+ * M4-C: finds the user’s open checkout order — **`awaiting_payment`** means “cart snapshot
+ * persisted, Stripe setup not completed yet” (not “charge pending at checkout”).
+ */
+export async function findCheckoutSetupOrderForUser(
   supabase: SupabaseClient<Database>,
 ): Promise<Order | null> {
   const userId = await requireAuthUserId(supabase);
@@ -71,12 +75,17 @@ export async function findAwaitingPaymentOrderForUser(
     .maybeSingle();
 
   if (error) {
-    throw orderServiceError("Could not find awaiting_payment order", error);
+    throw orderServiceError("Could not find checkout setup order", error);
   }
   return data;
 }
 
-export async function upsertAwaitingPaymentOrderFromCart(
+/**
+ * M4-C: creates or refreshes totals on the **`awaiting_payment`** order used for hosted
+ * Checkout **`mode: setup`**. Webhooks transition **`awaiting_payment` → `awaiting_vendor_approval`**
+ * after `metadata.order_id` correlates the completed setup to this row.
+ */
+export async function upsertCheckoutSetupOrderFromCart(
   supabase: SupabaseClient<Database>,
 ): Promise<Order> {
   const userId = await requireAuthUserId(supabase);
@@ -88,7 +97,7 @@ export async function upsertAwaitingPaymentOrderFromCart(
 
   const totals = computeOrderTotalsFromCartLines(lines);
 
-  const existing = await findAwaitingPaymentOrderForUser(supabase);
+  const existing = await findCheckoutSetupOrderForUser(supabase);
 
   if (existing) {
     const { data, error } = await supabase
@@ -192,10 +201,72 @@ export async function updateOrderStatus(
 }
 
 /**
- * Webhook fulfillment: set **`paid`** and persist **`stripe_payment_intent_id`** in one update.
- * Use with a **service-role** client after verifying Stripe `checkout.session.completed`.
+ * M4-C: atomically move **`awaiting_payment` → `awaiting_vendor_approval`** after SetupIntent /
+ * Checkout setup success. Returns **`null`** if the row was not in **`awaiting_payment`** (race or replay).
  */
-export async function updateOrderPaidWithStripePaymentIntent(
+export async function updateOrderAwaitingVendorApprovalFromSetup(
+  supabase: SupabaseClient<Database>,
+  input: {
+    orderId: string;
+    stripeCustomerId: string;
+    stripeSetupIntentId: string;
+  },
+): Promise<Order | null> {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      status: "awaiting_vendor_approval",
+      stripe_customer_id: input.stripeCustomerId,
+      stripe_setup_intent_id: input.stripeSetupIntentId,
+    })
+    .eq("id", input.orderId)
+    .eq("status", "awaiting_payment")
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw orderServiceError(
+      "Could not transition order to awaiting_vendor_approval",
+      error,
+    );
+  }
+  return data;
+}
+
+/**
+ * M4-C: rollback a failed setup fulfillment (no charge). Clears setup correlation fields.
+ */
+export async function revertOrderToAwaitingPaymentAfterSetupFailure(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+): Promise<Order> {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      status: "awaiting_payment",
+      stripe_setup_intent_id: null,
+    })
+    .eq("id", orderId)
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw orderServiceError(
+      "Could not revert order after setup fulfillment failure",
+      error,
+    );
+  }
+  if (!data) {
+    throw new Error("Order not found");
+  }
+  return data;
+}
+
+/**
+ * M4-C: after the **single settlement** `payment_intent.succeeded` (charge sum of confirmed lines).
+ * Not used until settlement capture is implemented.
+ */
+export async function updateOrderPaidAfterSettlementCapture(
   supabase: SupabaseClient<Database>,
   orderId: string,
   stripePaymentIntentId: string,
@@ -207,14 +278,106 @@ export async function updateOrderPaidWithStripePaymentIntent(
       stripe_payment_intent_id: stripePaymentIntentId,
     })
     .eq("id", orderId)
+    .in("status", ["awaiting_vendor_approval", "payment_pending"])
     .select("*")
     .maybeSingle();
 
   if (error) {
-    throw orderServiceError("Could not mark order paid with payment intent", error);
+    throw orderServiceError("Could not mark order paid after settlement capture", error);
   }
   if (!data) {
-    throw new Error("Order not found");
+    throw new Error("Order not found or not eligible for settlement paid transition");
+  }
+  return data;
+}
+
+export async function updateOrderStatusPaymentPending(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+): Promise<Order> {
+  return updateOrderStatus(supabase, orderId, "payment_pending");
+}
+
+/**
+ * M4-C: first settlement PI created off-session — move to **`payment_pending`** and record attempt **1**.
+ * Returns **`null`** if another writer already attached a PI (idempotent loss).
+ */
+export async function attachFirstSettlementPaymentIntent(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+  stripePaymentIntentId: string,
+): Promise<Order | null> {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      status: "payment_pending",
+      stripe_payment_intent_id: stripePaymentIntentId,
+      settlement_charge_attempt_count: 1,
+    })
+    .eq("id", orderId)
+    .eq("status", "awaiting_vendor_approval")
+    .is("stripe_payment_intent_id", null)
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw orderServiceError("Could not attach settlement PaymentIntent", error);
+  }
+  return data;
+}
+
+/**
+ * M4-C: single retry PI after first **`payment_failed`** — attempt count **2** must match prior PI id.
+ */
+export async function attachSettlementRetryPaymentIntent(
+  supabase: SupabaseClient<Database>,
+  input: {
+    orderId: string;
+    priorStripePaymentIntentId: string;
+    newStripePaymentIntentId: string;
+  },
+): Promise<Order | null> {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      stripe_payment_intent_id: input.newStripePaymentIntentId,
+      settlement_charge_attempt_count: 2,
+    })
+    .eq("id", input.orderId)
+    .eq("status", "payment_pending")
+    .eq("stripe_payment_intent_id", input.priorStripePaymentIntentId)
+    .eq("settlement_charge_attempt_count", 1)
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw orderServiceError("Could not attach settlement retry PaymentIntent", error);
+  }
+  return data;
+}
+
+/**
+ * M4-C: both settlement attempts failed — order **`failed`** (bookings cancelled separately).
+ */
+export async function markOrderFailedAfterSettlementExhausted(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+  failedStripePaymentIntentId: string,
+): Promise<Order | null> {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      status: "failed",
+    })
+    .eq("id", orderId)
+    .eq("status", "payment_pending")
+    .eq("stripe_payment_intent_id", failedStripePaymentIntentId)
+    .eq("settlement_charge_attempt_count", 2)
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw orderServiceError("Could not mark order failed after settlement exhaustion", error);
   }
   return data;
 }

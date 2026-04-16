@@ -1,6 +1,6 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-**UIV Travel** — Barbados-focused travel site (activities, accommodations, cart/checkout). For **environment variables**, **Stripe webhooks**, **Supabase** (including the server-only privileged key for webhook fulfillment), and deployment notes, see **`docs/architecture.md`**. Checkout and booking ADRs: `docs/adrs/ADR-M4-shopping-cart-and-checkout.md`, `docs/adrs/ADR-M4-booking-availability.md`.
+**UIV Travel** — Barbados-focused travel site (activities, accommodations, cart/checkout). For **environment variables**, **Stripe webhooks**, **Supabase** (including the server-only privileged key for webhook fulfillment), and deployment notes, see **`docs/architecture.md`**. Checkout and booking ADRs: `docs/adrs/ADR-M4-shopping-cart-and-checkout.md`, `docs/adrs/ADR-M4-booking-availability.md`, `docs/adrs/ADR-M4-C-pending-approval-checkout-and-payment.md`.
 
 ## Getting Started
 

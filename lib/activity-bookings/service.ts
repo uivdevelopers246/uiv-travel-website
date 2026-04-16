@@ -36,6 +36,8 @@ export type CreateActivityBookingAfterPaymentInput = {
   discount_cents?: number;
   /** Default: `confirmed`. */
   status?: ActivityBookingStatus;
+  /** Required when `status` is `pending_approval` (M4-C). */
+  expires_at?: string | null;
 };
 
 export type ListActivityBookingsOptions = {
@@ -160,6 +162,7 @@ export async function createActivityBookingAfterPayment(
     p_discount_cents: discount_cents,
     p_total_cents: input.total_cents,
     p_status: status,
+    p_expires_at: input.expires_at ?? null,
   });
 
   if (error) {
@@ -208,6 +211,163 @@ export async function cancelActivityBookingsForOrder(
   if (error) {
     throw bookingServiceError(
       "Could not cancel activity bookings for order",
+      error,
+    );
+  }
+}
+
+/**
+ * M4-C vendor decline before charge: **`pending_approval` → `declined`** for one vendor on the order.
+ * **`service_role` only** — use {@link createServiceRoleClient}.
+ */
+export async function declinePendingActivityBookingsForVendorOnOrder(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+  vendorId: string,
+): Promise<number> {
+  const { data, error } = await supabase.rpc(
+    "decline_pending_activity_bookings_for_vendor_on_order",
+    {
+      p_order_id: orderId,
+      p_vendor_id: vendorId,
+    },
+  );
+
+  if (error) {
+    throw bookingServiceError(
+      "Could not decline pending activity bookings for vendor on order",
+      error,
+    );
+  }
+  return data ?? 0;
+}
+
+/**
+ * M4-C: **`pending_approval` → `confirmed`** for one booking if **`vendor_id`** matches.
+ * **`service_role` only.**
+ */
+export async function confirmPendingActivityBookingForVendor(
+  supabase: SupabaseClient<Database>,
+  bookingId: string,
+  vendorId: string,
+): Promise<number> {
+  const { data, error } = await supabase.rpc(
+    "confirm_pending_activity_booking_for_vendor",
+    {
+      p_booking_id: bookingId,
+      p_vendor_id: vendorId,
+    },
+  );
+
+  if (error) {
+    throw bookingServiceError(
+      "Could not confirm pending activity booking for vendor",
+      error,
+    );
+  }
+  return data ?? 0;
+}
+
+/**
+ * M4-C: **`pending_approval` → `declined`** for one booking if **`vendor_id`** matches.
+ * **`service_role` only.**
+ */
+export async function declinePendingActivityBookingForVendor(
+  supabase: SupabaseClient<Database>,
+  bookingId: string,
+  vendorId: string,
+): Promise<number> {
+  const { data, error } = await supabase.rpc(
+    "decline_pending_activity_booking_for_vendor",
+    {
+      p_booking_id: bookingId,
+      p_vendor_id: vendorId,
+    },
+  );
+
+  if (error) {
+    throw bookingServiceError(
+      "Could not decline pending activity booking for vendor",
+      error,
+    );
+  }
+  return data ?? 0;
+}
+
+/** M4-C: admin single-booking confirm. **`service_role` only. */
+export async function confirmPendingActivityBookingAsAdmin(
+  supabase: SupabaseClient<Database>,
+  bookingId: string,
+): Promise<number> {
+  const { data, error } = await supabase.rpc(
+    "confirm_pending_activity_booking_as_admin",
+    { p_booking_id: bookingId },
+  );
+
+  if (error) {
+    throw bookingServiceError(
+      "Could not confirm pending activity booking as admin",
+      error,
+    );
+  }
+  return data ?? 0;
+}
+
+/** M4-C: admin single-booking decline. **`service_role` only. */
+export async function declinePendingActivityBookingAsAdmin(
+  supabase: SupabaseClient<Database>,
+  bookingId: string,
+): Promise<number> {
+  const { data, error } = await supabase.rpc(
+    "decline_pending_activity_booking_as_admin",
+    { p_booking_id: bookingId },
+  );
+
+  if (error) {
+    throw bookingServiceError(
+      "Could not decline pending activity booking as admin",
+      error,
+    );
+  }
+  return data ?? 0;
+}
+
+/**
+ * M4-C: confirm **all** **`pending_approval`** rows on an order (admin). **`service_role` only.**
+ */
+export async function confirmAllPendingActivityBookingsForOrder(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+): Promise<number> {
+  const { data, error } = await supabase.rpc(
+    "confirm_all_pending_activity_bookings_for_order",
+    { p_order_id: orderId },
+  );
+
+  if (error) {
+    throw bookingServiceError(
+      "Could not confirm all pending activity bookings for order",
+      error,
+    );
+  }
+  return data ?? 0;
+}
+
+/**
+ * M4-C admin / full-order decline: all **`pending_approval`** rows → **`declined`**.
+ * **`service_role` only** — use {@link createServiceRoleClient}.
+ */
+export async function declineAllPendingActivityBookingsForOrder(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+): Promise<void> {
+  const { error } = await supabase.rpc("decline_activity_bookings_for_order", {
+    p_order_id: orderId,
+  });
+
+  if (error) {
+    throw bookingServiceError(
+      "Could not decline pending activity bookings for order",
       error,
     );
   }
