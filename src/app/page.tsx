@@ -91,30 +91,30 @@ export default async function Home() {
     <>
       <Header />
 
-      <section className="relative flex min-h-[90vh] items-center justify-center overflow-hidden">
+      <section className="relative flex min-h-[90vh] items-center justify-center overflow-hidden max-[1249px]:min-h-[68vh] max-[1249px]:items-start max-[1249px]:pt-28">
         <div className="absolute inset-0">
           <Image
-            src="/images/hero/BeachSunset.jpg"
-            alt="Beach Sunset"
+            src="/images/hero/LightiningOcean.jpeg"
+            alt="Lightning ocean"
             fill
             priority
             className="object-cover object-top brightness-110 contrast-110"
           />
         </div>
-        <div className="absolute inset-0 bg-black/10" />
+        <div className="absolute inset-0 bg-white/10" />
 
-        <div className="relative z-10 mx-auto mt-19 max-w-4xl px-4 text-center">
+        <div className="relative z-10 mx-auto max-w-4xl px-4 text-center min-[1250px]:mt-19">
           <h1
-            className="mb-6 text-6xl font-bold md:text-7xl lg:text-8xl"
+            className="mb-5 text-5xl font-bold sm:text-6xl md:text-7xl lg:text-8xl"
             style={{ fontFamily: "var(--font-playfair)" }}
           >
-            <span className="text-[#FBCA1A]">Low Rates,</span>
+            <span className="text-[#FBCA1A]">Your Kind</span>
             <br />
-            <span className="font-bold text-white">High Tide</span>
+            <span className="font-bold text-white">of Trip</span>
           </h1>
 
           <p
-            className="mx-auto mb-12 max-w-3xl text-xl leading-relaxed text-white/90 md:text-2xl"
+            className="mx-auto mb-8 max-w-3xl text-lg leading-relaxed text-white/90 sm:mb-10 sm:text-xl md:mb-12 md:text-2xl"
             style={{ fontFamily: "var(--font-source-sans)" }}
           >
             Combining local insights and AI innovation, UnitedIV redefines how
@@ -126,7 +126,7 @@ export default async function Home() {
             className="inline-block rounded-full border-2 border-white/40 px-8 py-4 text-lg font-medium text-white transition-all hover:bg-white/10 hover:border-white/60 backdrop-blur-sm"
             style={{ fontFamily: "var(--font-playfair)" }}
           >
-            Try LocalLens.ai
+            Try LocalPin.ai
           </Link>
         </div>
       </section>
