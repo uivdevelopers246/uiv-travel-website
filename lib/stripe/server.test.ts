@@ -492,6 +492,91 @@ describe("fulfillSettlementPaymentIntentSucceeded", () => {
     );
 
     expect(result).toEqual({ status: "reconciliation_required" });
+    expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
+    expect(supabase.from).toHaveBeenCalledWith("orders");
+    expect(supabase.from).toHaveBeenCalledWith("activity_bookings");
+  });
+
+  it("returns reconciliation_required when mismatch transition is already applied by a prior delivery", async () => {
+    let step = 0;
+    const supabase = {
+      from: vi.fn(() => {
+        step += 1;
+        if (step === 1) {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+          };
+        }
+        if (step === 2) {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: {
+                id: "order-1",
+                status: "payment_pending",
+                currency: "usd",
+              },
+              error: null,
+            }),
+          };
+        }
+        if (step === 3) {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            order: vi.fn().mockReturnThis(),
+            range: vi.fn().mockResolvedValue({
+              data: [{ status: "confirmed", total_cents: 1000 }],
+              error: null,
+            }),
+          };
+        }
+        if (step === 4) {
+          return {
+            update: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            in: vi.fn().mockReturnThis(),
+            select: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: null,
+              error: null,
+            }),
+          };
+        }
+        if (step === 5) {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: {
+                id: "order-1",
+                status: "reconciliation_required",
+                currency: "usd",
+              },
+              error: null,
+            }),
+          };
+        }
+        if (step === 6) {
+          return {
+            insert: vi.fn().mockResolvedValue({ error: null }),
+          };
+        }
+        throw new Error(`Unexpected step ${step}`);
+      }),
+    };
+
+    const result = await fulfillSettlementPaymentIntentSucceeded(
+      paymentIntentSucceededEvent({ amount: 9999 }),
+      supabase as never,
+    );
+
+    expect(result).toEqual({ status: "reconciliation_required" });
+    expect(supabase.from).toHaveBeenCalledWith("orders");
+    expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
   });
 
   it("marks the order paid and records the webhook on success", async () => {

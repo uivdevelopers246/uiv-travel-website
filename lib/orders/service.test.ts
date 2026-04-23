@@ -481,6 +481,33 @@ describe("markOrderReconciliationRequiredAfterSettlementMismatch", () => {
     expect(row).toBeNull();
   });
 
+  it("returns null when order was already reconciled by a prior webhook delivery", async () => {
+    const ordersQuery: Record<string, unknown> = {
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn(() => ordersQuery),
+    };
+
+    const row = await markOrderReconciliationRequiredAfterSettlementMismatch(
+      supabase as never,
+      {
+        orderId,
+        capturedStripePaymentIntentId: "pi_settlement_1",
+      },
+    );
+
+    expect(row).toBeNull();
+    expect(ordersQuery.in).toHaveBeenCalledWith("status", [
+      "awaiting_vendor_approval",
+      "payment_pending",
+    ]);
+  });
+
   it("wraps database errors with operation context", async () => {
     const ordersQuery: Record<string, unknown> = {
       update: vi.fn().mockReturnThis(),
