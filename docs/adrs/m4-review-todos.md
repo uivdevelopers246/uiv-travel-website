@@ -6,10 +6,9 @@ Checklist of hardening and follow-ups identified in code review before expanding
 
 ## Critical — money or Stripe behavior
 
-1. **`payment_intent.succeeded` amount / currency mismatch**  
-   Today the handler can **acknowledge the webhook** (`stripe_webhook_events` + 200) while **not** marking the order `paid` if `pi.amount` (or currency) does not match `computeConfirmedSettlementTotalCents` / order currency.  
-   **Risk:** Capture succeeds in Stripe while the app leaves the order in a non-`paid` state — reconciliation gap.  
-   **Direction:** Define behavior: alerting + manual playbook, or block idempotency insert until reconciled, or explicit “reconciliation required” order state — pick one strategy and implement.
+1. **`payment_intent.succeeded` amount / currency mismatch** — **addressed (explicit state + ack)**  
+   **Strategy:** On mismatch between the succeeded settlement `PaymentIntent` and the app’s expected total (`computeConfirmedSettlementTotalCents`) or order currency, the order transitions to **`reconciliation_required`** via `markOrderReconciliationRequiredAfterSettlementMismatch` (`lib/orders/service.ts`), the event is still recorded in **`stripe_webhook_events`**, and **`POST /api/webhooks/stripe`** returns **200** (`reconciliation_required` fulfillment result) so Stripe does not retry indefinitely.  
+   **Ops:** Treat **`reconciliation_required`** as manual follow-up: compare Stripe Dashboard vs `orders` / `activity_bookings`; align data or refund per your playbook. Migrations add **`order_settlement_mismatches`** for structured mismatch audit by Stripe event id when you wire or backfill it. See **“Settlement amount or currency mismatch”** and **“Decision: Settlement capture mismatch → …”** in `docs/architecture.md`.
 
 2. **Settlement race: PI created before DB attach**  
    Off-session `PaymentIntent` with `confirm: true` can emit webhooks **before** `attachFirstSettlementPaymentIntent` commits. The code partially anticipates this (`updateOrderPaidAfterSettlementCapture` allows `awaiting_vendor_approval` or `payment_pending`), but **attach failure + cancel PI** can still overlap awkwardly with webhooks.  
@@ -52,7 +51,7 @@ Checklist of hardening and follow-ups identified in code review before expanding
 ## Suggested verification before phase 2
 
 - [ ] Run through: setup → bookings → vendor approve → settlement success/failure (including retry path).  
-- [ ] Confirm monitoring/logging exists for **amount mismatch** and **webhook failures** (even if MVP is “log + manual”).  
+- [ ] Confirm monitoring/logging exists for **amount mismatch** (orders in **`reconciliation_required`**) and **webhook failures** (even if MVP is “log + manual”).  
 - [ ] Re-read [ADR-M4-C](../adrs/ADR-M4-C-pending-approval-checkout-and-payment.md) and update if any of the above decisions change the model.
 
 ---
