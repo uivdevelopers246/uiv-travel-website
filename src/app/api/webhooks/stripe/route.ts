@@ -46,7 +46,7 @@ function settlementPaymentIntentSucceededResponse(
     case "already_paid":
     case "success":
     case "ignored":
-    case "amount_mismatch":
+    case "reconciliation_required":
       return NextResponse.json({ received: true });
     default: {
       const _exhaustive: never = result;

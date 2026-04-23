@@ -428,7 +428,7 @@ describe("fulfillSettlementPaymentIntentSucceeded", () => {
     expect(result).toEqual({ status: "ignored", reason: "not_settlement_flow" });
   });
 
-  it("returns amount_mismatch when the PaymentIntent amount does not match confirmed booking totals", async () => {
+  it("returns reconciliation_required when the PaymentIntent amount does not match confirmed booking totals", async () => {
     let step = 0;
     const supabase = {
       from: vi.fn(() => {
@@ -467,6 +467,18 @@ describe("fulfillSettlementPaymentIntentSucceeded", () => {
         }
         if (step === 4) {
           return {
+            update: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            in: vi.fn().mockReturnThis(),
+            select: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: { id: "order-1", status: "reconciliation_required" },
+              error: null,
+            }),
+          };
+        }
+        if (step === 5) {
+          return {
             insert: vi.fn().mockResolvedValue({ error: null }),
           };
         }
@@ -479,7 +491,7 @@ describe("fulfillSettlementPaymentIntentSucceeded", () => {
       supabase as never,
     );
 
-    expect(result).toEqual({ status: "amount_mismatch" });
+    expect(result).toEqual({ status: "reconciliation_required" });
   });
 
   it("marks the order paid and records the webhook on success", async () => {

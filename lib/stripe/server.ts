@@ -20,6 +20,7 @@ import {
   attachSettlementRetryPaymentIntent,
   getOrderById,
   markOrderFailedAfterSettlementExhausted,
+  markOrderReconciliationRequiredAfterSettlementMismatch,
   revertOrderToAwaitingPaymentAfterSetupFailure,
   updateOrderAwaitingVendorApprovalFromSetup,
   updateOrderPaidAfterSettlementCapture,
@@ -594,7 +595,7 @@ export type FulfillSettlementPaymentIntentSucceededResult =
   | { status: "duplicate_event" }
   | { status: "already_paid" }
   | { status: "ignored"; reason: "not_settlement_flow" }
-  | { status: "amount_mismatch" }
+  | { status: "reconciliation_required" }
   | { status: "success" };
 
 /**
@@ -640,14 +641,25 @@ export async function fulfillSettlementPaymentIntentSucceeded(
   }
 
   const bookings = await listActivityBookings(supabase, { orderId, limit: 500 });
-  const expectedCents = computeConfirmedSettlementTotalCents(bookings);
-  if (pi.amount !== expectedCents) {
+  const expectedSettlementAmountCents = computeConfirmedSettlementTotalCents(bookings);
+  const capturedPaymentIntentAmountCents = pi.amount;
+  const isAmountMismatch = capturedPaymentIntentAmountCents !== expectedSettlementAmountCents;
+  const isCurrencyMismatch = pi.currency.toLowerCase() !== order.currency.toLowerCase();
+  if (isAmountMismatch || isCurrencyMismatch) {
+    const transitioned = await markOrderReconciliationRequiredAfterSettlementMismatch(supabase, {
+      orderId,
+      capturedStripePaymentIntentId: pi.id,
+    });
+    if (!transitioned) {
+      const fresh = await getOrderById(supabase, orderId);
+      if (fresh?.status !== "reconciliation_required") {
+        throw new Error(
+          "Could not transition order to reconciliation_required after settlement mismatch",
+        );
+      }
+    }
     await insertStripeWebhookEvent(supabase, event.id);
-    return { status: "amount_mismatch" };
-  }
-  if (pi.currency.toLowerCase() !== order.currency.toLowerCase()) {
-    await insertStripeWebhookEvent(supabase, event.id);
-    return { status: "amount_mismatch" };
+    return { status: "reconciliation_required" };
   }
 
   try {
