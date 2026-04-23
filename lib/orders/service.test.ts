@@ -11,6 +11,7 @@ import {
   computeOrderTotalsFromCartLines,
   findCheckoutSetupOrderForUser,
   getOrderById,
+  markOrderReconciliationRequiredAfterSettlementMismatch,
   updateOrderStatus,
   updateOrderStripeCheckoutSession,
   upsertCheckoutSetupOrderFromCart,
@@ -414,5 +415,94 @@ describe("updateOrderStatus", () => {
       updateOrderStatus(supabase as never, orderId, "bogus" as never),
     ).rejects.toThrow("Invalid order status");
     expect(from).not.toHaveBeenCalled();
+  });
+});
+
+describe("markOrderReconciliationRequiredAfterSettlementMismatch", () => {
+  it("marks eligible settlement rows as reconciliation_required", async () => {
+    const updated = baseOrder({
+      status: "reconciliation_required",
+      stripe_payment_intent_id: "pi_settlement_1",
+    });
+    const ordersQuery: Record<string, unknown> = {
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: updated, error: null }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn(() => ordersQuery),
+    };
+
+    const row = await markOrderReconciliationRequiredAfterSettlementMismatch(
+      supabase as never,
+      {
+        orderId,
+        capturedStripePaymentIntentId: "pi_settlement_1",
+      },
+    );
+
+    expect(row).toEqual(updated);
+    expect(ordersQuery.update).toHaveBeenCalledWith({
+      status: "reconciliation_required",
+    });
+    expect(ordersQuery.eq).toHaveBeenCalledWith("id", orderId);
+    expect(ordersQuery.eq).toHaveBeenCalledWith(
+      "stripe_payment_intent_id",
+      "pi_settlement_1",
+    );
+    expect(ordersQuery.in).toHaveBeenCalledWith("status", [
+      "awaiting_vendor_approval",
+      "payment_pending",
+    ]);
+  });
+
+  it("returns null when order is not eligible for transition", async () => {
+    const ordersQuery: Record<string, unknown> = {
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn(() => ordersQuery),
+    };
+
+    const row = await markOrderReconciliationRequiredAfterSettlementMismatch(
+      supabase as never,
+      {
+        orderId,
+        capturedStripePaymentIntentId: "pi_settlement_1",
+      },
+    );
+
+    expect(row).toBeNull();
+  });
+
+  it("wraps database errors with operation context", async () => {
+    const ordersQuery: Record<string, unknown> = {
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({
+        data: null,
+        error: { message: "write blocked by policy" },
+      }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn(() => ordersQuery),
+    };
+
+    await expect(
+      markOrderReconciliationRequiredAfterSettlementMismatch(supabase as never, {
+        orderId,
+        capturedStripePaymentIntentId: "pi_settlement_1",
+      }),
+    ).rejects.toThrow(
+      "Could not mark order reconciliation_required after settlement mismatch",
+    );
   });
 });

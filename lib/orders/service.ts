@@ -381,3 +381,34 @@ export async function markOrderFailedAfterSettlementExhausted(
   }
   return data;
 }
+
+/**
+ * M4-C: settlement succeeded in Stripe but expected/order totals did not match captured values.
+ * Moves eligible orders to **`reconciliation_required`** for manual follow-up.
+ */
+export async function markOrderReconciliationRequiredAfterSettlementMismatch(
+  supabase: SupabaseClient<Database>,
+  input: {
+    orderId: string;
+    capturedStripePaymentIntentId: string;
+  },
+): Promise<Order | null> {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      status: "reconciliation_required",
+    })
+    .eq("id", input.orderId)
+    .eq("stripe_payment_intent_id", input.capturedStripePaymentIntentId)
+    .in("status", ["awaiting_vendor_approval", "payment_pending"])
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw orderServiceError(
+      "Could not mark order reconciliation_required after settlement mismatch",
+      error,
+    );
+  }
+  return data;
+}
