@@ -164,7 +164,65 @@ describe("tryBeginSettlementChargeForOrder", () => {
     expect(orderServiceMocks.paymentIntentCancel).not.toHaveBeenCalled();
   });
 
-  it("cancels the PaymentIntent when attachFirstSettlementPaymentIntent loses the race", async () => {
+  it("does not cancel when webhook already marked order paid with the same PaymentIntent", async () => {
+    orderServiceMocks.getOrderById
+      .mockResolvedValueOnce({
+        id: orderId,
+        status: "awaiting_vendor_approval",
+        stripe_payment_intent_id: null,
+        stripe_customer_id: "cus_1",
+        stripe_setup_intent_id: "seti_1",
+        currency: "usd",
+      } as Awaited<ReturnType<typeof orderServiceMocks.getOrderById>>)
+      .mockResolvedValueOnce({
+        id: orderId,
+        status: "paid",
+        stripe_payment_intent_id: "pi_settlement_1",
+        stripe_customer_id: "cus_1",
+        stripe_setup_intent_id: "seti_1",
+        currency: "usd",
+      } as Awaited<ReturnType<typeof orderServiceMocks.getOrderById>>);
+    vi.mocked(listActivityBookings).mockResolvedValue([
+      { status: "confirmed", total_cents: 100 },
+    ] as Awaited<ReturnType<typeof listActivityBookings>>);
+    orderServiceMocks.attachFirstSettlementPaymentIntent.mockResolvedValue(null);
+
+    await tryBeginSettlementChargeForOrder(supabase, orderId);
+
+    expect(orderServiceMocks.paymentIntentRetrieve).not.toHaveBeenCalled();
+    expect(orderServiceMocks.paymentIntentCancel).not.toHaveBeenCalled();
+  });
+
+  it("does not cancel when concurrent attach stored the same PaymentIntent as payment_pending", async () => {
+    orderServiceMocks.getOrderById
+      .mockResolvedValueOnce({
+        id: orderId,
+        status: "awaiting_vendor_approval",
+        stripe_payment_intent_id: null,
+        stripe_customer_id: "cus_1",
+        stripe_setup_intent_id: "seti_1",
+        currency: "usd",
+      } as Awaited<ReturnType<typeof orderServiceMocks.getOrderById>>)
+      .mockResolvedValueOnce({
+        id: orderId,
+        status: "payment_pending",
+        stripe_payment_intent_id: "pi_settlement_1",
+        stripe_customer_id: "cus_1",
+        stripe_setup_intent_id: "seti_1",
+        currency: "usd",
+      } as Awaited<ReturnType<typeof orderServiceMocks.getOrderById>>);
+    vi.mocked(listActivityBookings).mockResolvedValue([
+      { status: "confirmed", total_cents: 100 },
+    ] as Awaited<ReturnType<typeof listActivityBookings>>);
+    orderServiceMocks.attachFirstSettlementPaymentIntent.mockResolvedValue(null);
+
+    await tryBeginSettlementChargeForOrder(supabase, orderId);
+
+    expect(orderServiceMocks.paymentIntentRetrieve).not.toHaveBeenCalled();
+    expect(orderServiceMocks.paymentIntentCancel).not.toHaveBeenCalled();
+  });
+
+  it("cancels orphaned cancelable PaymentIntent when attach loses race and order is unchanged", async () => {
     orderServiceMocks.getOrderById
       .mockResolvedValueOnce({
         id: orderId,
@@ -185,6 +243,10 @@ describe("tryBeginSettlementChargeForOrder", () => {
     vi.mocked(listActivityBookings).mockResolvedValue([
       { status: "confirmed", total_cents: 100 },
     ] as Awaited<ReturnType<typeof listActivityBookings>>);
+    orderServiceMocks.paymentIntentRetrieve.mockResolvedValue({
+      id: "pi_settlement_1",
+      status: "requires_payment_method",
+    });
     orderServiceMocks.attachFirstSettlementPaymentIntent.mockResolvedValue(null);
 
     await tryBeginSettlementChargeForOrder(supabase, orderId);
