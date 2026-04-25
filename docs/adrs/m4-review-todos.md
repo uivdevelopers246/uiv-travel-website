@@ -10,9 +10,8 @@ Checklist of hardening and follow-ups identified in code review before expanding
    **Strategy:** On mismatch between the succeeded settlement `PaymentIntent` and the app’s expected total (`computeConfirmedSettlementTotalCents`) or order currency, the order transitions to **`reconciliation_required`** via `markOrderReconciliationRequiredAfterSettlementMismatch` (`lib/orders/service.ts`), the event is still recorded in **`stripe_webhook_events`**, and **`POST /api/webhooks/stripe`** returns **200** (`reconciliation_required` fulfillment result) so Stripe does not retry indefinitely.  
    **Ops:** Treat **`reconciliation_required`** as manual follow-up: compare Stripe Dashboard vs `orders` / `activity_bookings`; align data or refund per your playbook. Migrations add **`order_settlement_mismatches`** for structured mismatch audit by Stripe event id when you wire or backfill it. See **“Settlement amount or currency mismatch”** and **“Decision: Settlement capture mismatch → …”** in `docs/architecture.md`.
 
-2. **Settlement race: PI created before DB attach**  
-   Off-session `PaymentIntent` with `confirm: true` can emit webhooks **before** `attachFirstSettlementPaymentIntent` commits. The code partially anticipates this (`updateOrderPaidAfterSettlementCapture` allows `awaiting_vendor_approval` or `payment_pending`), but **attach failure + cancel PI** can still overlap awkwardly with webhooks.  
-   **Direction:** Document the intended ordering; add tests or idempotency checks so a succeeded PI is never “orphaned” without a clear order outcome.
+2. **Settlement race: PI created before DB attach** — **addressed (defensive cancel path + coverage)**  
+   `tryBeginSettlementChargeForOrder` now treats `attachFirstSettlementPaymentIntent(...) === null` defensively: it re-reads the order and retrieves the PI, skips cancel when the PI is already bound/succeeded, and only cancels true orphan intents in cancelable states. Coverage in `lib/orders/settlement.test.ts` includes webhook-won, concurrent attach with same PI, and cancelable orphan cases.
 
 ---
 
