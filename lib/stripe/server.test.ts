@@ -248,6 +248,27 @@ describe("fulfillCheckoutSetupSessionCompleted", () => {
     expect(result).toEqual({ status: "ignored", reason: "mode_not_setup" });
     expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
   });
+
+  it("returns ignored missing_order_id when setup session metadata lacks order_id", async () => {
+    const supabase = supabaseWithFromQueue([
+      () => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+      () => ({
+        insert: vi.fn().mockResolvedValue({ error: null }),
+      }),
+    ]);
+
+    const result = await fulfillCheckoutSetupSessionCompleted(
+      checkoutSessionCompletedEvent({ metadata: {} }),
+      supabase as never,
+    );
+
+    expect(result).toEqual({ status: "ignored", reason: "missing_order_id" });
+    expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
+  });
 });
 
 function paymentIntentSucceededEvent(
@@ -426,6 +447,35 @@ describe("fulfillSettlementPaymentIntentSucceeded", () => {
     );
 
     expect(result).toEqual({ status: "ignored", reason: "not_settlement_flow" });
+  });
+
+  it("returns ignored missing_order_id when payment_intent metadata lacks order_id", async () => {
+    let stripeEventsFrom = 0;
+    const supabase = {
+      from: vi.fn((table: string) => {
+        if (table === "stripe_webhook_events") {
+          stripeEventsFrom += 1;
+          if (stripeEventsFrom === 1) {
+            return {
+              select: vi.fn().mockReturnThis(),
+              eq: vi.fn().mockReturnThis(),
+              maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+            };
+          }
+          return {
+            insert: vi.fn().mockResolvedValue({ error: null }),
+          };
+        }
+        throw new Error(`Unexpected table ${table}`);
+      }),
+    };
+
+    const result = await fulfillSettlementPaymentIntentSucceeded(
+      paymentIntentSucceededEvent({ metadata: { flow: STRIPE_METADATA_FLOW_M4C_SETTLEMENT } }),
+      supabase as never,
+    );
+
+    expect(result).toEqual({ status: "ignored", reason: "missing_order_id" });
   });
 
   it("returns reconciliation_required when the PaymentIntent amount does not match confirmed booking totals", async () => {
