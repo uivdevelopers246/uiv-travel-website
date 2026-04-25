@@ -13,6 +13,13 @@ import {
   orderBookingsFullyResolvedForSettlement,
 } from "./settlement-utils";
 
+const CANCELABLE_PAYMENT_INTENT_STATUSES = new Set([
+  "requires_payment_method",
+  "requires_confirmation",
+  "requires_action",
+  "processing",
+] as const);
+
 /**
  * After vendor/expiry transitions: if every line is resolved and at least one is **`confirmed`**,
  * create the **first** off-session settlement **`PaymentIntent`** (M4-C). Idempotent when a PI
@@ -61,6 +68,29 @@ export async function tryBeginSettlementChargeForOrder(
     pi.id,
   );
   if (!attached) {
-    await getStripe().paymentIntents.cancel(pi.id);
+    const freshOrder = await getOrderById(supabase, orderId);
+    if (
+      freshOrder &&
+      ((
+        freshOrder.status === "paid" ||
+        freshOrder.status === "payment_pending"
+      ) &&
+        freshOrder.stripe_payment_intent_id === pi.id)
+    ) {
+      return;
+    }
+
+    const stripe = getStripe();
+    const latestPi = await stripe.paymentIntents.retrieve(pi.id);
+
+    if (latestPi.status === "succeeded") {
+      return;
+    }
+
+    if (!CANCELABLE_PAYMENT_INTENT_STATUSES.has(latestPi.status)) {
+      return;
+    }
+
+    await stripe.paymentIntents.cancel(pi.id);
   }
 }

@@ -6,6 +6,7 @@ const orderServiceMocks = vi.hoisted(() => ({
   getOrderById: vi.fn(),
   attachFirstSettlementPaymentIntent: vi.fn(),
   paymentIntentCancel: vi.fn().mockResolvedValue({}),
+  paymentIntentRetrieve: vi.fn(),
 }));
 
 vi.mock("./service", async (importOriginal) => {
@@ -21,6 +22,7 @@ vi.mock("@/lib/stripe/server", () => ({
   getStripe: vi.fn(() => ({
     paymentIntents: {
       cancel: orderServiceMocks.paymentIntentCancel,
+      retrieve: orderServiceMocks.paymentIntentRetrieve,
     },
   })),
   createSettlementPaymentIntentForOrder: vi.fn(),
@@ -49,6 +51,11 @@ describe("tryBeginSettlementChargeForOrder", () => {
     orderServiceMocks.attachFirstSettlementPaymentIntent.mockReset();
     orderServiceMocks.paymentIntentCancel.mockReset();
     orderServiceMocks.paymentIntentCancel.mockResolvedValue({});
+    orderServiceMocks.paymentIntentRetrieve.mockReset();
+    orderServiceMocks.paymentIntentRetrieve.mockResolvedValue({
+      id: "pi_settlement_1",
+      status: "requires_payment_method",
+    });
   });
 
   it("returns early when order is not awaiting_vendor_approval", async () => {
@@ -158,14 +165,23 @@ describe("tryBeginSettlementChargeForOrder", () => {
   });
 
   it("cancels the PaymentIntent when attachFirstSettlementPaymentIntent loses the race", async () => {
-    orderServiceMocks.getOrderById.mockResolvedValue({
-      id: orderId,
-      status: "awaiting_vendor_approval",
-      stripe_payment_intent_id: null,
-      stripe_customer_id: "cus_1",
-      stripe_setup_intent_id: "seti_1",
-      currency: "usd",
-    } as Awaited<ReturnType<typeof orderServiceMocks.getOrderById>>);
+    orderServiceMocks.getOrderById
+      .mockResolvedValueOnce({
+        id: orderId,
+        status: "awaiting_vendor_approval",
+        stripe_payment_intent_id: null,
+        stripe_customer_id: "cus_1",
+        stripe_setup_intent_id: "seti_1",
+        currency: "usd",
+      } as Awaited<ReturnType<typeof orderServiceMocks.getOrderById>>)
+      .mockResolvedValueOnce({
+        id: orderId,
+        status: "awaiting_vendor_approval",
+        stripe_payment_intent_id: null,
+        stripe_customer_id: "cus_1",
+        stripe_setup_intent_id: "seti_1",
+        currency: "usd",
+      } as Awaited<ReturnType<typeof orderServiceMocks.getOrderById>>);
     vi.mocked(listActivityBookings).mockResolvedValue([
       { status: "confirmed", total_cents: 100 },
     ] as Awaited<ReturnType<typeof listActivityBookings>>);
@@ -173,6 +189,7 @@ describe("tryBeginSettlementChargeForOrder", () => {
 
     await tryBeginSettlementChargeForOrder(supabase, orderId);
 
+    expect(orderServiceMocks.paymentIntentRetrieve).toHaveBeenCalledWith("pi_settlement_1");
     expect(orderServiceMocks.paymentIntentCancel).toHaveBeenCalledWith("pi_settlement_1");
   });
 });
