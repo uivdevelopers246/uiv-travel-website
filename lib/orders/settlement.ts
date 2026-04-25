@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type Stripe from "stripe";
 
 import { listActivityBookings } from "@/lib/activity-bookings/service";
 import { createSettlementPaymentIntentForOrder, getStripe } from "@/lib/stripe/server";
@@ -13,12 +14,13 @@ import {
   orderBookingsFullyResolvedForSettlement,
 } from "./settlement-utils";
 
-const CANCELABLE_PAYMENT_INTENT_STATUSES = new Set([
-  "requires_payment_method",
-  "requires_confirmation",
-  "requires_action",
-  "processing",
-] as const);
+const CANCELABLE_PAYMENT_INTENT_STATUSES: ReadonlySet<Stripe.PaymentIntent.Status> =
+  new Set([
+    "requires_payment_method",
+    "requires_confirmation",
+    "requires_action",
+    "processing",
+  ]);
 
 /**
  * After vendor/expiry transitions: if every line is resolved and at least one is **`confirmed`**,
