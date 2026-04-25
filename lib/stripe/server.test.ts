@@ -352,6 +352,66 @@ function supabaseForSuccessfulSettlement() {
   };
 }
 
+function supabaseForSuccessfulSettlementBeforeAttach() {
+  let step = 0;
+  return {
+    from: vi.fn(() => {
+      step += 1;
+      if (step === 1) {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+        };
+      }
+      if (step === 2) {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: {
+              id: "order-1",
+              status: "awaiting_vendor_approval",
+              currency: "usd",
+              stripe_payment_intent_id: null,
+            },
+            error: null,
+          }),
+        };
+      }
+      if (step === 3) {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          order: vi.fn().mockReturnThis(),
+          range: vi.fn().mockResolvedValue({
+            data: [{ status: "confirmed", total_cents: 3000 }],
+            error: null,
+          }),
+        };
+      }
+      if (step === 4) {
+        return {
+          update: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          in: vi.fn().mockReturnThis(),
+          select: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: { id: "order-1", status: "paid" },
+            error: null,
+          }),
+        };
+      }
+      if (step === 5) {
+        return {
+          insert: vi.fn().mockResolvedValue({ error: null }),
+        };
+      }
+      throw new Error(`Unexpected from() step ${step}`);
+    }),
+  };
+}
+
 describe("createSettlementPaymentIntentForOrder", () => {
   it("throws when amount is below one cent", async () => {
     await expect(
@@ -631,6 +691,20 @@ describe("fulfillSettlementPaymentIntentSucceeded", () => {
 
   it("marks the order paid and records the webhook on success", async () => {
     const supabase = supabaseForSuccessfulSettlement();
+
+    const result = await fulfillSettlementPaymentIntentSucceeded(
+      paymentIntentSucceededEvent(),
+      supabase as never,
+    );
+
+    expect(result).toEqual({ status: "success" });
+    expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
+    expect(supabase.from).toHaveBeenCalledWith("orders");
+    expect(supabase.from).toHaveBeenCalledWith("activity_bookings");
+  });
+
+  it("marks settlement success when webhook arrives before attach updates the order", async () => {
+    const supabase = supabaseForSuccessfulSettlementBeforeAttach();
 
     const result = await fulfillSettlementPaymentIntentSucceeded(
       paymentIntentSucceededEvent(),
