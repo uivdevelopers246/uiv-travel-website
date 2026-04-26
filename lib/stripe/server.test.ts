@@ -298,6 +298,7 @@ describe("fulfillCheckoutSetupSessionCompleted", () => {
   });
 
   it("returns order_not_found and records stripe_webhook_events when order lookup misses", async () => {
+    const insertStripeWebhookEvent = vi.fn().mockResolvedValue({ error: null });
     const supabase = supabaseWithFromQueue([
       () => ({
         select: vi.fn().mockReturnThis(),
@@ -310,7 +311,7 @@ describe("fulfillCheckoutSetupSessionCompleted", () => {
         maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
       }),
       () => ({
-        insert: vi.fn().mockResolvedValue({ error: null }),
+        insert: insertStripeWebhookEvent,
       }),
     ]);
 
@@ -321,6 +322,9 @@ describe("fulfillCheckoutSetupSessionCompleted", () => {
 
     expect(result).toEqual({ status: "order_not_found" });
     expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
+    expect(insertStripeWebhookEvent).toHaveBeenCalledWith({
+      stripe_event_id: "evt_1",
+    });
   });
 });
 
@@ -530,6 +534,7 @@ describe("createSettlementPaymentIntentForOrder", () => {
 
 describe("fulfillSetupIntentSucceeded", () => {
   it("returns order_not_found and records stripe_webhook_events when order lookup misses", async () => {
+    const insertStripeWebhookEvent = vi.fn().mockResolvedValue({ error: null });
     const supabase = supabaseWithFromQueue([
       () => ({
         select: vi.fn().mockReturnThis(),
@@ -542,7 +547,7 @@ describe("fulfillSetupIntentSucceeded", () => {
         maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
       }),
       () => ({
-        insert: vi.fn().mockResolvedValue({ error: null }),
+        insert: insertStripeWebhookEvent,
       }),
     ]);
 
@@ -553,6 +558,9 @@ describe("fulfillSetupIntentSucceeded", () => {
 
     expect(result).toEqual({ status: "order_not_found" });
     expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
+    expect(insertStripeWebhookEvent).toHaveBeenCalledWith({
+      stripe_event_id: "evt_seti_success",
+    });
   });
 });
 
