@@ -41,6 +41,7 @@ import {
   createCheckoutSetupSessionForOrder,
   createSettlementPaymentIntentForOrder,
   fulfillCheckoutSetupSessionCompleted,
+  fulfillSetupIntentSucceeded,
   fulfillSettlementPaymentIntentSucceeded,
   getStripe,
 } from "./server";
@@ -295,6 +296,32 @@ describe("fulfillCheckoutSetupSessionCompleted", () => {
     expect(result).toEqual({ status: "ignored", reason: "missing_order_id" });
     expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
   });
+
+  it("returns order_not_found and records stripe_webhook_events when order lookup misses", async () => {
+    const supabase = supabaseWithFromQueue([
+      () => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+      () => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+      () => ({
+        insert: vi.fn().mockResolvedValue({ error: null }),
+      }),
+    ]);
+
+    const result = await fulfillCheckoutSetupSessionCompleted(
+      checkoutSessionCompletedEvent(),
+      supabase as never,
+    );
+
+    expect(result).toEqual({ status: "order_not_found" });
+    expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
+  });
 });
 
 function paymentIntentSucceededEvent(
@@ -315,6 +342,23 @@ function paymentIntentSucceededEvent(
     id: "evt_pi_success",
     type: "payment_intent.succeeded",
     data: { object: pi },
+  } as Stripe.Event;
+}
+
+function setupIntentSucceededEvent(
+  siOverrides: Partial<Stripe.SetupIntent> = {},
+): Stripe.Event {
+  const si = {
+    id: "seti_1",
+    metadata: { order_id: "order-1" },
+    customer: "cus_1",
+    ...siOverrides,
+  } as Stripe.SetupIntent;
+
+  return {
+    id: "evt_seti_success",
+    type: "setup_intent.succeeded",
+    data: { object: si },
   } as Stripe.Event;
 }
 
@@ -481,6 +525,34 @@ describe("createSettlementPaymentIntentForOrder", () => {
       }),
       { idempotencyKey: "idem-m4c-1" },
     );
+  });
+});
+
+describe("fulfillSetupIntentSucceeded", () => {
+  it("returns order_not_found and records stripe_webhook_events when order lookup misses", async () => {
+    const supabase = supabaseWithFromQueue([
+      () => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+      () => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+      () => ({
+        insert: vi.fn().mockResolvedValue({ error: null }),
+      }),
+    ]);
+
+    const result = await fulfillSetupIntentSucceeded(
+      setupIntentSucceededEvent(),
+      supabase as never,
+    );
+
+    expect(result).toEqual({ status: "order_not_found" });
+    expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
   });
 });
 

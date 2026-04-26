@@ -351,6 +351,7 @@ async function fulfillM4cVendorApprovalRequestAfterSetupSaved(
 ): Promise<M4cSetupFulfillmentCoreResult> {
   let order = await getOrderById(supabase, ctx.orderId);
   if (!order) {
+    await insertStripeWebhookEvent(supabase, eventId);
     return { status: "order_not_found" };
   }
 
@@ -399,6 +400,7 @@ async function fulfillM4cVendorApprovalRequestAfterSetupSaved(
     if (!transitioned) {
       const fresh = await getOrderById(supabase, ctx.orderId);
       if (!fresh) {
+        await insertStripeWebhookEvent(supabase, eventId);
         return { status: "order_not_found" };
       }
       order = fresh;
