@@ -249,6 +249,32 @@ describe("fulfillCheckoutSetupSessionCompleted", () => {
     expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
   });
 
+  it("treats duplicate stripe_webhook_events inserts as idempotent success", async () => {
+    const supabase = supabaseWithFromQueue([
+      () => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+      () => ({
+        insert: vi.fn().mockResolvedValue({
+          error: { code: "23505", message: "duplicate key value violates unique constraint" },
+        }),
+      }),
+    ]);
+
+    const event = checkoutSessionCompletedEvent({
+      mode: "payment" as unknown as Stripe.Checkout.Session["mode"],
+      payment_status: "paid",
+      payment_intent: "pi_1",
+    });
+
+    const result = await fulfillCheckoutSetupSessionCompleted(event, supabase as never);
+
+    expect(result).toEqual({ status: "ignored", reason: "mode_not_setup" });
+    expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
+  });
+
   it("returns ignored missing_order_id when setup session metadata lacks order_id", async () => {
     const supabase = supabaseWithFromQueue([
       () => ({

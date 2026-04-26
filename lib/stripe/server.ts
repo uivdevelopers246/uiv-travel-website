@@ -252,9 +252,14 @@ async function insertStripeWebhookEvent(
   const { error } = await supabase.from("stripe_webhook_events").insert({
     stripe_event_id: stripeEventId,
   });
-  if (error) {
+  if (error && !isDuplicateStripeWebhookEventInsert(error)) {
     throw new Error(`Could not record Stripe webhook event: ${error.message}`);
   }
+}
+
+function isDuplicateStripeWebhookEventInsert(error: { code?: string | null }): boolean {
+  // Postgres unique_violation. Treat as idempotent success for webhook event recording.
+  return error.code === "23505";
 }
 
 async function stripeWebhookEventExists(
