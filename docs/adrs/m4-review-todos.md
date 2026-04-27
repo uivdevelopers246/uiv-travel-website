@@ -29,9 +29,8 @@ Checklist of hardening and follow-ups identified in code review before expanding
 
 ## Medium — correctness and maintainability
 
-5. **SLA expiry sweep: pre-query vs RPC**  
-   `runPendingApprovalExpirySweep` lists affected `order_id`s **before** `expire_pending_activity_bookings()`. Rare **clock / `now()` vs JS ISO** skew could theoretically desync “which orders to sync” from “which rows expired.”  
-   **Direction:** Prefer a single source of truth (e.g. RPC returns affected `order_id`s, or one SQL path that both expires and returns orders to sync).
+5. **SLA expiry sweep: pre-query vs RPC** — **addressed**  
+   **`expire_pending_activity_bookings`** now returns **`jsonb`** with **`expired_count`** and **`order_ids`** from the same **`UPDATE … RETURNING`** (Postgres **`now()`** only). **`runPendingApprovalExpirySweep`** (`lib/orders/pending-approval-expiry.ts`) calls that RPC alone and syncs **`syncOrderDeclinedWhenNoPendingHoldsRemain`** per returned id—no separate list query.
 
 6. **`declineActivityOrderAsAdmin` vs `syncOrderM4cAfterBookingChange`**  
    Bulk admin decline uses a **direct** `updateOrderStatus(..., declined)` path instead of the shared post-change hook. Works today; easy to **drift** when phase 2 adds side effects.  
