@@ -41,6 +41,7 @@ import {
   createCheckoutSetupSessionForOrder,
   createSettlementPaymentIntentForOrder,
   fulfillCheckoutSetupSessionCompleted,
+  fulfillSetupIntentSucceeded,
   fulfillSettlementPaymentIntentSucceeded,
   getStripe,
 } from "./server";
@@ -248,6 +249,83 @@ describe("fulfillCheckoutSetupSessionCompleted", () => {
     expect(result).toEqual({ status: "ignored", reason: "mode_not_setup" });
     expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
   });
+
+  it("treats duplicate stripe_webhook_events inserts as idempotent success", async () => {
+    const supabase = supabaseWithFromQueue([
+      () => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+      () => ({
+        insert: vi.fn().mockResolvedValue({
+          error: { code: "23505", message: "duplicate key value violates unique constraint" },
+        }),
+      }),
+    ]);
+
+    const event = checkoutSessionCompletedEvent({
+      mode: "payment" as unknown as Stripe.Checkout.Session["mode"],
+      payment_status: "paid",
+      payment_intent: "pi_1",
+    });
+
+    const result = await fulfillCheckoutSetupSessionCompleted(event, supabase as never);
+
+    expect(result).toEqual({ status: "ignored", reason: "mode_not_setup" });
+    expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
+  });
+
+  it("returns ignored missing_order_id when setup session metadata lacks order_id", async () => {
+    const supabase = supabaseWithFromQueue([
+      () => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+      () => ({
+        insert: vi.fn().mockResolvedValue({ error: null }),
+      }),
+    ]);
+
+    const result = await fulfillCheckoutSetupSessionCompleted(
+      checkoutSessionCompletedEvent({ metadata: {} }),
+      supabase as never,
+    );
+
+    expect(result).toEqual({ status: "ignored", reason: "missing_order_id" });
+    expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
+  });
+
+  it("returns order_not_found and records stripe_webhook_events when order lookup misses", async () => {
+    const insertStripeWebhookEvent = vi.fn().mockResolvedValue({ error: null });
+    const supabase = supabaseWithFromQueue([
+      () => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+      () => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+      () => ({
+        insert: insertStripeWebhookEvent,
+      }),
+    ]);
+
+    const result = await fulfillCheckoutSetupSessionCompleted(
+      checkoutSessionCompletedEvent(),
+      supabase as never,
+    );
+
+    expect(result).toEqual({ status: "order_not_found" });
+    expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
+    expect(insertStripeWebhookEvent).toHaveBeenCalledWith({
+      stripe_event_id: "evt_1",
+    });
+  });
 });
 
 function paymentIntentSucceededEvent(
@@ -268,6 +346,23 @@ function paymentIntentSucceededEvent(
     id: "evt_pi_success",
     type: "payment_intent.succeeded",
     data: { object: pi },
+  } as Stripe.Event;
+}
+
+function setupIntentSucceededEvent(
+  siOverrides: Partial<Stripe.SetupIntent> = {},
+): Stripe.Event {
+  const si = {
+    id: "seti_1",
+    metadata: { order_id: "order-1" },
+    customer: "cus_1",
+    ...siOverrides,
+  } as Stripe.SetupIntent;
+
+  return {
+    id: "evt_seti_success",
+    type: "setup_intent.succeeded",
+    data: { object: si },
   } as Stripe.Event;
 }
 
@@ -293,6 +388,66 @@ function supabaseForSuccessfulSettlement() {
               status: "payment_pending",
               currency: "usd",
               stripe_payment_intent_id: "pi_settlement_1",
+            },
+            error: null,
+          }),
+        };
+      }
+      if (step === 3) {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          order: vi.fn().mockReturnThis(),
+          range: vi.fn().mockResolvedValue({
+            data: [{ status: "confirmed", total_cents: 3000 }],
+            error: null,
+          }),
+        };
+      }
+      if (step === 4) {
+        return {
+          update: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          in: vi.fn().mockReturnThis(),
+          select: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: { id: "order-1", status: "paid" },
+            error: null,
+          }),
+        };
+      }
+      if (step === 5) {
+        return {
+          insert: vi.fn().mockResolvedValue({ error: null }),
+        };
+      }
+      throw new Error(`Unexpected from() step ${step}`);
+    }),
+  };
+}
+
+function supabaseForSuccessfulSettlementBeforeAttach() {
+  let step = 0;
+  return {
+    from: vi.fn(() => {
+      step += 1;
+      if (step === 1) {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+        };
+      }
+      if (step === 2) {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: {
+              id: "order-1",
+              status: "awaiting_vendor_approval",
+              currency: "usd",
+              stripe_payment_intent_id: null,
             },
             error: null,
           }),
@@ -377,6 +532,38 @@ describe("createSettlementPaymentIntentForOrder", () => {
   });
 });
 
+describe("fulfillSetupIntentSucceeded", () => {
+  it("returns order_not_found and records stripe_webhook_events when order lookup misses", async () => {
+    const insertStripeWebhookEvent = vi.fn().mockResolvedValue({ error: null });
+    const supabase = supabaseWithFromQueue([
+      () => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+      () => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+      () => ({
+        insert: insertStripeWebhookEvent,
+      }),
+    ]);
+
+    const result = await fulfillSetupIntentSucceeded(
+      setupIntentSucceededEvent(),
+      supabase as never,
+    );
+
+    expect(result).toEqual({ status: "order_not_found" });
+    expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
+    expect(insertStripeWebhookEvent).toHaveBeenCalledWith({
+      stripe_event_id: "evt_seti_success",
+    });
+  });
+});
+
 describe("fulfillSettlementPaymentIntentSucceeded", () => {
   it("returns duplicate_event when the Stripe event id was already processed", async () => {
     const maybeSingle = vi.fn().mockResolvedValue({
@@ -428,7 +615,36 @@ describe("fulfillSettlementPaymentIntentSucceeded", () => {
     expect(result).toEqual({ status: "ignored", reason: "not_settlement_flow" });
   });
 
-  it("returns amount_mismatch when the PaymentIntent amount does not match confirmed booking totals", async () => {
+  it("returns ignored missing_order_id when payment_intent metadata lacks order_id", async () => {
+    let stripeEventsFrom = 0;
+    const supabase = {
+      from: vi.fn((table: string) => {
+        if (table === "stripe_webhook_events") {
+          stripeEventsFrom += 1;
+          if (stripeEventsFrom === 1) {
+            return {
+              select: vi.fn().mockReturnThis(),
+              eq: vi.fn().mockReturnThis(),
+              maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+            };
+          }
+          return {
+            insert: vi.fn().mockResolvedValue({ error: null }),
+          };
+        }
+        throw new Error(`Unexpected table ${table}`);
+      }),
+    };
+
+    const result = await fulfillSettlementPaymentIntentSucceeded(
+      paymentIntentSucceededEvent({ metadata: { flow: STRIPE_METADATA_FLOW_M4C_SETTLEMENT } }),
+      supabase as never,
+    );
+
+    expect(result).toEqual({ status: "ignored", reason: "missing_order_id" });
+  });
+
+  it("returns reconciliation_required when the PaymentIntent amount does not match confirmed booking totals", async () => {
     let step = 0;
     const supabase = {
       from: vi.fn(() => {
@@ -467,6 +683,18 @@ describe("fulfillSettlementPaymentIntentSucceeded", () => {
         }
         if (step === 4) {
           return {
+            update: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            in: vi.fn().mockReturnThis(),
+            select: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: { id: "order-1", status: "reconciliation_required" },
+              error: null,
+            }),
+          };
+        }
+        if (step === 5) {
+          return {
             insert: vi.fn().mockResolvedValue({ error: null }),
           };
         }
@@ -479,11 +707,110 @@ describe("fulfillSettlementPaymentIntentSucceeded", () => {
       supabase as never,
     );
 
-    expect(result).toEqual({ status: "amount_mismatch" });
+    expect(result).toEqual({ status: "reconciliation_required" });
+    expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
+    expect(supabase.from).toHaveBeenCalledWith("orders");
+    expect(supabase.from).toHaveBeenCalledWith("activity_bookings");
+  });
+
+  it("returns reconciliation_required when mismatch transition is already applied by a prior delivery", async () => {
+    let step = 0;
+    const supabase = {
+      from: vi.fn(() => {
+        step += 1;
+        if (step === 1) {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+          };
+        }
+        if (step === 2) {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: {
+                id: "order-1",
+                status: "payment_pending",
+                currency: "usd",
+              },
+              error: null,
+            }),
+          };
+        }
+        if (step === 3) {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            order: vi.fn().mockReturnThis(),
+            range: vi.fn().mockResolvedValue({
+              data: [{ status: "confirmed", total_cents: 1000 }],
+              error: null,
+            }),
+          };
+        }
+        if (step === 4) {
+          return {
+            update: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            in: vi.fn().mockReturnThis(),
+            select: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: null,
+              error: null,
+            }),
+          };
+        }
+        if (step === 5) {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: {
+                id: "order-1",
+                status: "reconciliation_required",
+                currency: "usd",
+              },
+              error: null,
+            }),
+          };
+        }
+        if (step === 6) {
+          return {
+            insert: vi.fn().mockResolvedValue({ error: null }),
+          };
+        }
+        throw new Error(`Unexpected step ${step}`);
+      }),
+    };
+
+    const result = await fulfillSettlementPaymentIntentSucceeded(
+      paymentIntentSucceededEvent({ amount: 9999 }),
+      supabase as never,
+    );
+
+    expect(result).toEqual({ status: "reconciliation_required" });
+    expect(supabase.from).toHaveBeenCalledWith("orders");
+    expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
   });
 
   it("marks the order paid and records the webhook on success", async () => {
     const supabase = supabaseForSuccessfulSettlement();
+
+    const result = await fulfillSettlementPaymentIntentSucceeded(
+      paymentIntentSucceededEvent(),
+      supabase as never,
+    );
+
+    expect(result).toEqual({ status: "success" });
+    expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
+    expect(supabase.from).toHaveBeenCalledWith("orders");
+    expect(supabase.from).toHaveBeenCalledWith("activity_bookings");
+  });
+
+  it("marks settlement success when webhook arrives before attach updates the order", async () => {
+    const supabase = supabaseForSuccessfulSettlementBeforeAttach();
 
     const result = await fulfillSettlementPaymentIntentSucceeded(
       paymentIntentSucceededEvent(),
