@@ -1,37 +1,48 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { Database } from "@/supabase/types/database";
+import type { Database, Json } from "@/supabase/types/database";
 
 import { syncOrderDeclinedWhenNoPendingHoldsRemain } from "./vendor-approval";
 
-/**
- * Distinct **`orders.id`** values that currently have at least one
- * **`pending_approval`** booking past **`expires_at`** (SLA breach).
- */
-export async function listOrderIdsWithPendingApprovalPastSla(
-  supabase: SupabaseClient<Database>,
-): Promise<string[]> {
-  const { data, error } = await supabase
-    .from("activity_bookings")
-    .select("order_id")
-    .eq("status", "pending_approval")
-    .not("expires_at", "is", null)
-    .lte("expires_at", new Date().toISOString())
-    .not("order_id", "is", null);
-
-  if (error) {
+function parseExpirePendingActivityBookingsPayload(
+  raw: Json | null,
+): { expiredCount: number; orderIds: string[] } {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(
-      `Could not list orders with expirable pending approvals: ${error.message}`,
+      "expire_pending_activity_bookings returned an invalid payload shape",
     );
   }
 
-  const ids = new Set<string>();
-  for (const row of data ?? []) {
-    if (row.order_id) {
-      ids.add(row.order_id);
-    }
+  const expiredCount = (raw as Record<string, Json | undefined>)["expired_count"];
+  if (
+    typeof expiredCount !== "number" ||
+    !Number.isFinite(expiredCount) ||
+    !Number.isInteger(expiredCount) ||
+    expiredCount < 0
+  ) {
+    throw new Error(
+      "expire_pending_activity_bookings returned invalid expired_count",
+    );
   }
-  return [...ids];
+
+  const orderIdsRaw = (raw as Record<string, Json | undefined>)["order_ids"];
+  if (!Array.isArray(orderIdsRaw)) {
+    throw new Error(
+      "expire_pending_activity_bookings returned invalid order_ids",
+    );
+  }
+
+  const orderIds: string[] = [];
+  for (const id of orderIdsRaw) {
+    if (typeof id !== "string" || id.length === 0) {
+      throw new Error(
+        "expire_pending_activity_bookings returned invalid order_ids entry",
+      );
+    }
+    orderIds.push(id);
+  }
+
+  return { expiredCount, orderIds };
 }
 
 export type PendingApprovalExpirySweepResult = {
@@ -45,13 +56,14 @@ export type PendingApprovalExpirySweepResult = {
  * M4-C SLA sweep: **`pending_approval`** past **`expires_at`** → **`expired`**, then for each
  * affected order sync **`declined`** when no **`pending_approval`** remains and every line is
  * terminal without **`confirmed`**. Does **not** create settlement Stripe charges.
+ *
+ * Uses a single RPC call so expiry metrics and **`order_id`** list share the database **`now()`**
+ * time base (same **`UPDATE … RETURNING`**).
  */
 export async function runPendingApprovalExpirySweep(
   supabase: SupabaseClient<Database>,
 ): Promise<PendingApprovalExpirySweepResult> {
-  const orderIdsSynced = await listOrderIdsWithPendingApprovalPastSla(supabase);
-
-  const { data: expiredRaw, error: expireError } = await supabase.rpc(
+  const { data: rpcData, error: expireError } = await supabase.rpc(
     "expire_pending_activity_bookings",
   );
 
@@ -61,8 +73,8 @@ export async function runPendingApprovalExpirySweep(
     );
   }
 
-  const expiredCount =
-    typeof expiredRaw === "number" ? expiredRaw : Number(expiredRaw);
+  const { expiredCount, orderIds: orderIdsSynced } =
+    parseExpirePendingActivityBookingsPayload(rpcData);
 
   for (const orderId of orderIdsSynced) {
     await syncOrderDeclinedWhenNoPendingHoldsRemain(supabase, orderId);

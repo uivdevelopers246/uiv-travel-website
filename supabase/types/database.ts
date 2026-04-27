@@ -774,7 +774,7 @@ export type Database = {
         Args: { p_order_id: string; p_vendor_id: string }
         Returns: number
       }
-      expire_pending_activity_bookings: { Args: never; Returns: number }
+      expire_pending_activity_bookings: { Args: never; Returns: Json }
       is_site_admin: { Args: never; Returns: boolean }
       is_vendor_owner: { Args: { v_id: string }; Returns: boolean }
       is_vendor_user: { Args: never; Returns: boolean }

@@ -24,33 +24,18 @@ beforeEach(() => {
 });
 
 describe("runPendingApprovalExpirySweep", () => {
-  it("expires rows, then syncs declined for each distinct order (no settlement)", async () => {
-    const listRows = {
-      data: [
-        { order_id: "order-a" },
-        { order_id: "order-a" },
-        { order_id: "order-b" },
-      ],
-      error: null,
-    };
-    vi.mocked(mockSupabase.from).mockReturnValue({
-      select: () => ({
-        eq: () => ({
-          not: () => ({
-            lte: () => ({
-              not: () => Promise.resolve(listRows),
-            }),
-          }),
-        }),
-      }),
-    } as never);
+  it("parses RPC jsonb, then syncs declined per returned order_ids (no list query)", async () => {
     vi.mocked(mockSupabase.rpc).mockResolvedValue({
-      data: 3,
+      data: {
+        expired_count: 3,
+        order_ids: ["order-a", "order-b"],
+      },
       error: null,
     });
 
     await runPendingApprovalExpirySweep(mockSupabase);
 
+    expect(mockSupabase.from).not.toHaveBeenCalled();
     expect(mockSupabase.rpc).toHaveBeenCalledWith("expire_pending_activity_bookings");
     expect(
       vendorApproval.syncOrderDeclinedWhenNoPendingHoldsRemain,
