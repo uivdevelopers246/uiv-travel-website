@@ -286,7 +286,11 @@ export async function declineActivityOrderAsVendor(
 }
 
 /**
- * Admin: declines all **`pending_approval`** rows on the order and sets order **`declined`**.
+ * Admin: declines all **`pending_approval`** rows on the order, then delegates to
+ * **`syncOrderM4cAfterBookingChange`**: sets the order to **`declined`** only when it
+ * is still in a vendor-approval state, no row is **`pending_approval`**, and every
+ * booking is **`declined`**, **`expired`**, or **`cancelled`**; if any line is
+ * **`confirmed`**, settlement may begin instead when M4-C conditions are met.
  */
 export async function declineActivityOrderAsAdmin(orderId: string): Promise<void> {
   const service = createServiceRoleClient();
@@ -301,5 +305,5 @@ export async function declineActivityOrderAsAdmin(orderId: string): Promise<void
   }
 
   await declineAllPendingActivityBookingsForOrder(service, orderId);
-  await updateOrderStatus(service, orderId, "declined");
+  await syncOrderM4cAfterBookingChange(service, orderId);
 }

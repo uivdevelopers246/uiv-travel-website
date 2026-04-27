@@ -32,9 +32,8 @@ Checklist of hardening and follow-ups identified in code review before expanding
 5. **SLA expiry sweep: pre-query vs RPC** — **addressed**  
    **`expire_pending_activity_bookings`** now returns **`jsonb`** with **`expired_count`** and **`order_ids`** from the same **`UPDATE … RETURNING`** (Postgres **`now()`** only). **`runPendingApprovalExpirySweep`** (`lib/orders/pending-approval-expiry.ts`) calls that RPC alone and syncs **`syncOrderDeclinedWhenNoPendingHoldsRemain`** per returned id—no separate list query.
 
-6. **`declineActivityOrderAsAdmin` vs `syncOrderM4cAfterBookingChange`**  
-   Bulk admin decline uses a **direct** `updateOrderStatus(..., declined)` path instead of the shared post-change hook. Works today; easy to **drift** when phase 2 adds side effects.  
-   **Direction:** Revisit for consistency or document why it must stay special-case.
+6. **`declineActivityOrderAsAdmin` vs `syncOrderM4cAfterBookingChange`** — **addressed**  
+   **`declineActivityOrderAsAdmin`** (`lib/orders/vendor-approval.ts`) now calls **`syncOrderM4cAfterBookingChange`** after declining all pending lines (same hook as other approve/decline paths), so order **`declined`** vs settlement start stays aligned with ADR-M4-C instead of an unconditional **`orders.status`** update.
 
 ---
 
