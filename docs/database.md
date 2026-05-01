@@ -111,7 +111,7 @@ Policies below reflect the consolidated vendors/activities migration (`202601290
 | **confirm_all_pending_activity_bookings_for_order** | Same as above for **all** vendors’ pending rows on the order (admin). | `p_order_id` | — | **`service_role` only** | `SECURITY DEFINER`. |
 | **decline_pending_activity_bookings_for_vendor_on_order** | **`pending_approval` → `declined`** for one vendor on an order. | `p_order_id`, `p_vendor_id` | — | **`service_role` only** | `SECURITY DEFINER`. |
 | **decline_activity_bookings_for_order** | Sets **all** **`pending_approval`** rows on an order to **`declined`** (bulk decline). | `p_order_id` | — | **`service_role` only** | `SECURITY DEFINER`. Prefer vendor-scoped decline when multiple vendors share an order. |
-| **expire_pending_activity_bookings** | Sets expired **`pending_approval`** rows to **`expired`** (cron / service role). | none | — | **`service_role` only** | Called by **`GET /api/cron/pending-approval-expiry`**; see `docs/architecture.md`. |
+| **expire_pending_activity_bookings** | Sets expired **`pending_approval`** rows to **`expired`** (cron / service role). | none | — | **`service_role` only** | **Returns** `jsonb`: **`expired_count`** (integer, rows updated) and **`order_ids`** (JSON array of distinct non-null `order_id` values from the same **`UPDATE … RETURNING`** as the expiry, so metrics and sync targets share Postgres **`now()`**). Called by **`GET /api/cron/pending-approval-expiry`**; see `docs/architecture.md`. |
 
 ### RLS helper functions (used in policies)
 

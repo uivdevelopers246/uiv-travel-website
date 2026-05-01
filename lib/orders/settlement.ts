@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type Stripe from "stripe";
 
 import { listActivityBookings } from "@/lib/activity-bookings/service";
 import { createSettlementPaymentIntentForOrder, getStripe } from "@/lib/stripe/server";
@@ -12,6 +13,14 @@ import {
   computeConfirmedSettlementTotalCents,
   orderBookingsFullyResolvedForSettlement,
 } from "./settlement-utils";
+
+const CANCELABLE_PAYMENT_INTENT_STATUSES: ReadonlySet<Stripe.PaymentIntent.Status> =
+  new Set([
+    "requires_payment_method",
+    "requires_confirmation",
+    "requires_action",
+    "processing",
+  ]);
 
 /**
  * After vendor/expiry transitions: if every line is resolved and at least one is **`confirmed`**,
@@ -61,6 +70,29 @@ export async function tryBeginSettlementChargeForOrder(
     pi.id,
   );
   if (!attached) {
-    await getStripe().paymentIntents.cancel(pi.id);
+    const freshOrder = await getOrderById(supabase, orderId);
+    if (
+      freshOrder &&
+      ((
+        freshOrder.status === "paid" ||
+        freshOrder.status === "payment_pending"
+      ) &&
+        freshOrder.stripe_payment_intent_id === pi.id)
+    ) {
+      return;
+    }
+
+    const stripe = getStripe();
+    const latestPi = await stripe.paymentIntents.retrieve(pi.id);
+
+    if (latestPi.status === "succeeded") {
+      return;
+    }
+
+    if (!CANCELABLE_PAYMENT_INTENT_STATUSES.has(latestPi.status)) {
+      return;
+    }
+
+    await stripe.paymentIntents.cancel(pi.id);
   }
 }

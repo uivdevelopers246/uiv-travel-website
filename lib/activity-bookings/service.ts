@@ -162,7 +162,7 @@ export async function createActivityBookingAfterPayment(
     p_discount_cents: discount_cents,
     p_total_cents: input.total_cents,
     p_status: status,
-    p_expires_at: input.expires_at ?? null,
+    p_expires_at: input.expires_at ?? undefined,
   });
 
   if (error) {

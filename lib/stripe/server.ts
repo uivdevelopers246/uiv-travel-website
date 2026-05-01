@@ -20,6 +20,7 @@ import {
   attachSettlementRetryPaymentIntent,
   getOrderById,
   markOrderFailedAfterSettlementExhausted,
+  markOrderReconciliationRequiredAfterSettlementMismatch,
   revertOrderToAwaitingPaymentAfterSetupFailure,
   updateOrderAwaitingVendorApprovalFromSetup,
   updateOrderPaidAfterSettlementCapture,
@@ -251,9 +252,14 @@ async function insertStripeWebhookEvent(
   const { error } = await supabase.from("stripe_webhook_events").insert({
     stripe_event_id: stripeEventId,
   });
-  if (error) {
+  if (error && !isDuplicateStripeWebhookEventInsert(error)) {
     throw new Error(`Could not record Stripe webhook event: ${error.message}`);
   }
+}
+
+function isDuplicateStripeWebhookEventInsert(error: { code?: string | null }): boolean {
+  // Postgres unique_violation. Treat as idempotent success for webhook event recording.
+  return error.code === "23505";
 }
 
 async function stripeWebhookEventExists(
@@ -313,7 +319,15 @@ export type FulfillCheckoutSetupSessionCompletedResult =
   | { status: "order_not_found" }
   | { status: "session_mismatch_marked_failed" }
   | { status: "partial_failure_rolled_back" }
-  | { status: "ignored"; reason: "mode_not_setup" };
+  | {
+      status: "ignored";
+      reason:
+        | "mode_not_setup"
+        | "missing_order_id"
+        | "missing_setup_intent"
+        | "missing_customer"
+        | "order_not_eligible";
+    };
 
 export type FulfillSetupIntentSucceededResult = FulfillCheckoutSetupSessionCompletedResult;
 
@@ -322,7 +336,8 @@ type M4cSetupFulfillmentCoreResult =
   | { status: "already_fulfilled" }
   | { status: "order_not_found" }
   | { status: "session_mismatch_marked_failed" }
-  | { status: "partial_failure_rolled_back" };
+  | { status: "partial_failure_rolled_back" }
+  | { status: "ignored"; reason: "order_not_eligible" };
 
 async function fulfillM4cVendorApprovalRequestAfterSetupSaved(
   supabase: SupabaseClient<Database>,
@@ -336,6 +351,7 @@ async function fulfillM4cVendorApprovalRequestAfterSetupSaved(
 ): Promise<M4cSetupFulfillmentCoreResult> {
   let order = await getOrderById(supabase, ctx.orderId);
   if (!order) {
+    await insertStripeWebhookEvent(supabase, eventId);
     return { status: "order_not_found" };
   }
 
@@ -365,7 +381,7 @@ async function fulfillM4cVendorApprovalRequestAfterSetupSaved(
 
   if (order.status !== "awaiting_payment" && order.status !== "awaiting_vendor_approval") {
     await insertStripeWebhookEvent(supabase, eventId);
-    throw new Error(`Order is not eligible for setup fulfillment: ${order.status}`);
+    return { status: "ignored", reason: "order_not_eligible" };
   }
 
   if (order.status === "awaiting_vendor_approval") {
@@ -384,6 +400,7 @@ async function fulfillM4cVendorApprovalRequestAfterSetupSaved(
     if (!transitioned) {
       const fresh = await getOrderById(supabase, ctx.orderId);
       if (!fresh) {
+        await insertStripeWebhookEvent(supabase, eventId);
         return { status: "order_not_found" };
       }
       order = fresh;
@@ -487,19 +504,20 @@ export async function fulfillCheckoutSetupSessionCompleted(
 
   const orderId = metadataOrderId(session.metadata);
   if (!orderId) {
-    throw new Error(
-      `checkout.session.completed (setup) missing metadata.${STRIPE_METADATA_ORDER_ID_KEY}`,
-    );
+    await insertStripeWebhookEvent(supabase, event.id);
+    return { status: "ignored", reason: "missing_order_id" };
   }
 
   const setupIntentId = setupIntentIdFromSession(session);
   if (!setupIntentId) {
-    throw new Error("checkout.session.completed (setup) missing setup_intent");
+    await insertStripeWebhookEvent(supabase, event.id);
+    return { status: "ignored", reason: "missing_setup_intent" };
   }
 
   const customerId = stripeId(session.customer);
   if (!customerId) {
-    throw new Error("checkout.session.completed (setup) missing customer");
+    await insertStripeWebhookEvent(supabase, event.id);
+    return { status: "ignored", reason: "missing_customer" };
   }
 
   return fulfillM4cVendorApprovalRequestAfterSetupSaved(supabase, event.id, {
@@ -529,12 +547,14 @@ export async function fulfillSetupIntentSucceeded(
   const si = event.data.object as Stripe.SetupIntent;
   const orderId = metadataOrderId(si.metadata);
   if (!orderId) {
-    throw new Error(`setup_intent.succeeded missing metadata.${STRIPE_METADATA_ORDER_ID_KEY}`);
+    await insertStripeWebhookEvent(supabase, event.id);
+    return { status: "ignored", reason: "missing_order_id" };
   }
 
   const customerId = stripeId(si.customer);
   if (!customerId) {
-    throw new Error("setup_intent.succeeded missing customer");
+    await insertStripeWebhookEvent(supabase, event.id);
+    return { status: "ignored", reason: "missing_customer" };
   }
 
   return fulfillM4cVendorApprovalRequestAfterSetupSaved(supabase, event.id, {
@@ -593,8 +613,11 @@ export async function createSettlementPaymentIntentForOrder(
 export type FulfillSettlementPaymentIntentSucceededResult =
   | { status: "duplicate_event" }
   | { status: "already_paid" }
-  | { status: "ignored"; reason: "not_settlement_flow" }
-  | { status: "amount_mismatch" }
+  | {
+      status: "ignored";
+      reason: "not_settlement_flow" | "missing_order_id" | "order_not_found";
+    }
+  | { status: "reconciliation_required" }
   | { status: "success" };
 
 /**
@@ -623,15 +646,14 @@ export async function fulfillSettlementPaymentIntentSucceeded(
 
   const orderId = metadataOrderId(pi.metadata);
   if (!orderId) {
-    throw new Error(
-      `payment_intent.succeeded missing metadata.${STRIPE_METADATA_ORDER_ID_KEY}`,
-    );
+    await insertStripeWebhookEvent(supabase, event.id);
+    return { status: "ignored", reason: "missing_order_id" };
   }
 
   const order = await getOrderById(supabase, orderId);
   if (!order) {
     await insertStripeWebhookEvent(supabase, event.id);
-    throw new Error("Order not found for settlement success");
+    return { status: "ignored", reason: "order_not_found" };
   }
 
   if (order.status === "paid") {
@@ -640,14 +662,25 @@ export async function fulfillSettlementPaymentIntentSucceeded(
   }
 
   const bookings = await listActivityBookings(supabase, { orderId, limit: 500 });
-  const expectedCents = computeConfirmedSettlementTotalCents(bookings);
-  if (pi.amount !== expectedCents) {
+  const expectedSettlementAmountCents = computeConfirmedSettlementTotalCents(bookings);
+  const capturedPaymentIntentAmountCents = pi.amount;
+  const isAmountMismatch = capturedPaymentIntentAmountCents !== expectedSettlementAmountCents;
+  const isCurrencyMismatch = pi.currency.toLowerCase() !== order.currency.toLowerCase();
+  if (isAmountMismatch || isCurrencyMismatch) {
+    const transitioned = await markOrderReconciliationRequiredAfterSettlementMismatch(supabase, {
+      orderId,
+      capturedStripePaymentIntentId: pi.id,
+    });
+    if (!transitioned) {
+      const fresh = await getOrderById(supabase, orderId);
+      if (fresh?.status !== "reconciliation_required") {
+        throw new Error(
+          "Could not transition order to reconciliation_required after settlement mismatch",
+        );
+      }
+    }
     await insertStripeWebhookEvent(supabase, event.id);
-    return { status: "amount_mismatch" };
-  }
-  if (pi.currency.toLowerCase() !== order.currency.toLowerCase()) {
-    await insertStripeWebhookEvent(supabase, event.id);
-    return { status: "amount_mismatch" };
+    return { status: "reconciliation_required" };
   }
 
   try {
@@ -673,7 +706,9 @@ export type FulfillSettlementPaymentIntentPaymentFailedResult =
       reason:
         | "not_settlement_flow"
         | "unexpected_attempt_count"
-        | "order_not_payment_pending";
+        | "order_not_payment_pending"
+        | "missing_order_id"
+        | "order_not_found";
     }
   | { status: "stale_intent" }
   | { status: "retry_scheduled" }
@@ -705,15 +740,14 @@ export async function fulfillSettlementPaymentIntentPaymentFailed(
 
   const orderId = metadataOrderId(pi.metadata);
   if (!orderId) {
-    throw new Error(
-      `payment_intent.payment_failed missing metadata.${STRIPE_METADATA_ORDER_ID_KEY}`,
-    );
+    await insertStripeWebhookEvent(supabase, event.id);
+    return { status: "ignored", reason: "missing_order_id" };
   }
 
   const order = await getOrderById(supabase, orderId);
   if (!order) {
     await insertStripeWebhookEvent(supabase, event.id);
-    throw new Error("Order not found for settlement failure");
+    return { status: "ignored", reason: "order_not_found" };
   }
 
   if (order.status === "paid") {

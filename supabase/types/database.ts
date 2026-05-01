@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -34,6 +34,41 @@ export type Database = {
   }
   public: {
     Tables: {
+      accommodation_images: {
+        Row: {
+          accommodation_id: string
+          alt_text: string | null
+          created_at: string
+          display_order: number
+          id: string
+          image_url: string
+        }
+        Insert: {
+          accommodation_id: string
+          alt_text?: string | null
+          created_at?: string
+          display_order?: number
+          id?: string
+          image_url: string
+        }
+        Update: {
+          accommodation_id?: string
+          alt_text?: string | null
+          created_at?: string
+          display_order?: number
+          id?: string
+          image_url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "accommodation_images_accommodation_id_fkey"
+            columns: ["accommodation_id"]
+            isOneToOne: false
+            referencedRelation: "accommodations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       accommodations: {
         Row: {
           accommodation_type: string
@@ -50,7 +85,9 @@ export type Database = {
           id: string
           image_url: string | null
           is_featured: boolean
+          latitude: number | null
           location_point: unknown
+          longitude: number | null
           max_guest_capacity: number | null
           name: string
           parish: string | null
@@ -82,7 +119,9 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_featured?: boolean
+          latitude?: number | null
           location_point?: unknown
+          longitude?: number | null
           max_guest_capacity?: number | null
           name: string
           parish?: string | null
@@ -114,7 +153,9 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_featured?: boolean
+          latitude?: number | null
           location_point?: unknown
+          longitude?: number | null
           max_guest_capacity?: number | null
           name?: string
           parish?: string | null
@@ -150,8 +191,10 @@ export type Database = {
           id: string
           image_url: string | null
           is_featured: boolean
+          latitude: number | null
           location: string | null
           location_point: unknown
+          longitude: number | null
           max_capacity: number | null
           price_per_person: number | null
           rating: number | null
@@ -168,8 +211,10 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_featured?: boolean
+          latitude?: number | null
           location?: string | null
           location_point?: unknown
+          longitude?: number | null
           max_capacity?: number | null
           price_per_person?: number | null
           rating?: number | null
@@ -186,8 +231,10 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_featured?: boolean
+          latitude?: number | null
           location?: string | null
           location_point?: unknown
+          longitude?: number | null
           max_capacity?: number | null
           price_per_person?: number | null
           rating?: number | null
@@ -285,6 +332,41 @@ export type Database = {
             columns: ["vendor_id"]
             isOneToOne: false
             referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      activity_images: {
+        Row: {
+          activity_id: string
+          alt_text: string | null
+          created_at: string
+          display_order: number
+          id: string
+          image_url: string
+        }
+        Insert: {
+          activity_id: string
+          alt_text?: string | null
+          created_at?: string
+          display_order?: number
+          id?: string
+          image_url: string
+        }
+        Update: {
+          activity_id?: string
+          alt_text?: string | null
+          created_at?: string
+          display_order?: number
+          id?: string
+          image_url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "activity_images_activity_id_fkey"
+            columns: ["activity_id"]
+            isOneToOne: false
+            referencedRelation: "activities"
             referencedColumns: ["id"]
           },
         ]
@@ -412,6 +494,47 @@ export type Database = {
           },
         ]
       }
+      order_settlement_mismatches: {
+        Row: {
+          captured_amount_cents: number
+          captured_currency: string
+          created_at: string
+          expected_amount_cents: number
+          expected_currency: string
+          order_id: string
+          stripe_event_id: string
+          stripe_payment_intent_id: string
+        }
+        Insert: {
+          captured_amount_cents: number
+          captured_currency: string
+          created_at?: string
+          expected_amount_cents: number
+          expected_currency: string
+          order_id: string
+          stripe_event_id: string
+          stripe_payment_intent_id: string
+        }
+        Update: {
+          captured_amount_cents?: number
+          captured_currency?: string
+          created_at?: string
+          expected_amount_cents?: number
+          expected_currency?: string
+          order_id?: string
+          stripe_event_id?: string
+          stripe_payment_intent_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_settlement_mismatches_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       orders: {
         Row: {
           created_at: string
@@ -450,8 +573,8 @@ export type Database = {
           currency?: string
           discount_cents?: number
           id?: string
-          status?: string
           settlement_charge_attempt_count?: number
+          status?: string
           stripe_checkout_session_id?: string | null
           stripe_customer_id?: string | null
           stripe_payment_intent_id?: string | null
@@ -579,28 +702,28 @@ export type Database = {
       cancel_activity_booking: {
         Args: { p_booking_id: string }
         Returns: undefined
-      },
+      }
       cancel_activity_bookings_for_order: {
         Args: { p_order_id: string }
         Returns: undefined
-      },
+      }
       confirm_all_pending_activity_bookings_for_order: {
         Args: { p_order_id: string }
         Returns: number
-      },
+      }
       confirm_pending_activity_booking_as_admin: {
         Args: { p_booking_id: string }
         Returns: number
-      },
+      }
       confirm_pending_activity_booking_for_vendor: {
         Args: { p_booking_id: string; p_vendor_id: string }
         Returns: number
-      },
+      }
       create_activity_booking_after_payment: {
         Args: {
           p_activity_id: string
           p_discount_cents?: number
-          p_expires_at?: string | null
+          p_expires_at?: string
           p_order_id: string
           p_participants: number
           p_slot_id: string
@@ -611,35 +734,50 @@ export type Database = {
           p_user_id: string
           p_vendor_id: string
         }
-        Returns: Database["public"]["Tables"]["activity_bookings"]["Row"]
-      },
+        Returns: {
+          activity_id: string
+          created_at: string
+          discount_cents: number
+          expires_at: string | null
+          id: string
+          order_id: string | null
+          participants: number
+          slot_id: string
+          status: string
+          subtotal_cents: number
+          total_cents: number
+          unit_price_cents: number
+          updated_at: string
+          user_id: string
+          vendor_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "activity_bookings"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       decline_activity_bookings_for_order: {
         Args: { p_order_id: string }
         Returns: undefined
-      },
+      }
       decline_pending_activity_booking_as_admin: {
         Args: { p_booking_id: string }
         Returns: number
-      },
+      }
       decline_pending_activity_booking_for_vendor: {
         Args: { p_booking_id: string; p_vendor_id: string }
         Returns: number
-      },
+      }
       decline_pending_activity_bookings_for_vendor_on_order: {
         Args: { p_order_id: string; p_vendor_id: string }
         Returns: number
-      },
-      expire_pending_activity_bookings: {
-        Args: never
-        Returns: number
-      },
+      }
+      expire_pending_activity_bookings: { Args: never; Returns: Json }
       is_site_admin: { Args: never; Returns: boolean }
       is_vendor_owner: { Args: { v_id: string }; Returns: boolean }
       is_vendor_user: { Args: never; Returns: boolean }
-      slot_platform_participants_booked: {
-        Args: { p_slot_ids: string[] }
-        Returns: { booked: number; slot_id: string }[]
-      },
       set_accommodation_location_point: {
         Args: { p_accommodation_id: string; p_lat?: number; p_lng?: number }
         Returns: undefined
@@ -647,6 +785,13 @@ export type Database = {
       set_activity_location_point: {
         Args: { p_activity_id: string; p_lat?: number; p_lng?: number }
         Returns: undefined
+      }
+      slot_platform_participants_booked: {
+        Args: { p_slot_ids: string[] }
+        Returns: {
+          booked: number
+          slot_id: string
+        }[]
       }
       vendor_id_for_user: { Args: never; Returns: string }
     }
