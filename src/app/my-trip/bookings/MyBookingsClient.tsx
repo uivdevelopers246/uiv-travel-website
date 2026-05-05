@@ -2,6 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import {
+  type BuyerFlowMessage,
+  getOrderStatusNotice,
+} from "@/lib/orders/buyer-flow";
 import { collectOrderStatusAlerts } from "@/lib/orders/status-alerts";
 import type {
   ActivityBookingWithPreview,
@@ -86,8 +90,25 @@ function formatCountdown(deadlineAt: string | null, now: number) {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")} left`;
 }
 
+function getOrderApprovalDeadlineAt(
+  order: OrderWithActivityBookingsPaymentPreview,
+): string | null {
+  const pendingDeadlines = order.activity_bookings
+    .filter((booking) => booking.status === "pending_approval")
+    .map((booking) => booking.approval_deadline_at)
+    .filter((deadline): deadline is string => typeof deadline === "string");
+
+  if (pendingDeadlines.length === 0) {
+    return null;
+  }
+
+  pendingDeadlines.sort((left, right) => left.localeCompare(right));
+  return pendingDeadlines[0] ?? null;
+}
+
 function getOrderStatusClasses(status: string) {
   switch (status) {
+    case "awaiting_payment":
     case "awaiting_vendor_approval":
       return "border-amber-200 bg-amber-50 text-amber-800";
     case "payment_pending":
@@ -130,85 +151,6 @@ function getToastClasses(tone: Toast["tone"]) {
     case "error":
     default:
       return "border-rose-200 bg-rose-50 text-rose-800";
-  }
-}
-
-type OrderStatusNotice = {
-  tone: Toast["tone"];
-  title: string;
-  message: string;
-  failureMessage: string | null;
-  receiptUrl: string | null;
-  canRetry: boolean;
-  showContactSupport: boolean;
-};
-
-function getOrderStatusNotice(
-  order: OrderWithActivityBookingsPaymentPreview,
-): OrderStatusNotice | null {
-  switch (order.status) {
-    case "payment_pending":
-      return {
-        tone: "warning",
-        title: "Payment processing...",
-        message:
-          "All bookings are resolved. We're charging the saved payment method for the confirmed bookings now.",
-        failureMessage: null,
-        receiptUrl: null,
-        canRetry: false,
-        showContactSupport: false,
-      };
-    case "paid":
-      return {
-        tone: "success",
-        title: "Payment complete",
-        message: "Payment completed successfully for this order.",
-        failureMessage: null,
-        receiptUrl: order.payment_summary?.receipt_url ?? null,
-        canRetry: false,
-        showContactSupport: false,
-      };
-    case "failed":
-      return {
-        tone: "error",
-        title: "Payment failed",
-        message:
-          order.payment_summary?.show_contact_support
-            ? "We couldn't complete the retry for this order. Contact support to finish the booking."
-            : "We couldn't complete the charge for the confirmed bookings. Update your payment method to retry.",
-        failureMessage: order.payment_summary?.failure_message ?? null,
-        receiptUrl: null,
-        canRetry:
-          order.payment_summary?.can_retry_with_payment_method_update ?? false,
-        showContactSupport:
-          order.payment_summary?.show_contact_support ?? false,
-      };
-    case "reconciliation_required":
-      return {
-        tone: "error",
-        title: "Payment needs review",
-        message:
-          "We received a settlement result that needs manual review before this order can be closed.",
-        failureMessage: null,
-        receiptUrl: null,
-        canRetry: false,
-        showContactSupport: true,
-      };
-    case "declined":
-    case "expired":
-    case "cancelled":
-      return {
-        tone: "warning",
-        title: "No payment collected",
-        message:
-          "This order finished without any confirmed bookings, so no payment was charged.",
-        failureMessage: null,
-        receiptUrl: null,
-        canRetry: false,
-        showContactSupport: false,
-      };
-    default:
-      return null;
   }
 }
 
@@ -267,7 +209,6 @@ async function createPaymentRecoverySession(orderId: string): Promise<string> {
 
 type BookingLineProps = {
   booking: ActivityBookingWithPreview;
-  now: number;
 };
 
 type Toast = {
@@ -276,42 +217,56 @@ type Toast = {
   message: string;
 };
 
-function BookingLine({ booking, now }: BookingLineProps) {
-  const countdown = formatCountdown(booking.approval_deadline_at, now);
-  const countdownTone =
-    countdown && countdown.startsWith("SLA expired")
-      ? "border-rose-200 bg-rose-50 text-rose-700"
-      : "border-amber-200 bg-amber-50 text-amber-800";
-
+function BookingLine({ booking }: BookingLineProps) {
   return (
     <article className="rounded-[24px] border border-[#d8e5f2] bg-[#f8fbfe] p-5">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <h3
-              className="text-2xl font-bold text-[#193059]"
-              style={{ fontFamily: "var(--font-playfair)" }}
-            >
-              {booking.activity_title}
-            </h3>
-            <span
-              className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${getBookingStatusClasses(
-                booking.status,
-              )}`}
-            >
-              {formatStatusLabel(booking.status)}
-            </span>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex min-w-0 flex-1 gap-4">
+          <div className="h-28 w-28 shrink-0 overflow-hidden rounded-[22px] bg-[linear-gradient(135deg,#dbe8f6_0%,#8ec7ff_48%,#193059_100%)] shadow-[0_14px_36px_rgba(25,48,89,0.12)]">
+            {booking.activity_image_url ? (
+              <img
+                src={booking.activity_image_url}
+                alt={booking.activity_title}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full w-full items-end bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.5),transparent_55%)] p-4">
+                <span className="text-xs font-semibold uppercase tracking-[0.2em] text-white/90">
+                  Booking
+                </span>
+              </div>
+            )}
           </div>
 
-          <p className="text-sm text-slate-600">
-            {formatSlotDateTime(booking.slot_starts_at, booking.slot_ends_at)}
-          </p>
-          <p className="text-sm text-slate-600">
-            {formatParticipants(booking.participants)}
-          </p>
+          <div className="min-w-0 space-y-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <h3
+                className="text-2xl font-bold text-[#193059]"
+                style={{ fontFamily: "var(--font-playfair)" }}
+              >
+                {booking.activity_title}
+              </h3>
+              {booking.status !== "pending_approval" ? (
+                <span
+                  className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${getBookingStatusClasses(
+                    booking.status,
+                  )}`}
+                >
+                  {formatStatusLabel(booking.status)}
+                </span>
+              ) : null}
+            </div>
+
+            <p className="text-sm text-slate-600">
+              {formatSlotDateTime(booking.slot_starts_at, booking.slot_ends_at)}
+            </p>
+            <p className="text-sm text-slate-600">
+              {formatParticipants(booking.participants)}
+            </p>
+          </div>
         </div>
 
-        <div className="rounded-2xl bg-white px-4 py-3 text-left shadow-[0_12px_32px_rgba(25,48,89,0.06)] md:min-w-[170px]">
+        <div className="rounded-2xl bg-white px-5 py-4 text-left shadow-[0_12px_32px_rgba(25,48,89,0.06)] lg:min-w-[180px]">
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
             Booking Total
           </p>
@@ -320,19 +275,17 @@ function BookingLine({ booking, now }: BookingLineProps) {
           </p>
         </div>
       </div>
-
-      {booking.status === "pending_approval" && countdown && (
-        <div
-          className={`mt-4 inline-flex rounded-full border px-4 py-2 text-sm font-semibold ${countdownTone}`}
-        >
-          Vendor response window: {countdown}
-        </div>
-      )}
     </article>
   );
 }
 
-export function MyBookingsClient() {
+type MyBookingsClientProps = {
+  initialReturnMessage?: BuyerFlowMessage | null;
+};
+
+export function MyBookingsClient({
+  initialReturnMessage = null,
+}: MyBookingsClientProps) {
   const [orders, setOrders] = useState<OrderWithActivityBookingsPaymentPreview[]>(
     [],
   );
@@ -342,6 +295,7 @@ export function MyBookingsClient() {
   const [now, setNow] = useState(() => Date.now());
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [recoveringOrderId, setRecoveringOrderId] = useState<string | null>(null);
+  const returnMessage = initialReturnMessage;
   const hasLoadedRef = useRef(false);
   const previousOrdersRef = useRef<OrderWithActivityBookingsPaymentPreview[]>([]);
 
@@ -429,6 +383,26 @@ export function MyBookingsClient() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!initialReturnMessage) {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+    let changed = false;
+    for (const key of ["checkout", "payment_recovery", "order_id"]) {
+      if (url.searchParams.has(key)) {
+        url.searchParams.delete(key);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+      window.history.replaceState({}, "", nextUrl);
+    }
+  }, [initialReturnMessage]);
+
   async function handlePaymentRecovery(orderId: string) {
     try {
       setRecoveringOrderId(orderId);
@@ -466,11 +440,11 @@ export function MyBookingsClient() {
             <span>My Trip</span>
             <Link
               href="/cart"
-              className="rounded-full border border-white/15 px-3 py-1 text-[11px] tracking-[0.24em] text-white/78 transition-colors hover:bg-white/10"
+              className="rounded-full border border-white/15 px-5 py-2 text-xs tracking-[0.24em] text-white/78 transition-colors hover:bg-white/10"
             >
               Cart
             </Link>
-            <span className="rounded-full bg-white/12 px-3 py-1 text-[11px] tracking-[0.24em] text-white">
+            <span className="rounded-full bg-white/12 px-5 py-2 text-xs tracking-[0.24em] text-white">
               Bookings
             </span>
           </div>
@@ -495,6 +469,20 @@ export function MyBookingsClient() {
             </Link>
           </div>
         </section>
+
+        {returnMessage ? (
+          <section
+            className={`rounded-2xl border px-4 py-3 text-sm ${
+              returnMessage.tone === "success"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : returnMessage.tone === "warning"
+                  ? "border-amber-200 bg-amber-50 text-amber-900"
+                  : "border-rose-200 bg-rose-50 text-rose-700"
+            }`}
+          >
+            {returnMessage.message}
+          </section>
+        ) : null}
 
         {loading ? (
           <section className="rounded-[28px] border border-[#d8e5f2] bg-white p-8 shadow-[0_20px_60px_rgba(25,48,89,0.08)]">
@@ -541,13 +529,21 @@ export function MyBookingsClient() {
           <section className="space-y-6">
             {orders.map((order) => {
               const statusNotice = getOrderStatusNotice(order);
+              const isFinalizingOrder =
+                order.activity_bookings.length === 0 &&
+                (order.status === "awaiting_payment" ||
+                  order.status === "awaiting_vendor_approval");
+              const orderApprovalCountdown = formatCountdown(
+                getOrderApprovalDeadlineAt(order),
+                now,
+              );
 
               return (
                 <article
                   key={order.id}
                   className="rounded-[28px] border border-[#d8e5f2] bg-white p-6 shadow-[0_20px_60px_rgba(25,48,89,0.08)]"
                 >
-                  {statusNotice ? (
+                  {statusNotice && order.status !== "awaiting_vendor_approval" ? (
                     <div
                       className={`mb-5 rounded-[22px] border px-4 py-3 text-sm font-medium ${getToastClasses(
                         statusNotice.tone,
@@ -610,22 +606,33 @@ export function MyBookingsClient() {
                         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#407FC2]">
                           Order {order.id.slice(0, 8)}
                         </p>
-                        <span
-                          className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${getOrderStatusClasses(
-                            order.status,
-                          )}`}
-                        >
-                          {formatStatusLabel(order.status)}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${getOrderStatusClasses(
+                              order.status,
+                            )}`}
+                          >
+                            {formatStatusLabel(order.status)}
+                          </span>
+                          {order.status === "awaiting_vendor_approval" &&
+                          orderApprovalCountdown ? (
+                            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700">
+                              {orderApprovalCountdown}
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                       <h2
                         className="text-3xl font-bold text-[#193059]"
                         style={{ fontFamily: "var(--font-playfair)" }}
                       >
-                        {order.activity_bookings.length}{" "}
-                        {order.activity_bookings.length === 1
-                          ? "activity booking"
-                          : "activity bookings"}
+                        {isFinalizingOrder
+                          ? "Booking request being finalized"
+                          : `${order.activity_bookings.length} ${
+                              order.activity_bookings.length === 1
+                                ? "activity booking"
+                                : "activity bookings"
+                            }`}
                       </h2>
                       <p className="text-sm text-slate-600">
                         Placed {orderDateFormatter.format(new Date(order.created_at))}
@@ -642,16 +649,24 @@ export function MyBookingsClient() {
                       <div className="flex items-center justify-between gap-4">
                         <span>Lines</span>
                         <span className="font-semibold text-[#193059]">
-                          {order.activity_bookings.length}
+                          {isFinalizingOrder ? "Syncing..." : order.activity_bookings.length}
                         </span>
                       </div>
                     </div>
                   </div>
 
                   <div className="mt-6 space-y-4">
-                    {order.activity_bookings.map((booking) => (
-                      <BookingLine key={booking.id} booking={booking} now={now} />
-                    ))}
+                    {isFinalizingOrder ? (
+                      <div className="rounded-[24px] border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-900">
+                        We&apos;re still creating the booking items for this order after checkout.
+                        Refresh is automatic, and this card will update as soon as the request is
+                        fully attached to your account.
+                      </div>
+                    ) : (
+                      order.activity_bookings.map((booking) => (
+                        <BookingLine key={booking.id} booking={booking} />
+                      ))
+                    )}
                   </div>
                 </article>
               );

@@ -239,7 +239,7 @@ export async function updateAccommodation(
 ) {
   const userId = await getCurrentUserIdOrThrow(supabase);
 
-  const payload: Record<string, unknown> = {};
+  const payload: Database["public"]["Tables"]["accommodations"]["Update"] = {};
   if (input.name !== undefined) payload.name = (input.name as string).trim();
   if (input.accommodation_type !== undefined)
     payload.accommodation_type = (input.accommodation_type as string).trim();

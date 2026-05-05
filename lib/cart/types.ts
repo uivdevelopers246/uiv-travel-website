@@ -24,6 +24,7 @@ export type UpdateCartLineParticipantsInput = {
  */
 export type CartLineWithPreview = CartLine & {
   activity_title: string;
+  activity_image_url: string | null;
   slot_starts_at: string;
   slot_ends_at: string;
   max_capacity: number;

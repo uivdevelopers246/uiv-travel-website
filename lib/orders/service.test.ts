@@ -595,7 +595,13 @@ describe("listOrdersWithActivityBookingsPreview", () => {
     const activitiesQuery: Record<string, unknown> = {
       select: vi.fn().mockReturnThis(),
       in: vi.fn().mockResolvedValue({
-        data: [{ id: "activity-1", title: "Catamaran Cruise" }],
+        data: [
+          {
+            id: "activity-1",
+            title: "Catamaran Cruise",
+            image_url: "https://example.com/catamaran.jpg",
+          },
+        ],
         error: null,
       }),
     };
@@ -619,6 +625,7 @@ describe("listOrdersWithActivityBookingsPreview", () => {
           {
             ...booking,
             activity_title: "Catamaran Cruise",
+            activity_image_url: "https://example.com/catamaran.jpg",
             slot_starts_at: "2026-01-10T15:00:00.000Z",
             slot_ends_at: "2026-01-10T17:00:00.000Z",
             approval_deadline_at: "2026-01-04T12:00:00.000Z",
@@ -671,7 +678,7 @@ describe("listOrdersWithActivityBookingsPreview", () => {
     );
   });
 
-  it("filters out orders that do not have booking lines", async () => {
+  it("keeps orders that do not yet have booking lines", async () => {
     const order = baseOrder({ id: orderId });
 
     const ordersQuery: Record<string, unknown> = {
@@ -696,6 +703,47 @@ describe("listOrdersWithActivityBookingsPreview", () => {
 
     await expect(
       listOrdersWithActivityBookingsPreview(supabase as never),
-    ).resolves.toEqual([]);
+    ).resolves.toEqual([
+      {
+        ...order,
+        activity_bookings: [],
+      },
+    ]);
+  });
+
+  it("filters orders by orderId when provided", async () => {
+    const order = baseOrder({ id: orderId });
+    const ordersQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [order], error: null }),
+    };
+    const bookingsQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [], error: null }),
+    };
+
+    const supabase: Record<string, unknown> = {
+      from: vi
+        .fn()
+        .mockImplementationOnce(() => ordersQuery)
+        .mockImplementationOnce(() => bookingsQuery),
+      ...authUser(),
+    };
+
+    await expect(
+      listOrdersWithActivityBookingsPreview(supabase as never, {
+        orderId,
+      }),
+    ).resolves.toEqual([
+      {
+        ...order,
+        activity_bookings: [],
+      },
+    ]);
+    expect(ordersQuery.eq).toHaveBeenCalledWith("user_id", userId);
+    expect(ordersQuery.eq).toHaveBeenCalledWith("id", orderId);
   });
 });

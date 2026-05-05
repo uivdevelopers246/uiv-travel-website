@@ -6,6 +6,7 @@ export type Order = Database["public"]["Tables"]["orders"]["Row"];
 
 export type ActivityBookingWithPreview = ActivityBooking & {
   activity_title: string;
+  activity_image_url: string | null;
   slot_starts_at: string;
   slot_ends_at: string;
   approval_deadline_at: string | null;

@@ -179,6 +179,7 @@ export async function listCartLinesWithPreview(
     return lines.map((line) => ({
       ...line,
       activity_title: "",
+      activity_image_url: null,
       slot_starts_at: "",
       slot_ends_at: "",
       max_capacity: 0,
@@ -202,11 +203,14 @@ export async function listCartLinesWithPreview(
     ...new Set((slots ?? []).map((s) => s.activity_id)),
   ];
 
-  const titleByActivityId = new Map<string, string>();
+  const activityPreviewById = new Map<
+    string,
+    { title: string; image_url: string | null }
+  >();
   if (activityIds.length > 0) {
     const { data: activities, error: actError } = await supabase
       .from("activities")
-      .select("id, title")
+      .select("id, title, image_url")
       .eq("status", "published")
       .in("id", activityIds);
 
@@ -214,7 +218,10 @@ export async function listCartLinesWithPreview(
       throw cartServiceError("Could not load activities for cart", actError);
     }
     for (const a of activities ?? []) {
-      titleByActivityId.set(a.id, a.title);
+      activityPreviewById.set(a.id, {
+        title: a.title,
+        image_url: a.image_url,
+      });
     }
   }
 
@@ -229,12 +236,13 @@ export async function listCartLinesWithPreview(
     const maxCap = slot?.max_capacity ?? 0;
     const off = slot?.off_platform_participants ?? 0;
     const remaining = Math.max(0, maxCap - off - booked);
-    const activityTitle =
-      slot != null ? (titleByActivityId.get(slot.activity_id) ?? "") : "";
+    const activityPreview =
+      slot != null ? activityPreviewById.get(slot.activity_id) : undefined;
 
     return {
       ...line,
-      activity_title: activityTitle,
+      activity_title: activityPreview?.title ?? "",
+      activity_image_url: activityPreview?.image_url ?? null,
       slot_starts_at: slot?.starts_at ?? "",
       slot_ends_at: slot?.ends_at ?? "",
       max_capacity: maxCap,

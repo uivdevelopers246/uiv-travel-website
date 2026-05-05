@@ -330,12 +330,12 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
         <section className="rounded-[32px] bg-[#193059] px-6 py-8 text-white shadow-[0_30px_80px_rgba(25,48,89,0.18)] md:px-8">
           <div className="flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-[0.32em] text-[#8ec7ff]">
             <span>My Trip</span>
-            <span className="rounded-full bg-white/12 px-3 py-1 text-[11px] tracking-[0.24em] text-white">
+            <span className="rounded-full bg-white/12 px-5 py-2 text-xs tracking-[0.24em] text-white">
               Cart
             </span>
             <Link
               href="/my-trip/bookings"
-              className="rounded-full border border-white/15 px-3 py-1 text-[11px] tracking-[0.24em] text-white/78 transition-colors hover:bg-white/10"
+              className="rounded-full border border-white/15 px-5 py-2 text-xs tracking-[0.24em] text-white/78 transition-colors hover:bg-white/10"
             >
               Bookings
             </Link>
@@ -424,26 +424,44 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
                     key={line.id}
                     className="rounded-[28px] border border-[#d8e5f2] bg-white p-6 shadow-[0_20px_60px_rgba(25,48,89,0.08)]"
                   >
-                    <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
-                      <div className="space-y-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#407FC2]">
-                          Activity
-                        </p>
-                        <h2
-                          className="text-2xl font-bold text-[#193059]"
-                          style={{ fontFamily: "var(--font-playfair)" }}
-                        >
-                          {line.activity_title || "Untitled activity"}
-                        </h2>
-                        <p className="text-sm text-slate-600">
-                          {formatSlotDateTime(line.slot_starts_at, line.slot_ends_at)}
-                        </p>
-                        <p className="text-sm text-slate-600">
-                          Current booking: {formatParticipantsLabel(currentParticipants)}
-                        </p>
+                    <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="flex min-w-0 flex-1 gap-4">
+                        <div className="h-32 w-32 shrink-0 overflow-hidden rounded-[24px] bg-[linear-gradient(135deg,#dbe8f6_0%,#8ec7ff_48%,#193059_100%)] shadow-[0_18px_40px_rgba(25,48,89,0.12)]">
+                          {line.activity_image_url ? (
+                            <img
+                              src={line.activity_image_url}
+                              alt={line.activity_title || "Activity cover"}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-end bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.5),transparent_55%)] p-4 text-left">
+                              <span className="text-xs font-semibold uppercase tracking-[0.2em] text-white/90">
+                                Activity
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="min-w-0 space-y-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#407FC2]">
+                            Activity
+                          </p>
+                          <h2
+                            className="text-2xl font-bold text-[#193059]"
+                            style={{ fontFamily: "var(--font-playfair)" }}
+                          >
+                            {line.activity_title || "Untitled activity"}
+                          </h2>
+                          <p className="text-sm text-slate-600">
+                            {formatSlotDateTime(line.slot_starts_at, line.slot_ends_at)}
+                          </p>
+                          <p className="text-sm text-slate-600">
+                            Current booking: {formatParticipantsLabel(currentParticipants)}
+                          </p>
+                        </div>
                       </div>
 
-                      <div className="rounded-2xl bg-[#f4f8fc] px-4 py-3 text-left md:min-w-[180px]">
+                      <div className="rounded-2xl bg-[#f4f8fc] px-5 py-4 text-left lg:min-w-[200px]">
                         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
                           Line Total
                         </p>
@@ -465,13 +483,14 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
                           value={participants}
                           disabled={isBusy || checkoutLoading}
                           onChange={(event) => {
+                            const nextParticipants = normalizeParticipants(
+                              event.currentTarget.valueAsNumber,
+                              currentParticipants,
+                            );
                             setMessage(null);
                             setParticipantDrafts((current) => ({
                               ...current,
-                              [line.id]: normalizeParticipants(
-                                event.currentTarget.valueAsNumber,
-                                currentParticipants,
-                              ),
+                              [line.id]: nextParticipants,
                             }));
                           }}
                           className="w-full rounded-xl border border-[#c8d9ea] bg-white px-4 py-3 text-[#193059] outline-none transition-colors focus:border-[#407FC2] disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
@@ -539,7 +558,7 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
                 disabled={checkoutLoading || busyAction !== null}
                 className="mt-6 w-full rounded-full bg-gradient-to-r from-[#407FC2] to-[#193059] px-6 py-4 text-sm font-semibold text-white transition-all duration-300 hover:from-[#193059] hover:to-[#407FC2] disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-400"
               >
-                {checkoutLoading ? "Redirecting to Stripe..." : "Save payment method"}
+                {checkoutLoading ? "Redirecting to checkout..." : "Checkout"}
               </button>
             </aside>
           </div>

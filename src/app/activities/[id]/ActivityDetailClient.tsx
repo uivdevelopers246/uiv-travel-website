@@ -5,6 +5,10 @@ import { useEffect, useState } from "react";
 import { activityCategories } from "@/lib/activities/constants";
 import type { PublicSlotWithCapacity } from "@/lib/slots/types";
 import {
+  buildActivityDetailLoginRedirect,
+  getAddToCartSuccessMessage,
+} from "./cart-helpers";
+import {
   Breadcrumb,
   ImageGallery,
   ClockIcon,
@@ -88,10 +92,6 @@ function formatTimeRange(startsAt: string, endsAt: string) {
   return `${timeFormatter.format(new Date(startsAt))} - ${timeFormatter.format(new Date(endsAt))}`;
 }
 
-function formatParticipantLabel(count: number) {
-  return `${count} ${count === 1 ? "participant" : "participants"}`;
-}
-
 function formatRemainingLabel(remaining: number) {
   return `${remaining} ${remaining === 1 ? "spot" : "spots"} left`;
 }
@@ -150,6 +150,10 @@ async function fetchSlotsForActivity(activityId: string): Promise<PublicSlotWith
   }
 
   return payload as PublicSlotWithCapacity[];
+}
+
+function redirectToLogin(activityId: string) {
+  window.location.assign(buildActivityDetailLoginRedirect(activityId));
 }
 
 export function ActivityDetailClient({ activity, images }: Props) {
@@ -247,6 +251,11 @@ export function ActivityDetailClient({ activity, images }: Props) {
           participants,
         }),
       });
+      if (response.status === 401) {
+        redirectToLogin(activity.id);
+        return;
+      }
+
       const payload = await response.json().catch(() => null);
 
       if (!response.ok) {
@@ -257,9 +266,18 @@ export function ActivityDetailClient({ activity, images }: Props) {
         );
       }
 
+      const mergedParticipants =
+        payload && typeof payload === "object" && typeof payload.participants === "number"
+          ? payload.participants
+          : participants;
+
       setCartMessage({
         type: "success",
-        text: `Added ${formatParticipantLabel(participants)} to your cart for ${formatDateGroupLabel(slot.starts_at)}.`,
+        text: getAddToCartSuccessMessage({
+          requestedParticipants: participants,
+          mergedParticipants,
+          slotDateLabel: formatDateGroupLabel(slot.starts_at),
+        }),
       });
     } catch (error: unknown) {
       setCartMessage({
@@ -519,7 +537,7 @@ export function ActivityDetailClient({ activity, images }: Props) {
                       href="/cart"
                       className="inline-flex items-center justify-center rounded-full border border-emerald-300 bg-white px-4 py-2 text-sm font-semibold text-emerald-800 transition-colors hover:bg-emerald-100"
                     >
-                      Review cart
+                      Review cart and checkout
                     </Link>
                   ) : null}
                 </div>
@@ -631,13 +649,14 @@ export function ActivityDetailClient({ activity, images }: Props) {
                                     value={participants}
                                     disabled={isSoldOut || isSubmitting}
                                     onChange={(event) => {
+                                      const nextParticipants = clampParticipants(
+                                        event.currentTarget.valueAsNumber,
+                                        remaining,
+                                      );
                                       setCartMessage(null);
                                       setParticipantCounts((current) => ({
                                         ...current,
-                                        [slot.id]: clampParticipants(
-                                          event.currentTarget.valueAsNumber,
-                                          remaining,
-                                        ),
+                                        [slot.id]: nextParticipants,
                                       }));
                                     }}
                                     className="w-full rounded-2xl border border-[#c8d9ea] bg-white px-4 py-3 text-[#193059] outline-none transition-colors focus:border-[#407FC2] disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"

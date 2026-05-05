@@ -149,8 +149,7 @@ export async function createActivityBookingAfterPayment(
 ): Promise<ActivityBooking> {
   const discount_cents = input.discount_cents ?? 0;
   const status = input.status ?? "confirmed";
-
-  const { data, error } = await supabase.rpc("create_activity_booking_after_payment", {
+  const rpcInput = {
     p_slot_id: input.slot_id,
     p_activity_id: input.activity_id,
     p_user_id: input.user_id,
@@ -162,8 +161,13 @@ export async function createActivityBookingAfterPayment(
     p_discount_cents: discount_cents,
     p_total_cents: input.total_cents,
     p_status: status,
-    p_expires_at: input.expires_at ?? undefined,
-  });
+    p_expires_at: input.expires_at ?? null,
+  };
+
+  const { data, error } = await supabase.rpc(
+    "create_activity_booking_after_payment",
+    rpcInput as never,
+  );
 
   if (error) {
     throw bookingServiceError(

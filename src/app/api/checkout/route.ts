@@ -39,6 +39,11 @@ function handleCheckoutPostError(error: unknown): NextResponse {
   if (message === "Order not found") {
     return notFound(message);
   }
+  if (message === "STRIPE_SECRET_KEY environment variable is not set") {
+    return serverError(
+      "Checkout is not configured. Add STRIPE_SECRET_KEY to the server environment and try again.",
+    );
+  }
   return handleCartRouteError(error);
 }
 

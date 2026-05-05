@@ -186,8 +186,8 @@ export async function createCheckoutSetupSessionForOrder(
     mode: "setup",
     currency: order.currency,
     customer: stripeCustomerId,
-    success_url: `${base}/checkout/success`,
-    cancel_url: `${base}/checkout/cancel`,
+    success_url: `${base}/checkout/success?order_id=${encodeURIComponent(order.id)}`,
+    cancel_url: `${base}/checkout/cancel?order_id=${encodeURIComponent(order.id)}`,
     metadata: sessionMetadata,
     /** Ensures `setup_intent.succeeded` carries the same `metadata.order_id` as the Checkout Session. */
     setup_intent_data: {

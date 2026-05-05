@@ -341,7 +341,7 @@ export async function updateAvailabilitySlot(
     slotId,
   );
 
-  const payload: Record<string, unknown> = {};
+  const payload: Database["public"]["Tables"]["availability_slots"]["Update"] = {};
 
   if (input.max_capacity !== undefined) {
     if (!Number.isInteger(input.max_capacity) || input.max_capacity < 1) {

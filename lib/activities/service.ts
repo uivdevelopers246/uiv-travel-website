@@ -167,7 +167,7 @@ export async function updateActivity(
 ) {
     const userId = await getCurrentUserIdOrThrow(supabase);
 
-    const payload: Record<string, unknown> = {};
+    const payload: Database["public"]["Tables"]["activities"]["Update"] = {};
     if (input.title !== undefined) payload.title = input.title.trim();
     if (input.description !== undefined) payload.description = input.description;
     if (input.location !== undefined) payload.location = input.location;

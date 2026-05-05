@@ -179,8 +179,8 @@ describe("createCheckoutSetupSessionForOrder", () => {
     expect(createMock).toHaveBeenCalledWith(
       expect.objectContaining({
         mode: "setup",
-        success_url: "http://localhost:3000/checkout/success",
-        cancel_url: "http://localhost:3000/checkout/cancel",
+        success_url: "http://localhost:3000/checkout/success?order_id=order-xyz",
+        cancel_url: "http://localhost:3000/checkout/cancel?order_id=order-xyz",
         metadata: { order_id: "order-xyz", flow: "m4c_setup" },
         setup_intent_data: {
           metadata: { order_id: "order-xyz", flow: "m4c_setup" },

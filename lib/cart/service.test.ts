@@ -215,7 +215,13 @@ describe("listCartLinesWithPreview", () => {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       in: vi.fn().mockResolvedValue({
-        data: [{ id: activityId, title: "Kayak Tour" }],
+        data: [
+          {
+            id: activityId,
+            title: "Kayak Tour",
+            image_url: "https://example.com/kayak.jpg",
+          },
+        ],
         error: null,
       }),
     };
@@ -239,6 +245,7 @@ describe("listCartLinesWithPreview", () => {
     expect(rows[0]).toMatchObject({
       ...line,
       activity_title: "Kayak Tour",
+      activity_image_url: "https://example.com/kayak.jpg",
       slot_starts_at: "2026-04-06T12:00:00.000Z",
       slot_ends_at: "2026-04-06T14:00:00.000Z",
       max_capacity: 10,

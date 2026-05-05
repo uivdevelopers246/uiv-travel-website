@@ -216,14 +216,23 @@ function compareBookingsForDisplay(
 
 export async function listOrdersWithActivityBookingsPreview(
   supabase: SupabaseClient<Database>,
+  options?: { orderId?: string },
 ): Promise<OrderWithActivityBookingsPreview[]> {
   const userId = await requireAuthUserId(supabase);
 
-  const { data: orders, error: ordersError } = await supabase
+  let ordersQuery = supabase
     .from("orders")
     .select("*")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false });
+    .eq("user_id", userId);
+
+  if (options?.orderId) {
+    ordersQuery = ordersQuery.eq("id", options.orderId);
+  }
+
+  const { data: orders, error: ordersError } = await ordersQuery.order(
+    "created_at",
+    { ascending: false },
+  );
 
   if (ordersError) {
     throw orderServiceError("Could not list orders", ordersError);
@@ -249,7 +258,10 @@ export async function listOrdersWithActivityBookingsPreview(
   }
 
   if (!bookings || bookings.length === 0) {
-    return [];
+    return orders.map((order) => ({
+      ...order,
+      activity_bookings: [],
+    }));
   }
 
   const slotIds = [...new Set(bookings.map((booking) => booking.slot_id))];
@@ -277,11 +289,14 @@ export async function listOrdersWithActivityBookingsPreview(
     }
   }
 
-  const activityTitleById = new Map<string, string>();
+  const activityPreviewById = new Map<
+    string,
+    { title: string; image_url: string | null }
+  >();
   if (activityIds.length > 0) {
     const { data: activities, error: activitiesError } = await supabase
       .from("activities")
-      .select("id, title")
+      .select("id, title, image_url")
       .in("id", activityIds);
 
     if (activitiesError) {
@@ -289,7 +304,10 @@ export async function listOrdersWithActivityBookingsPreview(
     }
 
     for (const activity of activities ?? []) {
-      activityTitleById.set(activity.id, activity.title);
+      activityPreviewById.set(activity.id, {
+        title: activity.title,
+        image_url: activity.image_url,
+      });
     }
   }
 
@@ -301,10 +319,11 @@ export async function listOrdersWithActivityBookingsPreview(
     }
 
     const slot = slotMap.get(booking.slot_id);
+    const activityPreview = activityPreviewById.get(booking.activity_id);
     const preview: ActivityBookingWithPreview = {
       ...booking,
-      activity_title:
-        activityTitleById.get(booking.activity_id) ?? "Activity unavailable",
+      activity_title: activityPreview?.title ?? "Activity unavailable",
+      activity_image_url: activityPreview?.image_url ?? null,
       slot_starts_at: slot?.starts_at ?? "",
       slot_ends_at: slot?.ends_at ?? "",
       approval_deadline_at: getApprovalDeadlineAt(booking),
@@ -321,8 +340,7 @@ export async function listOrdersWithActivityBookingsPreview(
       activity_bookings: (bookingsByOrderId.get(order.id) ?? []).sort(
         compareBookingsForDisplay,
       ),
-    }))
-    .filter((order) => order.activity_bookings.length > 0);
+    }));
 }
 
 export async function updateOrderStatus(
