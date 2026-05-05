@@ -175,7 +175,7 @@ describe("listPublicSlotsForActivity", () => {
     expect(supabase.from).not.toHaveBeenCalled();
   });
 
-  it("returns bookable slots with capacity; excludes full slots", async () => {
+  it("returns upcoming slots with computed capacity, including sold-out ones", async () => {
     vi.mocked(getActivityById).mockResolvedValueOnce(publicActivity as any);
     const now = new Date("2026-04-06T12:00:00.000Z");
     const { supabase } = makePublicSlotsQueries(
@@ -204,12 +204,18 @@ describe("listPublicSlotsForActivity", () => {
       now,
     });
 
-    expect(rows).toHaveLength(1);
+    expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
       id: "slot-open",
       off_platform_participants: 0,
       booked_participants: 3,
       remaining_capacity: 7,
+    });
+    expect(rows[1]).toMatchObject({
+      id: "slot-full",
+      off_platform_participants: 0,
+      booked_participants: 5,
+      remaining_capacity: 0,
     });
   });
 
@@ -622,6 +628,61 @@ describe("updateAvailabilitySlot", () => {
     );
     expect(row.max_capacity).toBe(12);
     expect(updateChain.update).toHaveBeenCalledWith({ max_capacity: 12 });
+  });
+
+  it("updates off_platform_participants when capacity stays valid", async () => {
+    const loadQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi
+        .fn()
+        .mockResolvedValue({ data: baseSlot, error: null }),
+    };
+    const vendorsQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({
+        data: { id: vendorId },
+        error: null,
+      }),
+    };
+
+    const updateChain: Record<string, unknown> = {
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn(),
+    };
+    const updated = { ...baseSlot, off_platform_participants: 3 };
+    updateChain.single = vi
+      .fn()
+      .mockResolvedValue({ data: updated, error: null });
+
+    let slotsCalls = 0;
+    const supabase = {
+      ...authAndVendorSupabase(),
+      from: vi.fn((table: string) => {
+        if (table === "vendors") return vendorsQuery;
+        if (table === "availability_slots") {
+          slotsCalls += 1;
+          return slotsCalls === 1 ? loadQuery : updateChain;
+        }
+        return {};
+      }),
+      rpc: rpcSlotBookedMock({ "slot-1": 2 }),
+    };
+
+    const row = await updateAvailabilitySlot(
+      supabase as any,
+      activityId,
+      "slot-1",
+      { off_platform_participants: 3 },
+    );
+
+    expect(row.off_platform_participants).toBe(3);
+    expect(updateChain.update).toHaveBeenCalledWith({
+      off_platform_participants: 3,
+    });
   });
 
   it("recomputes ends_at when only starts_at changes", async () => {

@@ -17,7 +17,7 @@ export type UpdateSlotInput = {
   off_platform_participants?: number;
 };
 
-/** Public list entries after filtering to bookable slots (`remaining_capacity > 0`). */
+/** Public list entries for upcoming public slots with computed capacity. */
 export type PublicSlotWithCapacity = Pick<
   AvailabilitySlot,
   "id" | "activity_id" | "starts_at" | "ends_at" | "max_capacity" | "off_platform_participants"

@@ -70,7 +70,6 @@ export async function POST() {
     }
     return NextResponse.json({
       url: session.url,
-      order_id: order.id,
     });
   } catch (error: unknown) {
     return handleCheckoutPostError(error);

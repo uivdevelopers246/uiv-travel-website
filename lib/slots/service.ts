@@ -119,7 +119,7 @@ export type ListPublicSlotsOptions = {
 };
 
 /**
- * Lists bookable upcoming slots for a **published** activity with remaining capacity.
+ * Lists upcoming public slots for a **published** activity with computed remaining capacity.
  * Uses **`slot_platform_participants_booked`** so totals include all platform bookings under RLS.
  */
 export async function listPublicSlotsForActivity(
@@ -155,18 +155,16 @@ export async function listPublicSlotsForActivity(
     const booked = sums.get(s.id) ?? 0;
     const off = s.off_platform_participants ?? 0;
     const remaining = s.max_capacity - off - booked;
-    if (remaining > 0) {
-      result.push({
-        id: s.id,
-        activity_id: s.activity_id,
-        starts_at: s.starts_at,
-        ends_at: s.ends_at,
-        max_capacity: s.max_capacity,
-        off_platform_participants: off,
-        booked_participants: booked,
-        remaining_capacity: remaining,
-      });
-    }
+    result.push({
+      id: s.id,
+      activity_id: s.activity_id,
+      starts_at: s.starts_at,
+      ends_at: s.ends_at,
+      max_capacity: s.max_capacity,
+      off_platform_participants: off,
+      booked_participants: booked,
+      remaining_capacity: remaining,
+    });
   }
 
   return result;

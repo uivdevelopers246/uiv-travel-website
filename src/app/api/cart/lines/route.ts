@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { addOrMergeActivityLine } from "@/lib/cart/service";
+import {
+  addOrMergeActivityLine,
+  listCartLinesWithPreview,
+} from "@/lib/cart/service";
 import { handleCartRouteError } from "@/api-shared/cart-route-errors";
 import {
   badRequest,
@@ -16,6 +19,21 @@ function parsePositiveIntegerParticipants(value: unknown): number | null {
   return value;
 }
 
+export async function GET() {
+  const supabase = await createClient();
+  const roleResult = await requireRole(supabase, ["user", "vendor", "admin"]);
+  if ("response" in roleResult) {
+    return roleResult.response;
+  }
+
+  try {
+    const lines = await listCartLinesWithPreview(supabase);
+    return NextResponse.json(lines);
+  } catch (error: unknown) {
+    return handleCartRouteError(error);
+  }
+}
+
 export async function POST(req: Request) {
   const supabase = await createClient();
   const roleResult = await requireRole(supabase, ["user", "vendor", "admin"]);
@@ -29,9 +47,10 @@ export async function POST(req: Request) {
   }
   const { body } = parsedBody;
 
-  const slotIdRaw = body.slotId;
+  const slotIdRaw =
+    typeof body.slot_id === "string" ? body.slot_id : body.slotId;
   if (typeof slotIdRaw !== "string") {
-    return badRequest("slotId must be a UUID");
+    return badRequest("slot_id must be a UUID");
   }
   const slotParsed = parseUuidParam(slotIdRaw, "slot");
   if ("response" in slotParsed) {
