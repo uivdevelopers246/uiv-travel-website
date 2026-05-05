@@ -9,6 +9,16 @@ import {
   getAddToCartSuccessMessage,
 } from "./cart-helpers";
 import {
+  clampParticipants,
+  formatSlotDateTimeLabel,
+  formatTimeRange,
+  getAvailabilitySummary,
+  getRemainingCapacity,
+  groupSlotsByDate,
+  isSlotSoldOut,
+  shouldRefreshAvailabilityAfterCartError,
+} from "./booking-helpers";
+import {
   Breadcrumb,
   ImageGallery,
   ClockIcon,
@@ -47,89 +57,10 @@ type Props = {
   images: GalleryImage[];
 };
 
-type SlotGroup = {
-  key: string;
-  label: string;
-  slots: PublicSlotWithCapacity[];
-};
-
 type CartMessage = {
   type: "success" | "error";
   text: string;
 };
-
-const dateGroupFormatter = new Intl.DateTimeFormat("en-US", {
-  weekday: "long",
-  month: "long",
-  day: "numeric",
-  year: "numeric",
-});
-
-const dateKeyFormatter = new Intl.DateTimeFormat("en-CA", {
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-const timeFormatter = new Intl.DateTimeFormat("en-US", {
-  hour: "numeric",
-  minute: "2-digit",
-});
-
-function getRemainingCapacity(slot: PublicSlotWithCapacity) {
-  return slot.max_capacity - slot.off_platform_participants - slot.booked_participants;
-}
-
-function formatDateGroupLabel(iso: string) {
-  return dateGroupFormatter.format(new Date(iso));
-}
-
-function formatDateGroupKey(iso: string) {
-  return dateKeyFormatter.format(new Date(iso));
-}
-
-function formatTimeRange(startsAt: string, endsAt: string) {
-  return `${timeFormatter.format(new Date(startsAt))} - ${timeFormatter.format(new Date(endsAt))}`;
-}
-
-function formatRemainingLabel(remaining: number) {
-  return `${remaining} ${remaining === 1 ? "spot" : "spots"} left`;
-}
-
-function groupSlotsByDate(slots: PublicSlotWithCapacity[]): SlotGroup[] {
-  const groups = new Map<string, SlotGroup>();
-  const orderedGroups: SlotGroup[] = [];
-
-  for (const slot of slots) {
-    const key = formatDateGroupKey(slot.starts_at);
-    let group = groups.get(key);
-    if (!group) {
-      group = {
-        key,
-        label: formatDateGroupLabel(slot.starts_at),
-        slots: [],
-      };
-      groups.set(key, group);
-      orderedGroups.push(group);
-    }
-    group.slots.push(slot);
-  }
-
-  return orderedGroups;
-}
-
-function clampParticipants(value: number, remaining: number) {
-  if (!Number.isFinite(value)) {
-    return 1;
-  }
-
-  const next = Math.trunc(value);
-  if (remaining < 1) {
-    return 1;
-  }
-
-  return Math.min(Math.max(next, 1), remaining);
-}
 
 async function fetchSlotsForActivity(activityId: string): Promise<PublicSlotWithCapacity[]> {
   const response = await fetch(`/api/activities/${activityId}/slots`, {
@@ -156,10 +87,110 @@ function redirectToLogin(activityId: string) {
   window.location.assign(buildActivityDetailLoginRedirect(activityId));
 }
 
+type ParticipantStepperProps = {
+  value: number;
+  max: number;
+  disabled?: boolean;
+  onChange: (value: number) => void;
+};
+
+function ParticipantStepper({
+  value,
+  max,
+  disabled = false,
+  onChange,
+}: ParticipantStepperProps) {
+  const canDecrease = !disabled && value > 1;
+  const canIncrease = !disabled && value < max;
+  const dividerClass = disabled ? "border-slate-200" : "border-[#c8d9ea]";
+
+  return (
+    <div
+      className={`flex items-center rounded-2xl border ${
+        disabled
+          ? "border-slate-200 bg-slate-100 text-slate-400"
+          : "border-[#c8d9ea] bg-white text-[#193059]"
+      }`}
+    >
+      <button
+        type="button"
+        aria-label="Decrease participants"
+        disabled={!canDecrease}
+        onClick={() => onChange(value - 1)}
+        className="flex h-12 w-12 items-center justify-center rounded-l-2xl text-lg font-semibold transition-colors hover:bg-[#eef5fb] disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+      >
+        -
+      </button>
+      <div
+        className={`flex min-w-[3.5rem] items-center justify-center border-x px-3 text-base font-semibold ${dividerClass}`}
+      >
+        {value}
+      </div>
+      <button
+        type="button"
+        aria-label="Increase participants"
+        disabled={!canIncrease}
+        onClick={() => onChange(value + 1)}
+        className="flex h-12 w-12 items-center justify-center rounded-r-2xl text-lg font-semibold transition-colors hover:bg-[#eef5fb] disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
+function LoadingSlotGroups() {
+  return (
+    <div className="mt-8 space-y-6 animate-pulse">
+      {[0, 1].map((group) => (
+        <div
+          key={group}
+          className="rounded-[32px] border border-[#d8e5f2] bg-white/90 p-5 shadow-[0_18px_45px_rgba(25,48,89,0.06)] md:p-6"
+        >
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-3">
+              <div className="h-4 w-24 rounded-full bg-[#dbe7f2]" />
+              <div className="h-8 w-64 rounded-full bg-[#e7eff7]" />
+            </div>
+            <div className="flex gap-2">
+              <div className="h-10 w-28 rounded-full bg-[#eef5fb]" />
+              <div className="h-10 w-32 rounded-full bg-[#eef5fb]" />
+            </div>
+          </div>
+
+          <div className="mt-6 space-y-4">
+            {[0, 1].map((slot) => (
+              <div
+                key={slot}
+                className="rounded-[28px] border border-[#e5eef7] bg-[#fbfdff] p-5"
+              >
+                <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+                  <div className="space-y-3">
+                    <div className="h-7 w-48 rounded-full bg-[#e7eff7]" />
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="h-20 rounded-2xl bg-[#f3f8fc]" />
+                      <div className="h-20 rounded-2xl bg-[#f3f8fc]" />
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[minmax(0,168px)_minmax(0,200px)]">
+                    <div className="h-20 rounded-2xl bg-[#f3f8fc]" />
+                    <div className="h-14 rounded-2xl bg-[#dbe7f2]" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ActivityDetailClient({ activity, images }: Props) {
   const [slots, setSlots] = useState<PublicSlotWithCapacity[]>([]);
   const [participantCounts, setParticipantCounts] = useState<Record<string, number>>({});
   const [slotsLoading, setSlotsLoading] = useState(true);
+  const [slotsRefreshing, setSlotsRefreshing] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [addingSlotId, setAddingSlotId] = useState<string | null>(null);
@@ -180,6 +211,42 @@ export function ActivityDetailClient({ activity, images }: Props) {
     { label: activity.title },
   ];
   const slotGroups = groupSlotsByDate(slots);
+  const nextAvailableSlot = slots.find((slot) => !isSlotSoldOut(slot)) ?? null;
+  const nextAvailableLabel = nextAvailableSlot
+    ? formatSlotDateTimeLabel(nextAvailableSlot.starts_at, nextAvailableSlot.ends_at)
+    : "No upcoming departures right now";
+  const derivedMaxGroupSize = slots.reduce(
+    (currentMax, slot) => Math.max(currentMax, slot.max_capacity),
+    0,
+  );
+  const maxGroupSize = activity.max_capacity ?? (derivedMaxGroupSize > 0 ? derivedMaxGroupSize : null);
+
+  function applySlotState(nextSlots: PublicSlotWithCapacity[]) {
+    setSlots(nextSlots);
+    setParticipantCounts((current) => {
+      const next: Record<string, number> = {};
+      for (const slot of nextSlots) {
+        const remaining = getRemainingCapacity(slot);
+        next[slot.id] = clampParticipants(current[slot.id] ?? 1, remaining);
+      }
+      return next;
+    });
+  }
+
+  async function refreshAvailabilityInBackground() {
+    setSlotsRefreshing(true);
+
+    try {
+      const nextSlots = await fetchSlotsForActivity(activity.id);
+      applySlotState(nextSlots);
+      setSlotsError(null);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setSlotsRefreshing(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -194,15 +261,7 @@ export function ActivityDetailClient({ activity, images }: Props) {
           return;
         }
 
-        setSlots(nextSlots);
-        setParticipantCounts((current) => {
-          const next: Record<string, number> = {};
-          for (const slot of nextSlots) {
-            const remaining = getRemainingCapacity(slot);
-            next[slot.id] = clampParticipants(current[slot.id] ?? 1, remaining);
-          }
-          return next;
-        });
+        applySlotState(nextSlots);
       } catch (error: unknown) {
         if (!active) {
           return;
@@ -271,21 +330,36 @@ export function ActivityDetailClient({ activity, images }: Props) {
           ? payload.participants
           : participants;
 
+      await refreshAvailabilityInBackground();
+
       setCartMessage({
         type: "success",
         text: getAddToCartSuccessMessage({
           requestedParticipants: participants,
           mergedParticipants,
-          slotDateLabel: formatDateGroupLabel(slot.starts_at),
+          slotDateTimeLabel: formatSlotDateTimeLabel(slot.starts_at, slot.ends_at),
         }),
       });
     } catch (error: unknown) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not add this slot to your cart.";
+
+      if (shouldRefreshAvailabilityAfterCartError(message)) {
+        const refreshed = await refreshAvailabilityInBackground();
+        setCartMessage({
+          type: "error",
+          text: refreshed
+            ? "Availability changed while you were booking. Review the latest departures and try again."
+            : "Availability changed while you were booking. We could not refresh the latest departures right now.",
+        });
+        return;
+      }
+
       setCartMessage({
         type: "error",
-        text:
-          error instanceof Error
-            ? error.message
-            : "Could not add this slot to your cart.",
+        text: message,
       });
     } finally {
       setAddingSlotId(null);
@@ -486,39 +560,95 @@ export function ActivityDetailClient({ activity, images }: Props) {
             id="activity-availability"
             className="mt-6 rounded-[36px] border border-[#d9e6f1] bg-[linear-gradient(180deg,#ffffff_0%,#f7fbff_100%)] p-6 shadow-[0_28px_80px_rgba(25,48,89,0.1)] md:p-8"
           >
-            <div className="flex flex-wrap items-start justify-between gap-5">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#407FC2]">
-                  Availability
-                </p>
-                <h2
-                  className="mt-3 text-3xl font-bold text-[#193059]"
-                  style={{ fontFamily: "var(--font-playfair)" }}
-                >
-                  Choose your time slot
-                </h2>
-                <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
-                  Pick a date, choose how many participants are joining, then add the slot to your cart.
-                </p>
-              </div>
-
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
-                <div className="rounded-[24px] bg-[#193059] px-5 py-4 text-white shadow-[0_18px_40px_rgba(25,48,89,0.18)]">
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/65">
-                    Price
+            <div className="flex flex-col gap-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#407FC2]">
+                    Availability
                   </p>
-                  <p className="mt-2 text-2xl font-bold">
-                    {activity.price_per_person !== null
-                      ? `$${activity.price_per_person} / person`
-                      : "Price on request"}
+                  <h2
+                    className="mt-3 text-3xl font-bold text-[#193059]"
+                    style={{ fontFamily: "var(--font-playfair)" }}
+                  >
+                    Choose your time slot
+                  </h2>
+                  <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
+                    Scan the next bookable departures, set your participant count, and add a slot to your cart when it feels right.
                   </p>
                 </div>
-                <Link
-                  href="/cart"
-                  className="inline-flex items-center justify-center rounded-[24px] border border-[#193059] bg-white px-5 py-4 text-sm font-semibold text-[#193059] transition-colors hover:bg-[#193059] hover:text-white"
-                >
-                  View cart
-                </Link>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  {slotsRefreshing && !slotsLoading ? (
+                    <span className="inline-flex rounded-full border border-[#c8d9ea] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      Refreshing live availability
+                    </span>
+                  ) : null}
+                  <Link
+                    href="/cart"
+                    className="inline-flex items-center justify-center rounded-full border border-[#193059] bg-white px-5 py-3 text-sm font-semibold text-[#193059] transition-colors hover:bg-[#193059] hover:text-white"
+                  >
+                    View cart
+                  </Link>
+                </div>
+              </div>
+
+              <div className="grid gap-4 rounded-[30px] border border-[#d8e5f2] bg-white/90 p-5 shadow-[0_18px_45px_rgba(25,48,89,0.06)] xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)]">
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-[24px] border border-[#dbe7f2] bg-[#f7fbff] px-4 py-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                      Next available
+                    </p>
+                    <p className="mt-2 text-sm font-semibold leading-6 text-[#193059]">
+                      {nextAvailableLabel}
+                    </p>
+                  </div>
+                  <div className="rounded-[24px] border border-[#dbe7f2] bg-[#f7fbff] px-4 py-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                      Max group size
+                    </p>
+                    <p className="mt-2 text-sm font-semibold leading-6 text-[#193059]">
+                      {maxGroupSize !== null
+                        ? `Up to ${maxGroupSize} guests per departure`
+                        : "Shared capacity shown per departure"}
+                    </p>
+                  </div>
+                  <div className="rounded-[24px] border border-[#dbe7f2] bg-[#f7fbff] px-4 py-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                      How booking works
+                    </p>
+                    <p className="mt-2 text-sm font-semibold leading-6 text-[#193059]">
+                      Add a departure to your cart, save payment details at checkout, and wait for vendor approval before any charge is captured.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3 rounded-[26px] bg-[#193059] p-5 text-white shadow-[0_18px_40px_rgba(25,48,89,0.18)]">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/65">
+                      Price
+                    </p>
+                    <p className="mt-2 text-2xl font-bold">
+                      {activity.price_per_person !== null
+                        ? `$${activity.price_per_person} / person`
+                        : "Price on request"}
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-white/72">
+                      Participant counts stay editable in your cart before checkout.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      document
+                        .getElementById("activity-availability-list")
+                        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
+                    className="inline-flex items-center justify-center rounded-full bg-[#FBCA1A] px-5 py-3 text-sm font-semibold text-[#193059] transition-colors hover:bg-[#f0bf10]"
+                  >
+                    Browse departures
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -545,42 +675,93 @@ export function ActivityDetailClient({ activity, images }: Props) {
             )}
 
             {slotsLoading ? (
-              <div className="mt-6 rounded-[28px] border border-[#d8e5f2] bg-white px-5 py-7 text-sm text-slate-600">
-                Loading available slots...
-              </div>
+              <LoadingSlotGroups />
             ) : slotsError ? (
-              <div className="mt-6 rounded-[28px] border border-rose-200 bg-rose-50 p-5">
-                <p className="text-sm text-rose-700">{slotsError}</p>
+              <div className="mt-8 rounded-[30px] border border-rose-200 bg-[linear-gradient(180deg,#fff7f7_0%,#ffffff_100%)] p-6 shadow-[0_18px_45px_rgba(190,24,24,0.08)]">
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-rose-500">
+                  Availability unavailable
+                </p>
+                <h3
+                  className="mt-3 text-2xl font-bold text-[#193059]"
+                  style={{ fontFamily: "var(--font-playfair)" }}
+                >
+                  We couldn&apos;t load departures right now
+                </h3>
+                <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
+                  {slotsError} Retry to pull the latest departures and capacity from the activity schedule.
+                </p>
                 <button
                   type="button"
                   onClick={() => setReloadToken((value) => value + 1)}
-                  className="mt-3 inline-flex rounded-full border border-rose-300 px-4 py-2 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-100"
+                  className="mt-5 inline-flex rounded-full border border-rose-300 px-5 py-3 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-100"
                 >
-                  Retry
+                  Retry availability
                 </button>
               </div>
             ) : slotGroups.length === 0 ? (
-              <div className="mt-6 rounded-[28px] border border-[#d8e5f2] bg-white px-5 py-7 text-sm text-slate-600">
-                No upcoming slots are available right now.
+              <div className="mt-8 rounded-[30px] border border-[#d8e5f2] bg-white p-8 text-center shadow-[0_18px_45px_rgba(25,48,89,0.06)]">
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#407FC2]">
+                  No departures listed
+                </p>
+                <h3
+                  className="mt-3 text-2xl font-bold text-[#193059]"
+                  style={{ fontFamily: "var(--font-playfair)" }}
+                >
+                  No upcoming slots are available right now
+                </h3>
+                <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-slate-600">
+                  This activity does not have bookable departures on the schedule yet. Check back later or keep browsing other experiences while the host updates availability.
+                </p>
+                <Link
+                  href="/vacation-planning"
+                  className="mt-6 inline-flex rounded-full bg-gradient-to-r from-[#407FC2] to-[#193059] px-6 py-3 text-sm font-semibold text-white transition-all duration-300 hover:from-[#193059] hover:to-[#407FC2]"
+                >
+                  Explore more activities
+                </Link>
               </div>
             ) : (
-              <div className="mt-8 space-y-8">
+              <div id="activity-availability-list" className="mt-8 space-y-6">
                 {slotGroups.map((group) => (
-                  <div key={group.key}>
-                    <div className="flex items-center gap-3">
-                      <span className="h-10 w-1 rounded-full bg-[#FBCA1A]" />
-                      <h3
-                        className="text-2xl font-bold text-[#193059]"
-                        style={{ fontFamily: "var(--font-playfair)" }}
-                      >
-                        {group.label}
-                      </h3>
+                  <article
+                    key={group.key}
+                    className="rounded-[32px] border border-[#d8e5f2] bg-white/92 p-5 shadow-[0_18px_45px_rgba(25,48,89,0.06)] md:p-6"
+                  >
+                    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#407FC2]">
+                          Departure day
+                        </p>
+                        <h3
+                          className="mt-2 text-2xl font-bold text-[#193059]"
+                          style={{ fontFamily: "var(--font-playfair)" }}
+                        >
+                          {group.label}
+                        </h3>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <span className="inline-flex rounded-full border border-[#d8e5f2] bg-[#f7fbff] px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                          {group.departureCount} {group.departureCount === 1 ? "departure" : "departures"}
+                        </span>
+                        <span
+                          className={`inline-flex rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] ${
+                            group.soldOut
+                              ? "bg-rose-100 text-rose-700"
+                              : "border border-emerald-200 bg-emerald-50 text-emerald-700"
+                          }`}
+                        >
+                          {group.soldOut
+                            ? "Sold out for this day"
+                            : `${group.availableCount} bookable now`}
+                        </span>
+                      </div>
                     </div>
 
-                    <div className="mt-4 grid gap-4">
+                    <div className="mt-6 grid gap-4">
                       {group.slots.map((slot) => {
                         const remaining = getRemainingCapacity(slot);
-                        const isSoldOut = remaining < 1;
+                        const isSoldOut = isSlotSoldOut(slot);
+                        const availability = getAvailabilitySummary(slot);
                         const participants = clampParticipants(
                           participantCounts[slot.id] ?? 1,
                           remaining,
@@ -590,84 +771,122 @@ export function ActivityDetailClient({ activity, images }: Props) {
                         return (
                           <article
                             key={slot.id}
-                            className="rounded-[28px] border border-[#d8e5f2] bg-white p-5 shadow-[0_18px_45px_rgba(25,48,89,0.06)]"
+                            className={`rounded-[28px] border p-5 shadow-[0_18px_45px_rgba(25,48,89,0.06)] ${
+                              isSoldOut
+                                ? "border-slate-200 bg-[#f8fafc]"
+                                : "border-[#d8e5f2] bg-white"
+                            }`}
                           >
-                            <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+                            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
                               <div className="min-w-0 space-y-3">
                                 <div className="flex flex-wrap items-center gap-3">
-                                  <p className="text-2xl font-bold text-[#193059]">
+                                  <p
+                                    className={`text-2xl font-bold ${
+                                      isSoldOut ? "text-slate-500" : "text-[#193059]"
+                                    }`}
+                                  >
                                     {formatTimeRange(slot.starts_at, slot.ends_at)}
                                   </p>
                                   <span
                                     className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${
-                                      isSoldOut
+                                      availability.tone === "sold-out"
                                         ? "bg-rose-100 text-rose-700"
-                                        : "bg-emerald-100 text-emerald-700"
+                                        : availability.tone === "low"
+                                          ? "bg-amber-100 text-amber-800"
+                                          : "bg-emerald-100 text-emerald-700"
                                     }`}
                                   >
-                                    {isSoldOut ? "Sold Out" : formatRemainingLabel(remaining)}
+                                    {availability.badge}
                                   </span>
                                 </div>
 
                                 <div className="grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
-                                  <p className="rounded-2xl bg-[#f5f9fc] px-4 py-3">
+                                  <div className="rounded-2xl bg-[#f5f9fc] px-4 py-3">
                                     <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
                                       Time Window
                                     </span>
                                     <span className="mt-2 block font-medium text-[#193059]">
-                                      <time dateTime={slot.starts_at}>
-                                        Starts {timeFormatter.format(new Date(slot.starts_at))}
-                                      </time>
-                                      {"  "}
-                                      <time dateTime={slot.ends_at}>
-                                        Ends {timeFormatter.format(new Date(slot.ends_at))}
-                                      </time>
+                                      {formatTimeRange(slot.starts_at, slot.ends_at)}
                                     </span>
-                                  </p>
+                                  </div>
 
-                                  <p className="rounded-2xl bg-[#f5f9fc] px-4 py-3">
+                                  <div className="rounded-2xl bg-[#f5f9fc] px-4 py-3">
                                     <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
                                       Capacity
                                     </span>
                                     <span className="mt-2 block font-medium text-[#193059]">
-                                      {remaining} of {slot.max_capacity} spots remain
+                                      {availability.detail}
                                     </span>
-                                  </p>
+                                  </div>
                                 </div>
+
+                                <p
+                                  className={`text-sm leading-6 ${
+                                    isSoldOut ? "text-slate-500" : "text-slate-600"
+                                  }`}
+                                >
+                                  {isSoldOut
+                                    ? "This departure is fully booked right now. Try another time on this date or check back later for new capacity."
+                                    : "Choose participants first, then add this departure to your cart for checkout later."}
+                                </p>
                               </div>
 
-                              <div className="grid gap-3 sm:grid-cols-[minmax(0,150px)_minmax(0,190px)] sm:items-end">
-                                <label className="block">
-                                  <span className="mb-2 block text-sm font-semibold text-[#193059]">
-                                    Participants
-                                  </span>
-                                  <input
-                                    type="number"
-                                    min={1}
-                                    max={Math.max(1, remaining)}
-                                    step={1}
-                                    value={participants}
-                                    disabled={isSoldOut || isSubmitting}
-                                    onChange={(event) => {
-                                      const nextParticipants = clampParticipants(
-                                        event.currentTarget.valueAsNumber,
-                                        remaining,
-                                      );
-                                      setCartMessage(null);
-                                      setParticipantCounts((current) => ({
-                                        ...current,
-                                        [slot.id]: nextParticipants,
-                                      }));
-                                    }}
-                                    className="w-full rounded-2xl border border-[#c8d9ea] bg-white px-4 py-3 text-[#193059] outline-none transition-colors focus:border-[#407FC2] disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
-                                  />
-                                </label>
+                              <div className="w-full max-w-full lg:max-w-[320px]">
+                                <div
+                                  className={`rounded-[26px] border p-4 ${
+                                    isSoldOut
+                                      ? "border-slate-200 bg-white/70"
+                                      : "border-[#dbe7f2] bg-[#fbfdff]"
+                                  }`}
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                                        Participants
+                                      </p>
+                                      <p className="mt-2 text-sm font-semibold text-[#193059]">
+                                        {isSoldOut
+                                          ? "Sold out for now"
+                                          : `Book up to ${remaining} ${remaining === 1 ? "spot" : "spots"}`}
+                                      </p>
+                                    </div>
+                                    {!isSoldOut && activity.price_per_person !== null ? (
+                                      <div className="rounded-full bg-[#eef5fb] px-3 py-1 text-xs font-semibold text-[#193059]">
+                                        ${activity.price_per_person} each
+                                      </div>
+                                    ) : null}
+                                  </div>
+
+                                  <div className="mt-4 flex flex-col gap-3">
+                                    <ParticipantStepper
+                                      value={participants}
+                                      max={Math.max(1, remaining)}
+                                      disabled={isSoldOut || isSubmitting}
+                                      onChange={(nextParticipants) => {
+                                        setCartMessage(null);
+                                        setParticipantCounts((current) => ({
+                                          ...current,
+                                          [slot.id]: clampParticipants(
+                                            nextParticipants,
+                                            remaining,
+                                          ),
+                                        }));
+                                      }}
+                                    />
+
+                                    <p className="text-xs leading-5 text-slate-500">
+                                      {isSoldOut
+                                        ? "This departure cannot be booked until new capacity is added."
+                                        : `${availability.detail}. You can adjust this again from your cart before checkout.`}
+                                    </p>
+                                  </div>
+                                </div>
 
                                 <button
                                   type="button"
                                   onClick={() => void handleAddToCart(slot)}
                                   disabled={isSoldOut || isSubmitting}
-                                  className="rounded-2xl bg-[#193059] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#407FC2] disabled:cursor-not-allowed disabled:bg-slate-300"
+                                  className="mt-3 w-full rounded-2xl bg-[#193059] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#407FC2] disabled:cursor-not-allowed disabled:bg-slate-300"
                                 >
                                   {isSoldOut
                                     ? "Sold Out"
@@ -681,7 +900,7 @@ export function ActivityDetailClient({ activity, images }: Props) {
                         );
                       })}
                     </div>
-                  </div>
+                  </article>
                 ))}
               </div>
             )}
