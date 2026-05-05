@@ -9,6 +9,9 @@ import { createPublicClient } from "@/lib/supabase/public";
 
 export const revalidate = 300;
 
+const HERO_TEXT_HIGHLIGHT =
+  "0 0 18px rgba(255,255,255,0.95), 0 0 36px rgba(255,255,255,0.7)";
+
 const HOME_ACTIVITY_SELECT =
   "id, title, description, location, category, duration_hours, price_per_person, max_capacity, image_url, is_featured, vendors(name)" as const;
 const HOME_ACCOMMODATION_SELECT =
@@ -94,8 +97,8 @@ export default async function Home() {
       <section className="relative flex min-h-[90vh] items-center justify-center overflow-hidden max-[1249px]:min-h-[68vh] max-[1249px]:items-start max-[1249px]:pt-28">
         <div className="absolute inset-0">
           <Image
-            src="/images/hero/LightiningOcean.jpeg"
-            alt="Lightning ocean"
+            src="/images/hero/RockBeach.jpeg"
+            alt="Rock beach"
             fill
             priority
             className="object-cover object-top brightness-110 contrast-110"
@@ -110,24 +113,34 @@ export default async function Home() {
           >
             <span className="text-[#FBCA1A]">Your Kind</span>
             <br />
-            <span className="font-bold text-white">of Trip</span>
+            <span className="font-bold text-white" style={{ textShadow: "none" }}>
+              of Trip
+            </span>
           </h1>
 
-          <p
-            className="mx-auto mb-8 max-w-3xl text-lg leading-relaxed text-white/90 sm:mb-10 sm:text-xl md:mb-12 md:text-2xl"
-            style={{ fontFamily: "var(--font-source-sans)" }}
-          >
-            Combining local insights and AI innovation, UnitedIV redefines how
-            travelers plan and experience Barbados
-          </p>
+          <div className="mx-auto inline-flex max-w-3xl flex-col items-center px-5 py-5 sm:px-7">
+            <p
+              className="mb-6 max-w-3xl text-lg font-bold leading-relaxed text-[#193059] sm:text-xl md:text-2xl"
+              style={{
+                fontFamily: "var(--font-source-sans)",
+                textShadow: HERO_TEXT_HIGHLIGHT,
+              }}
+            >
+              Combining local insights and AI innovation, UnitedIV redefines how
+              travelers plan and experience Barbados
+            </p>
 
-          <Link
-            href="/locallens"
-            className="inline-block rounded-full border-2 border-white/40 px-8 py-4 text-lg font-medium text-white transition-all hover:bg-white/10 hover:border-white/60 backdrop-blur-sm"
-            style={{ fontFamily: "var(--font-playfair)" }}
-          >
-            Try LocalPin.ai
-          </Link>
+            <Link
+              href="/locallens"
+              className="inline-block rounded-full border-2 border-white/40 px-8 py-4 text-lg font-medium text-[#193059] transition-all hover:border-white/60 hover:bg-white/10 backdrop-blur-sm"
+              style={{
+                fontFamily: "var(--font-playfair)",
+                textShadow: HERO_TEXT_HIGHLIGHT,
+              }}
+            >
+              Try LocalPin.ai
+            </Link>
+          </div>
         </div>
       </section>
 

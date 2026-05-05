@@ -8,10 +8,12 @@ type Props = {
 
 export function InfoCard({ icon, value, label }: Props) {
   return (
-    <div className="bg-gray-50 rounded-xl p-4 text-center">
-      <div className="w-6 h-6 mx-auto mb-2 text-[#407FC2]">{icon}</div>
-      <p className="text-lg font-bold text-[#193059]">{value}</p>
-      <p className="text-sm text-gray-500">{label}</p>
+    <div className="rounded-[24px] border border-white/70 bg-[linear-gradient(180deg,#ffffff_0%,#f6fafd_100%)] p-5 shadow-[0_18px_45px_rgba(25,48,89,0.08)]">
+      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#eef5fb] text-[#407FC2]">
+        {icon}
+      </div>
+      <p className="text-2xl font-bold text-[#193059]">{value}</p>
+      <p className="mt-1 text-sm font-medium text-slate-500">{label}</p>
     </div>
   );
 }
