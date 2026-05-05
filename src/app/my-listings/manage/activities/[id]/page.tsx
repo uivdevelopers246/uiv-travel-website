@@ -3,11 +3,7 @@ import { Header } from "@/components/layout/header";
 import { ActivityFormClient } from "./ActivityFormClient";
 import type { ActivityImage } from "@/lib/activities/types";
 import { ManageListingStatePage } from "../../_shared/ManageListingStatePage";
-import {
-  getCurrentVendorIdForManage,
-  isValidUuid,
-  requireManageListingAccess,
-} from "../../_shared/server";
+import { getManagedActivityPageData } from "./managed-activity";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -15,64 +11,23 @@ type PageProps = {
 
 export default async function ManageActivityEditPage({ params }: PageProps) {
   const resolvedParams = await params;
-  if (!isValidUuid(resolvedParams.id)) {
-    return (
-      <ManageListingStatePage
-        title="Invalid activity"
-        message="The activity link is invalid."
-      />
-    );
-  }
-
-  const supabase = await createClient();
   const redirectTo = `/my-listings/manage/activities/${resolvedParams.id}`;
-  const role = await requireManageListingAccess(supabase, redirectTo);
+  const pageData = await getManagedActivityPageData(
+    resolvedParams.id,
+    redirectTo,
+  );
 
-  if (!role) {
+  if ("error" in pageData) {
     return (
       <ManageListingStatePage
-        title="Access denied"
-        message="You need admin or vendor access to edit activities."
+        title={pageData.error.title}
+        message={pageData.error.message}
       />
     );
   }
 
-  const vendorId =
-    role === "vendor"
-      ? await getCurrentVendorIdForManage(supabase, redirectTo)
-      : null;
-
-  if (role === "vendor" && !vendorId) {
-    return (
-      <ManageListingStatePage
-        title="Vendor profile required"
-        message="You need a vendor profile to manage activities."
-      />
-    );
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let activityQuery = (supabase as any)
-    .from("activities")
-    .select(
-      "id, vendor_id, title, description, location, latitude, longitude, category, duration_hours, price_per_person, max_capacity, image_url, status",
-    )
-    .eq("id", resolvedParams.id);
-
-  if (vendorId) {
-    activityQuery = activityQuery.eq("vendor_id", vendorId);
-  }
-
-  const { data: activity } = await activityQuery.maybeSingle();
-
-  if (!activity) {
-    return (
-      <ManageListingStatePage
-        title="Activity not found"
-        message="We couldn&apos;t find that activity."
-      />
-    );
-  }
+  const { activity } = pageData;
+  const supabase = await createClient();
 
   // Fetch activity images
   let existingImages: ActivityImage[] = [];

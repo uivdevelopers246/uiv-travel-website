@@ -125,14 +125,25 @@ export function MyListingsClient() {
     <main className="min-h-screen bg-gray-50 pt-24">
       <div className="container mx-auto px-4 max-w-6xl">
         {/* Header */}
-        <div className="mb-8">
-          <h1 
-            className="text-4xl font-bold text-[#193059] mb-2"
-            style={{ fontFamily: 'var(--font-playfair)' }}
-          >
-            My Listings
-          </h1>
-          <p className="text-gray-600">Manage your activities and accommodations</p>
+        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h1 
+              className="text-4xl font-bold text-[#193059] mb-2"
+              style={{ fontFamily: 'var(--font-playfair)' }}
+            >
+              My Listings
+            </h1>
+            <p className="text-gray-600">Manage your activities and accommodations</p>
+          </div>
+
+          {role === "vendor" ? (
+            <Link
+              href="/my-listings/bookings"
+              className="inline-flex items-center justify-center rounded-full border border-[#193059] px-5 py-3 text-sm font-semibold text-[#193059] transition-colors hover:bg-[#193059] hover:text-white"
+            >
+              View booking requests
+            </Link>
+          ) : null}
         </div>
 
         {/* Tab Buttons */}

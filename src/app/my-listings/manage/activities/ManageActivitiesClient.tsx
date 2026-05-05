@@ -161,6 +161,12 @@ export function ManageActivitiesClient({ activities, onRefresh }: Props) {
                   </button>
                 )}
                 <Link
+                  href={`/my-listings/manage/activities/${activity.id}/slots`}
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                >
+                  Manage Slots
+                </Link>
+                <Link
                   href={`/my-listings/manage/activities/${activity.id}`}
                   className="rounded-lg border border-[#407FC2] px-4 py-2 text-sm font-medium text-[#407FC2] transition-colors hover:bg-[#407FC2] hover:text-white"
                 >

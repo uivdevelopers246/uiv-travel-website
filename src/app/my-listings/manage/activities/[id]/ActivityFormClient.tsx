@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { activityCategories } from "@/lib/activities/constants";
@@ -254,12 +255,22 @@ export function ActivityFormClient({
                   : "Fill in the details to create a new activity listing."}
               </p>
             </div>
-            <a
-              href="/my-listings"
-              className="text-sm font-semibold text-[#407FC2] underline-offset-4 hover:underline"
-            >
-              Back to My Listings
-            </a>
+            <div className="flex flex-wrap items-center gap-3">
+              {isEdit && activityId ? (
+                <Link
+                  href={`/my-listings/manage/activities/${activityId}/slots`}
+                  className="rounded-lg border border-[#407FC2] px-4 py-2 text-sm font-medium text-[#407FC2] transition-colors hover:bg-[#407FC2] hover:text-white"
+                >
+                  Manage Slots
+                </Link>
+              ) : null}
+              <a
+                href="/my-listings"
+                className="text-sm font-semibold text-[#407FC2] underline-offset-4 hover:underline"
+              >
+                Back to My Listings
+              </a>
+            </div>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-8">
