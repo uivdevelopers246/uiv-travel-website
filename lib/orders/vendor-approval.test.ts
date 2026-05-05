@@ -90,7 +90,7 @@ describe("declineActivityOrderAsAdmin", () => {
   it("declines all pending rows then runs M4-C sync (settlement hook, no blanket order decline when a line stays confirmed)", async () => {
     vi.mocked(activityBookingsService.listActivityBookings).mockImplementation(
       async (_client, args) => {
-        if (args.status === "pending_approval") {
+        if (args?.status === "pending_approval") {
           return [{ status: "pending_approval" }] as never;
         }
         return [{ status: "confirmed" }, { status: "declined" }] as never;
@@ -135,7 +135,7 @@ describe("declineActivityOrderAsAdmin", () => {
   it("after bulk decline, sync may set order declined when every line is terminal non-confirmed", async () => {
     vi.mocked(activityBookingsService.listActivityBookings).mockImplementation(
       async (_client, args) => {
-        if (args.status === "pending_approval") {
+        if (args?.status === "pending_approval") {
           return [{ status: "pending_approval" }] as never;
         }
         return [{ status: "declined" }, { status: "expired" }] as never;

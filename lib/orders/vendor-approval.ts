@@ -16,6 +16,7 @@ import type { Database } from "@/supabase/types/database";
 import { getOrderById, updateOrderStatus } from "@/lib/orders/service";
 import type { Order } from "@/lib/orders/types";
 import { tryBeginSettlementChargeForOrder } from "@/lib/orders/settlement";
+import { safeSendBookingStatusEmailHook } from "@/lib/orders/status-email-hooks";
 
 export type ApproveActivityOrderResult = { confirmedCount: number };
 
@@ -130,6 +131,10 @@ export async function approveActivityBookingAsVendor(
     throw new Error("Could not confirm booking");
   }
   await syncOrderM4cAfterBookingChange(service, booking.order_id);
+  await safeSendBookingStatusEmailHook(service, {
+    bookingId,
+    event: "booking_confirmed",
+  });
 }
 
 /**
@@ -164,6 +169,10 @@ export async function declineActivityBookingAsVendor(
     throw new Error("Could not decline booking");
   }
   await syncOrderM4cAfterBookingChange(service, booking.order_id);
+  await safeSendBookingStatusEmailHook(service, {
+    bookingId,
+    event: "booking_declined",
+  });
 }
 
 /**
@@ -196,6 +205,10 @@ export async function approveActivityBookingAsAdmin(
     throw new Error("Could not confirm booking");
   }
   await syncOrderM4cAfterBookingChange(service, booking.order_id);
+  await safeSendBookingStatusEmailHook(service, {
+    bookingId,
+    event: "booking_confirmed",
+  });
 }
 
 /**
@@ -221,6 +234,10 @@ export async function declineActivityBookingAsAdmin(
     throw new Error("Could not decline booking");
   }
   await syncOrderM4cAfterBookingChange(service, booking.order_id);
+  await safeSendBookingStatusEmailHook(service, {
+    bookingId,
+    event: "booking_declined",
+  });
 }
 
 /**
@@ -240,7 +257,7 @@ export async function approveActivityOrderAsAdmin(
   const pending = await listActivityBookings(service, {
     orderId,
     status: "pending_approval",
-    limit: 1,
+    limit: 500,
   });
   if (pending.length === 0) {
     throw new Error("No pending approval bookings for this order.");
@@ -251,6 +268,12 @@ export async function approveActivityOrderAsAdmin(
     orderId,
   );
   await syncOrderM4cAfterBookingChange(service, orderId);
+  for (const booking of pending) {
+    await safeSendBookingStatusEmailHook(service, {
+      bookingId: booking.id,
+      event: "booking_confirmed",
+    });
+  }
   return { confirmedCount };
 }
 
@@ -282,6 +305,12 @@ export async function declineActivityOrderAsVendor(
     vendorId,
   );
   await syncOrderM4cAfterBookingChange(service, orderId);
+  for (const booking of mine) {
+    await safeSendBookingStatusEmailHook(service, {
+      bookingId: booking.id,
+      event: "booking_declined",
+    });
+  }
   return { declinedCount };
 }
 
@@ -298,7 +327,7 @@ export async function declineActivityOrderAsAdmin(orderId: string): Promise<void
   const pending = await listActivityBookings(service, {
     orderId,
     status: "pending_approval",
-    limit: 1,
+    limit: 500,
   });
   if (pending.length === 0) {
     throw new Error("No pending approval bookings for this order.");
@@ -306,4 +335,10 @@ export async function declineActivityOrderAsAdmin(orderId: string): Promise<void
 
   await declineAllPendingActivityBookingsForOrder(service, orderId);
   await syncOrderM4cAfterBookingChange(service, orderId);
+  for (const booking of pending) {
+    await safeSendBookingStatusEmailHook(service, {
+      bookingId: booking.id,
+      event: "booking_declined",
+    });
+  }
 }

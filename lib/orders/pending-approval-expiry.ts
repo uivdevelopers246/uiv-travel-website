@@ -1,8 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-
 import type { Database, Json } from "@/supabase/types/database";
+import { getActivityBookingById } from "@/lib/activity-bookings/service";
 
 import { syncOrderDeclinedWhenNoPendingHoldsRemain } from "./vendor-approval";
+import { safeSendBookingStatusEmailHook } from "@/lib/orders/status-email-hooks";
 
 function parseExpirePendingActivityBookingsPayload(
   raw: Json | null,
@@ -45,6 +46,29 @@ function parseExpirePendingActivityBookingsPayload(
   return { expiredCount, orderIds };
 }
 
+/**
+ * Captures likely-expiring booking ids before the RPC runs so the sweep can send notification
+ * hooks only for rows that the database actually transitioned to **`expired`**.
+ */
+export async function listPendingApprovalBookingsPastSla(
+  supabase: SupabaseClient<Database>,
+): Promise<Array<{ id: string }>> {
+  const { data, error } = await supabase
+    .from("activity_bookings")
+    .select("id")
+    .eq("status", "pending_approval")
+    .not("expires_at", "is", null)
+    .lte("expires_at", new Date().toISOString());
+
+  if (error) {
+    throw new Error(`Could not list pending approval bookings past SLA: ${error.message}`);
+  }
+
+  return (data ?? []).filter(
+    (row): row is { id: string } => typeof row.id === "string" && row.id.length > 0,
+  );
+}
+
 export type PendingApprovalExpirySweepResult = {
   /** Rows updated by **`expire_pending_activity_bookings`** (DB RPC). */
   expiredCount: number;
@@ -63,6 +87,7 @@ export type PendingApprovalExpirySweepResult = {
 export async function runPendingApprovalExpirySweep(
   supabase: SupabaseClient<Database>,
 ): Promise<PendingApprovalExpirySweepResult> {
+  const expirableBookings = await listPendingApprovalBookingsPastSla(supabase);
   const { data: rpcData, error: expireError } = await supabase.rpc(
     "expire_pending_activity_bookings",
   );
@@ -78,6 +103,16 @@ export async function runPendingApprovalExpirySweep(
 
   for (const orderId of orderIdsSynced) {
     await syncOrderDeclinedWhenNoPendingHoldsRemain(supabase, orderId);
+  }
+
+  for (const booking of expirableBookings) {
+    const latestBooking = await getActivityBookingById(supabase, booking.id);
+    if (latestBooking?.status === "expired") {
+      await safeSendBookingStatusEmailHook(supabase, {
+        bookingId: booking.id,
+        event: "booking_expired",
+      });
+    }
   }
 
   return { expiredCount, orderIdsSynced };
