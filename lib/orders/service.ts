@@ -1,8 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { listCartLines } from "@/lib/cart/service";
 import type { CartLine } from "@/lib/cart/types";
+import { BOOKING_APPROVAL_SLA_MS } from "@/lib/activity-bookings/sla";
+import type { ActivityBooking } from "@/lib/activity-bookings/service";
 import { ORDER_CURRENCY_USD, ORDER_STATUS_SET, type OrderStatus } from "@/lib/orders/constants";
-import type { Order } from "@/lib/orders/types";
+import type {
+  ActivityBookingWithPreview,
+  Order,
+  OrderWithActivityBookingsPreview,
+} from "@/lib/orders/types";
 import type { Database } from "@/supabase/types/database";
 
 /** Wraps upstream errors so logs and API mapping identify which operation failed. */
@@ -173,6 +179,150 @@ export async function getOrderById(
     throw orderServiceError("Could not load order", error);
   }
   return data;
+}
+
+function getApprovalDeadlineAt(booking: ActivityBooking): string | null {
+  if (booking.status !== "pending_approval") {
+    return null;
+  }
+
+  if (booking.expires_at) {
+    return booking.expires_at;
+  }
+
+  const createdAtMs = new Date(booking.created_at).getTime();
+  if (Number.isNaN(createdAtMs)) {
+    return null;
+  }
+
+  return new Date(createdAtMs + BOOKING_APPROVAL_SLA_MS).toISOString();
+}
+
+function compareBookingsForDisplay(
+  left: ActivityBookingWithPreview,
+  right: ActivityBookingWithPreview,
+): number {
+  if (left.slot_starts_at && right.slot_starts_at) {
+    return left.slot_starts_at.localeCompare(right.slot_starts_at);
+  }
+  if (left.slot_starts_at) {
+    return -1;
+  }
+  if (right.slot_starts_at) {
+    return 1;
+  }
+  return left.created_at.localeCompare(right.created_at);
+}
+
+export async function listOrdersWithActivityBookingsPreview(
+  supabase: SupabaseClient<Database>,
+): Promise<OrderWithActivityBookingsPreview[]> {
+  const userId = await requireAuthUserId(supabase);
+
+  const { data: orders, error: ordersError } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (ordersError) {
+    throw orderServiceError("Could not list orders", ordersError);
+  }
+
+  if (!orders || orders.length === 0) {
+    return [];
+  }
+
+  const orderIds = orders.map((order) => order.id);
+  const { data: bookings, error: bookingsError } = await supabase
+    .from("activity_bookings")
+    .select("*")
+    .eq("user_id", userId)
+    .in("order_id", orderIds)
+    .order("created_at", { ascending: true });
+
+  if (bookingsError) {
+    throw orderServiceError(
+      "Could not list activity bookings for orders",
+      bookingsError,
+    );
+  }
+
+  if (!bookings || bookings.length === 0) {
+    return [];
+  }
+
+  const slotIds = [...new Set(bookings.map((booking) => booking.slot_id))];
+  const activityIds = [...new Set(bookings.map((booking) => booking.activity_id))];
+
+  const slotMap = new Map<
+    string,
+    Pick<
+      Database["public"]["Tables"]["availability_slots"]["Row"],
+      "id" | "starts_at" | "ends_at"
+    >
+  >();
+  if (slotIds.length > 0) {
+    const { data: slots, error: slotsError } = await supabase
+      .from("availability_slots")
+      .select("id, starts_at, ends_at")
+      .in("id", slotIds);
+
+    if (slotsError) {
+      throw orderServiceError("Could not load order slot details", slotsError);
+    }
+
+    for (const slot of slots ?? []) {
+      slotMap.set(slot.id, slot);
+    }
+  }
+
+  const activityTitleById = new Map<string, string>();
+  if (activityIds.length > 0) {
+    const { data: activities, error: activitiesError } = await supabase
+      .from("activities")
+      .select("id, title")
+      .in("id", activityIds);
+
+    if (activitiesError) {
+      throw orderServiceError("Could not load order activity details", activitiesError);
+    }
+
+    for (const activity of activities ?? []) {
+      activityTitleById.set(activity.id, activity.title);
+    }
+  }
+
+  const bookingsByOrderId = new Map<string, ActivityBookingWithPreview[]>();
+
+  for (const booking of bookings) {
+    if (!booking.order_id) {
+      continue;
+    }
+
+    const slot = slotMap.get(booking.slot_id);
+    const preview: ActivityBookingWithPreview = {
+      ...booking,
+      activity_title:
+        activityTitleById.get(booking.activity_id) ?? "Activity unavailable",
+      slot_starts_at: slot?.starts_at ?? "",
+      slot_ends_at: slot?.ends_at ?? "",
+      approval_deadline_at: getApprovalDeadlineAt(booking),
+    };
+
+    const orderBookings = bookingsByOrderId.get(booking.order_id) ?? [];
+    orderBookings.push(preview);
+    bookingsByOrderId.set(booking.order_id, orderBookings);
+  }
+
+  return orders
+    .map((order) => ({
+      ...order,
+      activity_bookings: (bookingsByOrderId.get(order.id) ?? []).sort(
+        compareBookingsForDisplay,
+      ),
+    }))
+    .filter((order) => order.activity_bookings.length > 0);
 }
 
 export async function updateOrderStatus(
@@ -357,6 +507,43 @@ export async function attachSettlementRetryPaymentIntent(
 }
 
 /**
+ * M4-C: after the built-in retry has failed, the buyer can update their payment method once and
+ * trigger a final settlement attempt. Stores the new SetupIntent + PaymentIntent together.
+ */
+export async function attachSettlementRecoveryPaymentIntent(
+  supabase: SupabaseClient<Database>,
+  input: {
+    orderId: string;
+    stripeCustomerId: string;
+    stripeSetupIntentId: string;
+    newStripePaymentIntentId: string;
+  },
+): Promise<Order | null> {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      status: "payment_pending",
+      stripe_customer_id: input.stripeCustomerId,
+      stripe_setup_intent_id: input.stripeSetupIntentId,
+      stripe_payment_intent_id: input.newStripePaymentIntentId,
+      settlement_charge_attempt_count: 3,
+    })
+    .eq("id", input.orderId)
+    .eq("status", "failed")
+    .in("settlement_charge_attempt_count", [2, 3])
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw orderServiceError(
+      "Could not attach settlement recovery PaymentIntent",
+      error,
+    );
+  }
+  return data;
+}
+
+/**
  * M4-C: both settlement attempts failed — order **`failed`** (bookings cancelled separately).
  */
 export async function markOrderFailedAfterSettlementExhausted(
@@ -372,7 +559,7 @@ export async function markOrderFailedAfterSettlementExhausted(
     .eq("id", orderId)
     .eq("status", "payment_pending")
     .eq("stripe_payment_intent_id", failedStripePaymentIntentId)
-    .eq("settlement_charge_attempt_count", 2)
+    .in("settlement_charge_attempt_count", [2, 3])
     .select("*")
     .maybeSingle();
 

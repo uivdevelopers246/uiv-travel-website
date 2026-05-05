@@ -6,6 +6,9 @@ export const STRIPE_METADATA_ORDER_ID_KEY = "order_id" as const;
 
 /** Stripe PaymentIntent metadata for M4-C off-session settlement charge. */
 export const STRIPE_METADATA_FLOW_M4C_SETTLEMENT = "m4c_settlement" as const;
+export const STRIPE_METADATA_FLOW_M4C_SETUP = "m4c_setup" as const;
+export const STRIPE_METADATA_FLOW_M4C_PAYMENT_RECOVERY =
+  "m4c_payment_recovery" as const;
 
 /** Matches `orders.status` CHECK constraint. */
 export const ORDER_STATUSES = [
@@ -14,6 +17,7 @@ export const ORDER_STATUSES = [
   "payment_pending",
   "paid",
   "failed",
+  "reconciliation_required",
   "cancelled",
   "refunded",
   "declined",

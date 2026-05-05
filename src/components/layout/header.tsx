@@ -46,7 +46,8 @@ export function Header() {
   }, []);
 
   const flags = getRoleFlags(role);
-  const tripPath = role === "vendor" || role === "admin" ? "/my-listings" : "/my-trip";
+  const tripPath =
+    role === "vendor" || role === "admin" ? "/my-listings" : "/my-trip/bookings";
   const tripLabel = role === "vendor" || role === "admin" ? "My Listings" : "My Trip";
   const accountPath = flags.canAccessAccount ? "/account" : "/auth/login";
   const accountLabel = flags.canAccessAccount ? "Account" : "Sign In";
@@ -115,12 +116,12 @@ export function Header() {
               </Link>
               <Link
                 href={tripPath}
-                className="flex items-center gap-2 border border-gray-300 px-4 py-2 text-sm font-medium text-gray-900 transition-colors hover:bg-gray-100"
+                className="flex items-center gap-2 bg-gradient-to-r from-[#407FC2] to-[#193059] px-4 py-2 text-sm font-medium text-white transition-all duration-300 hover:from-[#193059] hover:to-[#407FC2]"
               >
                 <img
                   src="/images/icons/AccountIcon.png"
                   alt="Account"
-                  className="h-4 w-4"
+                  className="h-4 w-4 brightness-0 invert"
                 />
                 <span>{tripLabel}</span>
               </Link>
@@ -129,12 +130,6 @@ export function Header() {
                 className="border border-gray-300 px-4 py-2 text-sm font-medium text-gray-900 transition-colors hover:bg-gray-100"
               >
                 {accountLabel}
-              </Link>
-              <Link
-                href="/bookings"
-                className="bg-gradient-to-r from-[#407FC2] to-[#193059] px-6 py-2 text-sm font-medium text-white transition-all duration-300 hover:from-[#193059] hover:to-[#407FC2]"
-              >
-                Book Now
               </Link>
             </div>
           </div>
@@ -210,12 +205,12 @@ export function Header() {
             <Link
               href={tripPath}
               onClick={closeMobileMenu}
-              className="flex items-center gap-2 py-2 text-base font-medium transition-colors hover:text-[#407FC2]"
+              className="flex items-center gap-2 bg-gradient-to-r from-[#407FC2] to-[#193059] px-4 py-3 text-base font-medium text-white transition-all duration-300 hover:from-[#193059] hover:to-[#407FC2]"
             >
               <img
                 src="/images/icons/AccountIcon.png"
                 alt="Account"
-                className="h-5 w-5"
+                className="h-5 w-5 brightness-0 invert"
               />
               <span>{tripLabel}</span>
             </Link>
@@ -225,13 +220,6 @@ export function Header() {
               className="block border border-gray-300 px-4 py-3 text-center text-base font-medium text-gray-900 transition-colors hover:bg-gray-100"
             >
               {accountLabel}
-            </Link>
-            <Link
-              href="/bookings"
-              onClick={closeMobileMenu}
-              className="block bg-gradient-to-r from-[#407FC2] to-[#193059] px-4 py-3 text-center text-base font-medium text-white transition-all duration-300 hover:from-[#193059] hover:to-[#407FC2]"
-            >
-              Book Now
             </Link>
           </div>
         </div>

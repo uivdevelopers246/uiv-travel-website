@@ -6,12 +6,14 @@ vi.mock("@/lib/cart/service", () => ({
 
 import { listCartLines } from "@/lib/cart/service";
 import { CART_LINE_TYPE_ACTIVITY } from "@/lib/cart/constants";
+import type { ActivityBooking } from "@/lib/activity-bookings/service";
 import type { CartLine } from "@/lib/cart/types";
 import {
   computeOrderTotalsFromCartLines,
   findCheckoutSetupOrderForUser,
   getOrderById,
   markOrderReconciliationRequiredAfterSettlementMismatch,
+  listOrdersWithActivityBookingsPreview,
   updateOrderStatus,
   updateOrderStripeCheckoutSession,
   upsertCheckoutSetupOrderFromCart,
@@ -70,6 +72,29 @@ function baseOrder(overrides: Partial<Order> = {}): Order {
     settlement_charge_attempt_count: 0,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-02T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function baseActivityBooking(
+  overrides: Partial<ActivityBooking> = {},
+): ActivityBooking {
+  return {
+    id: "booking-1",
+    activity_id: "activity-1",
+    created_at: "2026-01-03T12:00:00.000Z",
+    discount_cents: 0,
+    expires_at: "2026-01-04T12:00:00.000Z",
+    order_id: orderId,
+    participants: 2,
+    slot_id: slotId,
+    status: "pending_approval",
+    subtotal_cents: 10000,
+    total_cents: 10000,
+    unit_price_cents: 5000,
+    updated_at: "2026-01-03T12:00:00.000Z",
+    user_id: userId,
+    vendor_id: "vendor-1",
     ...overrides,
   };
 }
@@ -531,5 +556,146 @@ describe("markOrderReconciliationRequiredAfterSettlementMismatch", () => {
     ).rejects.toThrow(
       "Could not mark order reconciliation_required after settlement mismatch",
     );
+  });
+});
+
+describe("listOrdersWithActivityBookingsPreview", () => {
+  it("returns orders with enriched booking lines", async () => {
+    const order = baseOrder({
+      id: orderId,
+      status: "awaiting_vendor_approval",
+      created_at: "2026-01-03T10:00:00.000Z",
+    });
+    const booking = baseActivityBooking();
+
+    const ordersQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [order], error: null }),
+    };
+    const bookingsQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [booking], error: null }),
+    };
+    const slotsQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      in: vi.fn().mockResolvedValue({
+        data: [
+          {
+            id: slotId,
+            starts_at: "2026-01-10T15:00:00.000Z",
+            ends_at: "2026-01-10T17:00:00.000Z",
+          },
+        ],
+        error: null,
+      }),
+    };
+    const activitiesQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      in: vi.fn().mockResolvedValue({
+        data: [{ id: "activity-1", title: "Catamaran Cruise" }],
+        error: null,
+      }),
+    };
+
+    const supabase: Record<string, unknown> = {
+      from: vi
+        .fn()
+        .mockImplementationOnce(() => ordersQuery)
+        .mockImplementationOnce(() => bookingsQuery)
+        .mockImplementationOnce(() => slotsQuery)
+        .mockImplementationOnce(() => activitiesQuery),
+      ...authUser(),
+    };
+
+    await expect(
+      listOrdersWithActivityBookingsPreview(supabase as never),
+    ).resolves.toEqual([
+      {
+        ...order,
+        activity_bookings: [
+          {
+            ...booking,
+            activity_title: "Catamaran Cruise",
+            slot_starts_at: "2026-01-10T15:00:00.000Z",
+            slot_ends_at: "2026-01-10T17:00:00.000Z",
+            approval_deadline_at: "2026-01-04T12:00:00.000Z",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("falls back to created_at plus SLA when expires_at is missing", async () => {
+    const order = baseOrder({ id: orderId });
+    const booking = baseActivityBooking({
+      created_at: "2026-01-03T12:00:00.000Z",
+      expires_at: null,
+    });
+
+    const ordersQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [order], error: null }),
+    };
+    const bookingsQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [booking], error: null }),
+    };
+    const slotsQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      in: vi.fn().mockResolvedValue({ data: [], error: null }),
+    };
+    const activitiesQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      in: vi.fn().mockResolvedValue({ data: [], error: null }),
+    };
+
+    const supabase: Record<string, unknown> = {
+      from: vi
+        .fn()
+        .mockImplementationOnce(() => ordersQuery)
+        .mockImplementationOnce(() => bookingsQuery)
+        .mockImplementationOnce(() => slotsQuery)
+        .mockImplementationOnce(() => activitiesQuery),
+      ...authUser(),
+    };
+
+    const rows = await listOrdersWithActivityBookingsPreview(supabase as never);
+    expect(rows[0]?.activity_bookings[0]?.approval_deadline_at).toBe(
+      "2026-01-04T12:00:00.000Z",
+    );
+  });
+
+  it("filters out orders that do not have booking lines", async () => {
+    const order = baseOrder({ id: orderId });
+
+    const ordersQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [order], error: null }),
+    };
+    const bookingsQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [], error: null }),
+    };
+
+    const supabase: Record<string, unknown> = {
+      from: vi
+        .fn()
+        .mockImplementationOnce(() => ordersQuery)
+        .mockImplementationOnce(() => bookingsQuery),
+      ...authUser(),
+    };
+
+    await expect(
+      listOrdersWithActivityBookingsPreview(supabase as never),
+    ).resolves.toEqual([]);
   });
 });

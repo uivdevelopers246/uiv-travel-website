@@ -12,11 +12,14 @@ import { CART_LINE_TYPE_ACTIVITY } from "@/lib/cart/constants";
 import { deleteAllCartLinesForUser } from "@/lib/cart/service";
 import type { CartLine } from "@/lib/cart/types";
 import {
+  STRIPE_METADATA_FLOW_M4C_PAYMENT_RECOVERY,
+  STRIPE_METADATA_FLOW_M4C_SETUP,
   STRIPE_METADATA_FLOW_M4C_SETTLEMENT,
   STRIPE_METADATA_ORDER_ID_KEY,
 } from "@/lib/orders/constants";
 import { computeConfirmedSettlementTotalCents } from "@/lib/orders/settlement-utils";
 import {
+  attachSettlementRecoveryPaymentIntent,
   attachSettlementRetryPaymentIntent,
   getOrderById,
   markOrderFailedAfterSettlementExhausted,
@@ -26,7 +29,8 @@ import {
   updateOrderPaidAfterSettlementCapture,
   updateOrderStatus,
 } from "@/lib/orders/service";
-import type { Order } from "@/lib/orders/types";
+import { safeSendOrderStatusEmailHook } from "@/lib/orders/status-email-hooks";
+import type { Order, OrderPaymentSummary } from "@/lib/orders/types";
 import type { Database } from "@/supabase/types/database";
 
 let stripeSingleton: Stripe | null = null;
@@ -81,6 +85,11 @@ function stripeId(
 /** Trims `metadata.order_id` (see {@link STRIPE_METADATA_ORDER_ID_KEY}) from Stripe objects. */
 function metadataOrderId(meta: Stripe.Metadata | null | undefined): string | undefined {
   const raw = meta?.[STRIPE_METADATA_ORDER_ID_KEY];
+  return typeof raw === "string" ? raw.trim() : undefined;
+}
+
+function metadataFlow(meta: Stripe.Metadata | null | undefined): string | undefined {
+  const raw = meta?.flow;
   return typeof raw === "string" ? raw.trim() : undefined;
 }
 
@@ -170,15 +179,15 @@ export async function createCheckoutSetupSessionForOrder(
 
   const sessionMetadata: Record<string, string> = {
     [STRIPE_METADATA_ORDER_ID_KEY]: order.id,
-    flow: "m4c_setup",
+    flow: STRIPE_METADATA_FLOW_M4C_SETUP,
   };
 
   return getStripe().checkout.sessions.create({
     mode: "setup",
     currency: order.currency,
     customer: stripeCustomerId,
-    success_url: `${base}/?checkout=setup_success&${STRIPE_METADATA_ORDER_ID_KEY}=${encodeURIComponent(order.id)}`,
-    cancel_url: `${base}/?checkout=cancelled`,
+    success_url: `${base}/checkout/success`,
+    cancel_url: `${base}/checkout/cancel`,
     metadata: sessionMetadata,
     /** Ensures `setup_intent.succeeded` carries the same `metadata.order_id` as the Checkout Session. */
     setup_intent_data: {
@@ -202,13 +211,38 @@ export async function createSetupIntentForOrder(input: {
     usage: "off_session",
     metadata: {
       [STRIPE_METADATA_ORDER_ID_KEY]: input.order.id,
-      flow: "m4c_setup",
+      flow: STRIPE_METADATA_FLOW_M4C_SETUP,
     },
   });
   return {
     setupIntentId: si.id,
     clientSecret: si.client_secret,
   };
+}
+
+export async function createPaymentMethodUpdateSessionForOrder(input: {
+  order: Order;
+  siteUrl: string;
+  stripeCustomerId: string;
+}): Promise<Stripe.Response<Stripe.Checkout.Session>> {
+  const base = input.siteUrl.replace(/\/$/, "");
+  const sessionMetadata: Record<string, string> = {
+    [STRIPE_METADATA_ORDER_ID_KEY]: input.order.id,
+    flow: STRIPE_METADATA_FLOW_M4C_PAYMENT_RECOVERY,
+  };
+
+  return getStripe().checkout.sessions.create({
+    mode: "setup",
+    currency: input.order.currency,
+    customer: input.stripeCustomerId,
+    success_url: `${base}/my-trip/bookings?payment_recovery=updated`,
+    cancel_url: `${base}/my-trip/bookings?payment_recovery=cancelled`,
+    metadata: sessionMetadata,
+    setup_intent_data: {
+      metadata: sessionMetadata,
+    },
+    client_reference_id: input.order.id,
+  });
 }
 
 async function fetchCartLinesForUser(
@@ -326,7 +360,9 @@ export type FulfillCheckoutSetupSessionCompletedResult =
         | "missing_order_id"
         | "missing_setup_intent"
         | "missing_customer"
-        | "order_not_eligible";
+        | "order_not_eligible"
+        | "unsupported_flow"
+        | "order_not_recoverable";
     };
 
 export type FulfillSetupIntentSucceededResult = FulfillCheckoutSetupSessionCompletedResult;
@@ -339,15 +375,17 @@ type M4cSetupFulfillmentCoreResult =
   | { status: "partial_failure_rolled_back" }
   | { status: "ignored"; reason: "order_not_eligible" };
 
+type SetupFulfillmentContext = {
+  orderId: string;
+  stripeCustomerId: string;
+  setupIntentId: string;
+  checkoutSessionId: string | null;
+};
+
 async function fulfillM4cVendorApprovalRequestAfterSetupSaved(
   supabase: SupabaseClient<Database>,
   eventId: string,
-  ctx: {
-    orderId: string;
-    stripeCustomerId: string;
-    setupIntentId: string;
-    checkoutSessionId: string | null;
-  },
+  ctx: SetupFulfillmentContext,
 ): Promise<M4cSetupFulfillmentCoreResult> {
   let order = await getOrderById(supabase, ctx.orderId);
   if (!order) {
@@ -480,6 +518,67 @@ async function fulfillM4cVendorApprovalRequestAfterSetupSaved(
   return { status: "success" };
 }
 
+async function fulfillM4cSettlementRecoveryAfterSetupSaved(
+  supabase: SupabaseClient<Database>,
+  eventId: string,
+  ctx: SetupFulfillmentContext,
+): Promise<FulfillCheckoutSetupSessionCompletedResult> {
+  const order = await getOrderById(supabase, ctx.orderId);
+  if (!order) {
+    return { status: "order_not_found" };
+  }
+
+  if (order.status === "paid" || order.status === "payment_pending") {
+    await insertStripeWebhookEvent(supabase, eventId);
+    return { status: "already_fulfilled" };
+  }
+
+  if (order.status !== "failed" || order.settlement_charge_attempt_count !== 2) {
+    await insertStripeWebhookEvent(supabase, eventId);
+    return { status: "ignored", reason: "order_not_recoverable" };
+  }
+
+  const bookings = await listActivityBookings(supabase, {
+    orderId: order.id,
+    limit: 500,
+  });
+  const amountCents = computeConfirmedSettlementTotalCents(bookings);
+  if (amountCents <= 0) {
+    await insertStripeWebhookEvent(supabase, eventId);
+    return { status: "ignored", reason: "order_not_recoverable" };
+  }
+
+  const recoveryPi = await createSettlementPaymentIntentForOrder({
+    order: {
+      ...order,
+      stripe_customer_id: ctx.stripeCustomerId,
+      stripe_setup_intent_id: ctx.setupIntentId,
+    },
+    amountCents,
+    idempotencyKey: `m4c-settlement-${order.id}-recovery-${ctx.setupIntentId}`,
+  });
+
+  const attached = await attachSettlementRecoveryPaymentIntent(supabase, {
+    orderId: order.id,
+    stripeCustomerId: ctx.stripeCustomerId,
+    stripeSetupIntentId: ctx.setupIntentId,
+    newStripePaymentIntentId: recoveryPi.id,
+  });
+
+  if (!attached) {
+    await getStripe().paymentIntents.cancel(recoveryPi.id);
+    const fresh = await getOrderById(supabase, order.id);
+    await insertStripeWebhookEvent(supabase, eventId);
+    if (fresh?.status === "payment_pending" || fresh?.status === "paid") {
+      return { status: "already_fulfilled" };
+    }
+    return { status: "ignored", reason: "order_not_recoverable" };
+  }
+
+  await insertStripeWebhookEvent(supabase, eventId);
+  return { status: "success" };
+}
+
 /**
  * M4-C: **`checkout.session.completed`** with **`mode: setup`** — pending_approval bookings,
  * **`awaiting_vendor_approval`**, cart clear. Idempotent via **`stripe_webhook_events`**.
@@ -520,12 +619,22 @@ export async function fulfillCheckoutSetupSessionCompleted(
     return { status: "ignored", reason: "missing_customer" };
   }
 
-  return fulfillM4cVendorApprovalRequestAfterSetupSaved(supabase, event.id, {
+  const ctx: SetupFulfillmentContext = {
     orderId,
     stripeCustomerId: customerId,
     setupIntentId,
     checkoutSessionId: session.id,
-  });
+  };
+  const flow = metadataFlow(session.metadata);
+  if (flow === STRIPE_METADATA_FLOW_M4C_SETUP) {
+    return fulfillM4cVendorApprovalRequestAfterSetupSaved(supabase, event.id, ctx);
+  }
+  if (flow === STRIPE_METADATA_FLOW_M4C_PAYMENT_RECOVERY) {
+    return fulfillM4cSettlementRecoveryAfterSetupSaved(supabase, event.id, ctx);
+  }
+
+  await insertStripeWebhookEvent(supabase, event.id);
+  return { status: "ignored", reason: "unsupported_flow" };
 }
 
 /**
@@ -557,12 +666,22 @@ export async function fulfillSetupIntentSucceeded(
     return { status: "ignored", reason: "missing_customer" };
   }
 
-  return fulfillM4cVendorApprovalRequestAfterSetupSaved(supabase, event.id, {
+  const ctx: SetupFulfillmentContext = {
     orderId,
     stripeCustomerId: customerId,
     setupIntentId: si.id,
     checkoutSessionId: null,
-  });
+  };
+  const flow = metadataFlow(si.metadata);
+  if (flow === STRIPE_METADATA_FLOW_M4C_SETUP) {
+    return fulfillM4cVendorApprovalRequestAfterSetupSaved(supabase, event.id, ctx);
+  }
+  if (flow === STRIPE_METADATA_FLOW_M4C_PAYMENT_RECOVERY) {
+    return fulfillM4cSettlementRecoveryAfterSetupSaved(supabase, event.id, ctx);
+  }
+
+  await insertStripeWebhookEvent(supabase, event.id);
+  return { status: "ignored", reason: "unsupported_flow" };
 }
 
 export type CreateSettlementPaymentIntentForOrderInput = {
@@ -608,6 +727,70 @@ export async function createSettlementPaymentIntentForOrder(
     },
     { idempotencyKey: input.idempotencyKey },
   );
+}
+
+function expandedCharge(
+  value: string | Stripe.Charge | null | undefined,
+): Stripe.Charge | null {
+  if (!value || typeof value === "string") {
+    return null;
+  }
+  return value;
+}
+
+export async function getOrderPaymentSummary(
+  order: Pick<
+    Order,
+    "status" | "stripe_payment_intent_id" | "settlement_charge_attempt_count"
+  >,
+): Promise<OrderPaymentSummary | null> {
+  if (
+    order.status !== "payment_pending" &&
+    order.status !== "paid" &&
+    order.status !== "failed"
+  ) {
+    return null;
+  }
+
+  const fallbackSummary: OrderPaymentSummary = {
+    status:
+      order.status === "payment_pending"
+        ? "processing"
+        : order.status === "paid"
+          ? "paid"
+          : "failed",
+    receipt_url: null,
+    failure_message: null,
+    can_retry_with_payment_method_update:
+      order.status === "failed" && order.settlement_charge_attempt_count === 2,
+    show_contact_support:
+      order.status === "failed" && order.settlement_charge_attempt_count >= 3,
+  };
+
+  if (!order.stripe_payment_intent_id) {
+    return fallbackSummary;
+  }
+
+  try {
+    const pi = await getStripe().paymentIntents.retrieve(
+      order.stripe_payment_intent_id,
+      { expand: ["latest_charge"] },
+    );
+    const latestCharge = expandedCharge(
+      pi.latest_charge as string | Stripe.Charge | null | undefined,
+    );
+
+    return {
+      ...fallbackSummary,
+      receipt_url: latestCharge?.receipt_url ?? null,
+      failure_message:
+        typeof pi.last_payment_error?.message === "string"
+          ? pi.last_payment_error.message
+          : latestCharge?.failure_message ?? null,
+    };
+  } catch {
+    return fallbackSummary;
+  }
 }
 
 export type FulfillSettlementPaymentIntentSucceededResult =
@@ -694,6 +877,10 @@ export async function fulfillSettlementPaymentIntentSucceeded(
     throw new Error("Could not transition order to paid after settlement");
   }
 
+  await safeSendOrderStatusEmailHook(supabase, {
+    orderId,
+    event: "payment_completed",
+  });
   await insertStripeWebhookEvent(supabase, event.id);
   return { status: "success" };
 }
@@ -715,8 +902,9 @@ export type FulfillSettlementPaymentIntentPaymentFailedResult =
   | { status: "terminal_failed" };
 
 /**
- * M4-C: **`payment_intent.payment_failed`** — one automatic retry, then **`failed`** + cancel
- * confirmed bookings.
+ * M4-C: **`payment_intent.payment_failed`** — one automatic retry, then **`failed`**.
+ * A final customer-initiated payment-method update can produce attempt `3`, which is terminal
+ * as well when that recovery charge fails.
  */
 export async function fulfillSettlementPaymentIntentPaymentFailed(
   event: Stripe.Event,
@@ -786,8 +974,7 @@ export async function fulfillSettlementPaymentIntentPaymentFailed(
     return { status: "retry_scheduled" };
   }
 
-  if (attempt === 2) {
-    await cancelActivityBookingsForOrder(supabase, orderId);
+  if (attempt === 2 || attempt === 3) {
     const marked = await markOrderFailedAfterSettlementExhausted(
       supabase,
       orderId,
@@ -797,6 +984,10 @@ export async function fulfillSettlementPaymentIntentPaymentFailed(
       await insertStripeWebhookEvent(supabase, event.id);
       return { status: "stale_intent" };
     }
+    await safeSendOrderStatusEmailHook(supabase, {
+      orderId,
+      event: "payment_failed",
+    });
     await insertStripeWebhookEvent(supabase, event.id);
     return { status: "terminal_failed" };
   }

@@ -42,10 +42,14 @@ import {
   createSettlementPaymentIntentForOrder,
   fulfillCheckoutSetupSessionCompleted,
   fulfillSetupIntentSucceeded,
+  fulfillSettlementPaymentIntentPaymentFailed,
   fulfillSettlementPaymentIntentSucceeded,
   getStripe,
 } from "./server";
-import { STRIPE_METADATA_FLOW_M4C_SETTLEMENT } from "@/lib/orders/constants";
+import {
+  STRIPE_METADATA_FLOW_M4C_SETUP,
+  STRIPE_METADATA_FLOW_M4C_SETTLEMENT,
+} from "@/lib/orders/constants";
 
 function baseOrder(overrides: Partial<Order> = {}): Order {
   return {
@@ -175,6 +179,8 @@ describe("createCheckoutSetupSessionForOrder", () => {
     expect(createMock).toHaveBeenCalledWith(
       expect.objectContaining({
         mode: "setup",
+        success_url: "http://localhost:3000/checkout/success",
+        cancel_url: "http://localhost:3000/checkout/cancel",
         metadata: { order_id: "order-xyz", flow: "m4c_setup" },
         setup_intent_data: {
           metadata: { order_id: "order-xyz", flow: "m4c_setup" },
@@ -188,10 +194,15 @@ describe("createCheckoutSetupSessionForOrder", () => {
 function checkoutSessionCompletedEvent(
   sessionOverrides: Partial<Stripe.Checkout.Session> = {},
 ): Stripe.Event {
+  const metadata = {
+    order_id: "order-1",
+    flow: STRIPE_METADATA_FLOW_M4C_SETUP,
+    ...(sessionOverrides.metadata ?? {}),
+  };
   const session = {
     id: "cs_1",
     mode: "setup" as const,
-    metadata: { order_id: "order-1" },
+    metadata,
     setup_intent: "seti_1",
     customer: "cus_1",
     ...sessionOverrides,
@@ -352,9 +363,14 @@ function paymentIntentSucceededEvent(
 function setupIntentSucceededEvent(
   siOverrides: Partial<Stripe.SetupIntent> = {},
 ): Stripe.Event {
+  const metadata = {
+    order_id: "order-1",
+    flow: STRIPE_METADATA_FLOW_M4C_SETUP,
+    ...(siOverrides.metadata ?? {}),
+  };
   const si = {
     id: "seti_1",
-    metadata: { order_id: "order-1" },
+    metadata,
     customer: "cus_1",
     ...siOverrides,
   } as Stripe.SetupIntent;
@@ -363,6 +379,27 @@ function setupIntentSucceededEvent(
     id: "evt_seti_success",
     type: "setup_intent.succeeded",
     data: { object: si },
+  } as Stripe.Event;
+}
+
+function paymentIntentFailedEvent(
+  piOverrides: Partial<Stripe.PaymentIntent> = {},
+): Stripe.Event {
+  const pi = {
+    id: "pi_settlement_failed_1",
+    amount: 3000,
+    currency: "usd",
+    metadata: {
+      order_id: "order-1",
+      flow: STRIPE_METADATA_FLOW_M4C_SETTLEMENT,
+    },
+    ...piOverrides,
+  } as Stripe.PaymentIntent;
+
+  return {
+    id: "evt_pi_failed",
+    type: "payment_intent.payment_failed",
+    data: { object: pi },
   } as Stripe.Event;
 }
 
@@ -821,5 +858,66 @@ describe("fulfillSettlementPaymentIntentSucceeded", () => {
     expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
     expect(supabase.from).toHaveBeenCalledWith("orders");
     expect(supabase.from).toHaveBeenCalledWith("activity_bookings");
+  });
+});
+
+describe("fulfillSettlementPaymentIntentPaymentFailed", () => {
+  it("marks a recovery attempt as terminally failed when attempt count is 3", async () => {
+    let step = 0;
+    const supabase = {
+      from: vi.fn(() => {
+        step += 1;
+        if (step === 1) {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+          };
+        }
+        if (step === 2) {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: {
+                id: "order-1",
+                status: "payment_pending",
+                currency: "usd",
+                stripe_payment_intent_id: "pi_settlement_failed_1",
+                settlement_charge_attempt_count: 3,
+              },
+              error: null,
+            }),
+          };
+        }
+        if (step === 3) {
+          return {
+            update: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            in: vi.fn().mockReturnThis(),
+            select: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: { id: "order-1", status: "failed" },
+              error: null,
+            }),
+          };
+        }
+        if (step === 4) {
+          return {
+            insert: vi.fn().mockResolvedValue({ error: null }),
+          };
+        }
+        throw new Error(`Unexpected step ${step}`);
+      }),
+    };
+
+    const result = await fulfillSettlementPaymentIntentPaymentFailed(
+      paymentIntentFailedEvent(),
+      supabase as never,
+    );
+
+    expect(result).toEqual({ status: "terminal_failed" });
+    expect(supabase.from).toHaveBeenCalledWith("orders");
+    expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
   });
 });
