@@ -3,9 +3,21 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { CartLineWithPreview } from "@/lib/cart/types";
+import {
+  type CartBannerTone,
+  formatParticipantsLabel,
+  formatSpotLabel,
+  getCartLineAvailabilityState,
+  getCartSummary,
+  getCheckoutCallToActionState,
+  getDraftLineTotalCents,
+  getLineParticipants,
+  getLineTotalCents,
+  getUnitPriceCents,
+} from "./cart-ui";
 
 type StatusMessage = {
-  tone: "success" | "error";
+  tone: CartBannerTone;
   text: string;
 };
 
@@ -34,32 +46,18 @@ const timeFormatter = new Intl.DateTimeFormat("en-US", {
   minute: "2-digit",
 });
 
+const CART_REFRESH_ERROR_MESSAGES = new Set([
+  "This slot is no longer available",
+  "Not enough spots left for this time slot",
+  "Activity is not available for booking",
+]);
+
 function redirectToLogin() {
   window.location.assign("/auth/login?redirect=/cart");
 }
 
 function formatCurrencyFromCents(value: number) {
   return currencyFormatter.format(value / 100);
-}
-
-function formatParticipantsLabel(count: number) {
-  return `${count} ${count === 1 ? "participant" : "participants"}`;
-}
-
-function getParticipantCount(value: number | null | undefined) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return 1;
-  }
-
-  return Math.max(1, Math.trunc(value));
-}
-
-function getLineTotalCents(value: number | null | undefined) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return 0;
-  }
-
-  return Math.max(0, Math.round(value));
 }
 
 function formatSlotDateTime(startsAt: string, endsAt: string) {
@@ -72,13 +70,51 @@ function formatSlotDateTime(startsAt: string, endsAt: string) {
   return `${dateFormatter.format(start)} - ${timeFormatter.format(start)} to ${timeFormatter.format(end)}`;
 }
 
-function normalizeParticipants(value: number, fallback: number) {
+function shouldRefreshCartAfterError(message: string) {
+  return CART_REFRESH_ERROR_MESSAGES.has(message);
+}
+
+function getDraftParticipantLimit(line: CartLineWithPreview) {
+  return Math.max(1, getLineParticipants(line), line.remaining_capacity);
+}
+
+function clampDraftParticipants(
+  value: number,
+  fallback: number,
+  max: number,
+) {
   if (!Number.isFinite(value)) {
     return fallback;
   }
 
   const next = Math.trunc(value);
-  return Math.max(1, next);
+  return Math.max(1, Math.min(max, next));
+}
+
+function getMessageClasses(tone: CartBannerTone) {
+  switch (tone) {
+    case "success":
+      return "border-emerald-200 bg-emerald-50 text-emerald-800";
+    case "warning":
+      return "border-amber-200 bg-amber-50 text-amber-900";
+    case "error":
+    default:
+      return "border-rose-200 bg-rose-50 text-rose-700";
+  }
+}
+
+function getAvailabilityClasses(
+  tone: ReturnType<typeof getCartLineAvailabilityState>["tone"],
+) {
+  switch (tone) {
+    case "success":
+      return "border-emerald-200 bg-emerald-50 text-emerald-800";
+    case "warning":
+      return "border-amber-200 bg-amber-50 text-amber-900";
+    case "error":
+    default:
+      return "border-rose-200 bg-rose-50 text-rose-800";
+  }
 }
 
 async function fetchCartLines(): Promise<CartLineWithPreview[]> {
@@ -108,6 +144,71 @@ async function fetchCartLines(): Promise<CartLineWithPreview[]> {
   return payload as CartLineWithPreview[];
 }
 
+type ParticipantStepperProps = {
+  value: number;
+  max: number;
+  disabled?: boolean;
+  onChange: (value: number) => void;
+};
+
+function ParticipantStepper({
+  value,
+  max,
+  disabled = false,
+  onChange,
+}: ParticipantStepperProps) {
+  const canDecrease = !disabled && value > 1;
+  const canIncrease = !disabled && value < max;
+  const dividerClass = disabled ? "border-slate-200" : "border-[#c8d9ea]";
+
+  return (
+    <div
+      className={`flex w-[176px] shrink-0 items-center overflow-hidden rounded-2xl border ${
+        disabled
+          ? "border-slate-200 bg-slate-100 text-slate-400"
+          : "border-[#c8d9ea] bg-white text-[#193059]"
+      }`}
+    >
+      <button
+        type="button"
+        aria-label="Decrease participants"
+        disabled={!canDecrease}
+        onClick={() => onChange(value - 1)}
+        className="flex h-12 w-12 items-center justify-center rounded-l-2xl text-lg font-semibold transition-colors hover:bg-[#eef5fb] disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+      >
+        -
+      </button>
+      <input
+        type="number"
+        min={1}
+        max={max}
+        step={1}
+        value={value}
+        disabled={disabled}
+        onChange={(event) =>
+          onChange(
+            clampDraftParticipants(
+              event.currentTarget.valueAsNumber,
+              value,
+              max,
+            ),
+          )
+        }
+        className={`h-12 w-20 border-x bg-transparent px-2 text-center text-base font-semibold tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${dividerClass}`}
+      />
+      <button
+        type="button"
+        aria-label="Increase participants"
+        disabled={!canIncrease}
+        onClick={() => onChange(value + 1)}
+        className="flex h-12 w-12 items-center justify-center rounded-r-2xl text-lg font-semibold transition-colors hover:bg-[#eef5fb] disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
 export function CartClient({ initialMessage = null }: CartClientProps) {
   const [lines, setLines] = useState<CartLineWithPreview[]>([]);
   const [participantDrafts, setParticipantDrafts] = useState<Record<string, number>>({});
@@ -117,6 +218,21 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  const [confirmingRemovalLineId, setConfirmingRemovalLineId] = useState<string | null>(
+    null,
+  );
+
+  function applyCartLines(nextLines: CartLineWithPreview[]) {
+    setLines(nextLines);
+    setParticipantDrafts(
+      Object.fromEntries(
+        nextLines.map((line) => [line.id, getLineParticipants(line)]),
+      ) as Record<string, number>,
+    );
+    setConfirmingRemovalLineId((current) =>
+      current && nextLines.some((line) => line.id === current) ? current : null,
+    );
+  }
 
   useEffect(() => {
     let active = true;
@@ -131,12 +247,7 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
           return;
         }
 
-        setLines(nextLines);
-        setParticipantDrafts(
-          Object.fromEntries(
-            nextLines.map((line) => [line.id, getParticipantCount(line.participants)]),
-          ) as Record<string, number>,
-        );
+        applyCartLines(nextLines);
       } catch (nextError: unknown) {
         if (!active) {
           return;
@@ -144,6 +255,7 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
 
         setLines([]);
         setParticipantDrafts({});
+        setConfirmingRemovalLineId(null);
         setError(
           nextError instanceof Error
             ? nextError.message
@@ -161,17 +273,26 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
     };
   }, [reloadToken]);
 
-  const subtotalCents = lines.reduce(
-    (sum, line) => sum + getLineTotalCents(line.line_total_cents),
-    0,
-  );
-  const totalCents = subtotalCents;
+  const summary = getCartSummary(lines);
+  const dirtyLineCount = lines.reduce((count, line) => {
+    const currentParticipants = getLineParticipants(line);
+    const draftParticipants = participantDrafts[line.id] ?? currentParticipants;
+    return count + (draftParticipants !== currentParticipants ? 1 : 0);
+  }, 0);
+  const hasPendingMutation = busyAction !== null;
+  const checkoutState = getCheckoutCallToActionState({
+    lines,
+    dirtyLineCount,
+    hasPendingMutation,
+  });
 
   async function handleUpdateParticipants(line: CartLineWithPreview) {
-    const currentParticipants = getParticipantCount(line.participants);
-    const participants = normalizeParticipants(
+    const currentParticipants = getLineParticipants(line);
+    const maxDraftParticipants = getDraftParticipantLimit(line);
+    const participants = clampDraftParticipants(
       participantDrafts[line.id] ?? currentParticipants,
       currentParticipants,
+      maxDraftParticipants,
     );
 
     setBusyAction({ lineId: line.id, action: "update" });
@@ -221,16 +342,28 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
       }));
       setMessage({
         tone: "success",
-        text: `Updated ${line.activity_title || "activity"} to ${formatParticipantsLabel(participants)}.`,
+        text: `Saved ${formatParticipantsLabel(participants)} for ${
+          line.activity_title || "this activity"
+        }. Your payment method can be saved next, and no charge is created unless the vendor confirms availability.`,
       });
     } catch (nextError: unknown) {
-      setMessage({
-        tone: "error",
-        text:
-          nextError instanceof Error
-            ? nextError.message
-            : "Unable to update this cart item.",
-      });
+      const nextMessage =
+        nextError instanceof Error
+          ? nextError.message
+          : "Unable to update this cart item.";
+
+      if (shouldRefreshCartAfterError(nextMessage)) {
+        setReloadToken((value) => value + 1);
+        setMessage({
+          tone: "warning",
+          text: `Availability changed while you were editing this request. ${nextMessage} We refreshed your cart so you can review the latest availability.`,
+        });
+      } else {
+        setMessage({
+          tone: "error",
+          text: nextMessage,
+        });
+      }
     } finally {
       setBusyAction(null);
     }
@@ -265,9 +398,10 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
         delete next[line.id];
         return next;
       });
+      setConfirmingRemovalLineId(null);
       setMessage({
         tone: "success",
-        text: `${line.activity_title || "Activity"} removed from your cart.`,
+        text: `${line.activity_title || "This activity"} was removed from your cart. You can keep browsing or continue with the remaining activity requests.`,
       });
     } catch (nextError: unknown) {
       setMessage({
@@ -312,13 +446,23 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
 
       window.location.assign(payload.url);
     } catch (nextError: unknown) {
-      setMessage({
-        tone: "error",
-        text:
-          nextError instanceof Error
-            ? nextError.message
-            : "Unable to start checkout right now.",
-      });
+      const nextMessage =
+        nextError instanceof Error
+          ? nextError.message
+          : "Unable to start checkout right now.";
+
+      if (shouldRefreshCartAfterError(nextMessage)) {
+        setReloadToken((value) => value + 1);
+        setMessage({
+          tone: "warning",
+          text: `Your cart changed before checkout could begin. ${nextMessage} We refreshed the latest availability so you can review it before saving a payment method.`,
+        });
+      } else {
+        setMessage({
+          tone: "error",
+          text: `${nextMessage} Stripe only saves a payment method at this step, so no charge was created.`,
+        });
+      }
     } finally {
       setCheckoutLoading(false);
     }
@@ -349,7 +493,9 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
                 Your cart
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-white/72 md:text-base">
-                Review your activities, adjust participant counts, and save a payment method for vendor approval. You will not be charged until the vendor confirms availability.
+                Review each activity request, update participants, and save a payment method for
+                vendor review. Stripe does not charge the guest during checkout. A charge only
+                happens later for bookings the vendor confirms.
               </p>
             </div>
             <Link
@@ -363,11 +509,9 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
 
         {message && (
           <div
-            className={`rounded-2xl border px-4 py-3 text-sm ${
-              message.tone === "success"
-                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                : "border-rose-200 bg-rose-50 text-rose-700"
-            }`}
+            className={`rounded-2xl border px-4 py-3 text-sm ${getMessageClasses(
+              message.tone,
+            )}`}
           >
             {message.text}
           </div>
@@ -394,10 +538,12 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
               className="text-3xl font-bold text-[#193059]"
               style={{ fontFamily: "var(--font-playfair)" }}
             >
-              Your cart is empty
+              No activity requests in your cart yet
             </h2>
-            <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-600 md:text-base">
-              Add an activity time slot to start building your trip. You can come back here anytime to adjust participants before checkout.
+            <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-slate-600 md:text-base">
+              Add an activity departure to start your trip. When you are ready, checkout will save
+              a payment method first, then vendors review live availability. You are only charged
+              later if a vendor confirms the booking.
             </p>
             <Link
               href="/vacation-planning"
@@ -410,7 +556,7 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.9fr)] lg:items-start">
             <section className="space-y-4">
               {lines.map((line) => {
-                const currentParticipants = getParticipantCount(line.participants);
+                const currentParticipants = getLineParticipants(line);
                 const participants = participantDrafts[line.id] ?? currentParticipants;
                 const isBusy = busyAction?.lineId === line.id;
                 const isUpdating =
@@ -418,6 +564,15 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
                 const isRemoving =
                   busyAction?.lineId === line.id && busyAction.action === "remove";
                 const hasParticipantChange = participants !== currentParticipants;
+                const availabilityState = getCartLineAvailabilityState(line);
+                const maxDraftParticipants = getDraftParticipantLimit(line);
+                const currentLineTotalCents = getLineTotalCents(line.line_total_cents);
+                const draftLineTotalCents = getDraftLineTotalCents(line, participants);
+                const canSaveParticipants =
+                  availabilityState.canEditParticipants &&
+                  hasParticipantChange &&
+                  participants <= line.remaining_capacity;
+                const isConfirmingRemove = confirmingRemovalLineId === line.id;
 
                 return (
                   <article
@@ -442,78 +597,150 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
                           )}
                         </div>
 
-                        <div className="min-w-0 space-y-3">
-                          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#407FC2]">
-                            Activity
-                          </p>
-                          <h2
-                            className="text-2xl font-bold text-[#193059]"
-                            style={{ fontFamily: "var(--font-playfair)" }}
-                          >
-                            {line.activity_title || "Untitled activity"}
-                          </h2>
-                          <p className="text-sm text-slate-600">
-                            {formatSlotDateTime(line.slot_starts_at, line.slot_ends_at)}
-                          </p>
-                          <p className="text-sm text-slate-600">
-                            Current booking: {formatParticipantsLabel(currentParticipants)}
-                          </p>
+                        <div className="min-w-0 space-y-4">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#407FC2]">
+                              Activity booking
+                            </p>
+                            <h2
+                              className="mt-2 text-2xl font-bold text-[#193059]"
+                              style={{ fontFamily: "var(--font-playfair)" }}
+                            >
+                              {line.activity_title || "Unavailable activity"}
+                            </h2>
+                            <p className="mt-2 text-sm text-slate-600">
+                              {formatSlotDateTime(line.slot_starts_at, line.slot_ends_at)}
+                            </p>
+                          </div>
+
                         </div>
                       </div>
 
-                      <div className="rounded-2xl bg-[#f4f8fc] px-5 py-4 text-left lg:min-w-[200px]">
-                        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-                          Line Total
+                      <div className="rounded-2xl border border-[#dbe7f2] bg-[#f4f8fc] px-5 py-4 text-left md:w-[280px] md:shrink-0">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                          {hasParticipantChange ? "Draft total" : "Request total"}
                         </p>
-                        <p className="mt-2 text-2xl font-semibold text-[#193059]">
-                          {formatCurrencyFromCents(getLineTotalCents(line.line_total_cents))}
+                        <p className="mt-2 text-3xl font-semibold text-[#193059]">
+                          {formatCurrencyFromCents(
+                            hasParticipantChange ? draftLineTotalCents : currentLineTotalCents,
+                          )}
+                        </p>
+                        <p className="mt-2 text-sm text-slate-600">
+                          {hasParticipantChange
+                            ? `${formatParticipantsLabel(participants)} pending save`
+                            : "Matches the participant count currently saved in your cart."}
                         </p>
                       </div>
                     </div>
 
-                    <div className="mt-6 flex flex-col gap-4 border-t border-[#e5eef7] pt-5 sm:flex-row sm:items-end sm:justify-between">
-                      <label className="block sm:min-w-[180px]">
-                        <span className="mb-2 block text-sm font-medium text-[#193059]">
-                          Participants
-                        </span>
-                        <input
-                          type="number"
-                          min={1}
-                          step={1}
-                          value={participants}
-                          disabled={isBusy || checkoutLoading}
-                          onChange={(event) => {
-                            const nextParticipants = normalizeParticipants(
-                              event.currentTarget.valueAsNumber,
-                              currentParticipants,
-                            );
-                            setMessage(null);
-                            setParticipantDrafts((current) => ({
-                              ...current,
-                              [line.id]: nextParticipants,
-                            }));
-                          }}
-                          className="w-full rounded-xl border border-[#c8d9ea] bg-white px-4 py-3 text-[#193059] outline-none transition-colors focus:border-[#407FC2] disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
-                        />
-                      </label>
+                    <div
+                      className={`mt-6 rounded-2xl border px-4 py-3 text-sm ${getAvailabilityClasses(
+                        availabilityState.tone,
+                      )}`}
+                    >
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em]">
+                        {availabilityState.title}
+                      </p>
+                      <p className="mt-2">{availabilityState.detail}</p>
+                    </div>
 
-                      <div className="flex flex-col gap-3 sm:flex-row">
-                        <button
-                          type="button"
-                          onClick={() => void handleUpdateParticipants(line)}
-                          disabled={isBusy || checkoutLoading || !hasParticipantChange}
-                          className="rounded-full border border-[#193059] px-5 py-3 text-sm font-semibold text-[#193059] transition-colors hover:bg-[#193059] hover:text-white disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400"
-                        >
-                          {isUpdating ? "Saving..." : "Update participants"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void handleRemoveLine(line)}
-                          disabled={isBusy || checkoutLoading}
-                          className="rounded-full border border-rose-200 px-5 py-3 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
-                        >
-                          {isRemoving ? "Removing..." : "Remove"}
-                        </button>
+                    <div className="mt-6 flex flex-col gap-4 border-t border-[#e5eef7] pt-5 xl:flex-row xl:items-end xl:justify-between">
+                      <div className="space-y-3">
+                        <div>
+                          <span className="mb-2 block text-sm font-medium text-[#193059]">
+                            Participants
+                          </span>
+                          <ParticipantStepper
+                            value={participants}
+                            max={maxDraftParticipants}
+                            disabled={
+                              isBusy || checkoutLoading || !availabilityState.canEditParticipants
+                            }
+                            onChange={(nextParticipants) => {
+                              setMessage(null);
+                              setParticipantDrafts((current) => ({
+                                ...current,
+                                [line.id]: clampDraftParticipants(
+                                  nextParticipants,
+                                  currentParticipants,
+                                  maxDraftParticipants,
+                                ),
+                              }));
+                            }}
+                          />
+                        </div>
+                        <p className="text-xs leading-5 text-slate-500">
+                          {availabilityState.canEditParticipants
+                            ? hasParticipantChange
+                              ? `Draft total: ${formatCurrencyFromCents(
+                                  draftLineTotalCents,
+                                )}. Save this change before you continue to checkout.`
+                              : `You can request up to ${formatSpotLabel(
+                                  maxDraftParticipants,
+                                )} from this cart view.`
+                            : "This line cannot be edited anymore. Remove it to continue."}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-col gap-3 xl:items-end">
+                        <div className="flex flex-col gap-3 sm:flex-row">
+                          <button
+                            type="button"
+                            onClick={() => void handleUpdateParticipants(line)}
+                            disabled={!canSaveParticipants || isBusy || checkoutLoading}
+                            className="rounded-full border border-[#193059] px-5 py-3 text-sm font-semibold text-[#193059] transition-colors hover:bg-[#193059] hover:text-white disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400"
+                          >
+                            {isUpdating ? "Saving..." : "Save participants"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMessage(null);
+                              setParticipantDrafts((current) => ({
+                                ...current,
+                                [line.id]: currentParticipants,
+                              }));
+                            }}
+                            disabled={!hasParticipantChange || isBusy || checkoutLoading}
+                            className="rounded-full border border-[#c8d9ea] px-5 py-3 text-sm font-semibold text-[#193059] transition-colors hover:bg-[#f4f8fc] disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
+                          >
+                            Reset
+                          </button>
+                          {!isConfirmingRemove ? (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmingRemovalLineId(line.id)}
+                              disabled={isBusy || checkoutLoading}
+                              className="rounded-full border border-rose-200 px-5 py-3 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
+                            >
+                              Remove
+                            </button>
+                          ) : null}
+                        </div>
+
+                        {isConfirmingRemove ? (
+                          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+                            <p>Remove this activity request from your cart?</p>
+                            <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+                              <button
+                                type="button"
+                                onClick={() => setConfirmingRemovalLineId(null)}
+                                disabled={isRemoving}
+                                className="rounded-full border border-rose-200 bg-white px-4 py-2 font-semibold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:text-slate-400"
+                              >
+                                Keep request
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleRemoveLine(line)}
+                                disabled={isRemoving}
+                                className="rounded-full bg-rose-600 px-4 py-2 font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                              >
+                                {isRemoving ? "Removing..." : "Remove activity"}
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   </article>
@@ -523,43 +750,78 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
 
             <aside className="rounded-[28px] border border-[#d8e5f2] bg-white p-6 shadow-[0_20px_60px_rgba(25,48,89,0.08)] lg:sticky lg:top-28">
               <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#407FC2]">
-                Order Summary
+                Order summary
               </p>
               <h2
                 className="mt-3 text-2xl font-bold text-[#193059]"
                 style={{ fontFamily: "var(--font-playfair)" }}
               >
-                Ready for checkout
+                Before secure checkout
               </h2>
+
               <div className="mt-6 space-y-4 rounded-2xl bg-[#f4f8fc] p-4">
                 <div className="flex items-center justify-between gap-4 text-sm text-slate-600">
-                  <span>Items</span>
-                  <span>{lines.length}</span>
+                  <span>Activities</span>
+                  <span>{summary.activityCount}</span>
+                </div>
+                <div className="flex items-center justify-between gap-4 text-sm text-slate-600">
+                  <span>Participants</span>
+                  <span>{summary.participantCount}</span>
                 </div>
                 <div className="flex items-center justify-between gap-4 text-sm text-slate-600">
                   <span>Subtotal</span>
                   <span className="font-semibold text-[#193059]">
-                    {formatCurrencyFromCents(subtotalCents)}
+                    {formatCurrencyFromCents(summary.subtotalCents)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-4 border-t border-[#d8e5f2] pt-4 text-base font-semibold text-[#193059]">
                   <span>Total</span>
-                  <span>{formatCurrencyFromCents(totalCents)}</span>
+                  <span>{formatCurrencyFromCents(summary.totalCents)}</span>
                 </div>
               </div>
 
-              <p className="mt-4 text-sm leading-6 text-slate-600">
-                Stripe will securely save your payment method now. Your booking request is submitted after setup completes, and the card is charged only if the vendor approves.
-              </p>
+              <div className="mt-6 rounded-2xl border border-[#d8e5f2] bg-[#fbfdff] p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                  How checkout works
+                </p>
+                <ol className="mt-4 space-y-3 text-sm text-slate-600">
+                  <li className="flex gap-3">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#193059] text-xs font-semibold text-white">
+                      1
+                    </span>
+                    <span>Save a payment method securely in Stripe.</span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#193059] text-xs font-semibold text-white">
+                      2
+                    </span>
+                    <span>Vendors review live availability for each activity request.</span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#193059] text-xs font-semibold text-white">
+                      3
+                    </span>
+                    <span>Only confirmed bookings are charged later.</span>
+                  </li>
+                </ol>
+              </div>
+
+              {checkoutState.blockingMessage ? (
+                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  {checkoutState.blockingMessage}
+                </div>
+              ) : null}
 
               <button
                 type="button"
                 onClick={() => void handleCheckout()}
-                disabled={checkoutLoading || busyAction !== null}
+                disabled={checkoutLoading || checkoutState.disabled}
                 className="mt-6 w-full rounded-full bg-gradient-to-r from-[#407FC2] to-[#193059] px-6 py-4 text-sm font-semibold text-white transition-all duration-300 hover:from-[#193059] hover:to-[#407FC2] disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-400"
               >
-                {checkoutLoading ? "Redirecting to checkout..." : "Checkout"}
+                {checkoutLoading ? "Opening secure checkout..." : checkoutState.label}
               </button>
+
+              <p className="mt-4 text-sm leading-6 text-slate-600">{checkoutState.supportText}</p>
             </aside>
           </div>
         )}

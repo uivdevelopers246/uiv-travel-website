@@ -7,8 +7,8 @@ export default function CheckoutCancelPage() {
       <Header />
       <CartClient
         initialMessage={{
-          tone: "error",
-          text: "Checkout was canceled before your payment method was saved. Your cart is unchanged, and you can retry whenever you're ready.",
+          tone: "warning",
+          text: "Checkout was canceled before your payment method was saved. Your cart is unchanged, and no charge was created. You can try again whenever you're ready.",
         }}
       />
     </>

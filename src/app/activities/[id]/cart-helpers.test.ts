@@ -22,7 +22,7 @@ describe("getAddToCartSuccessMessage", () => {
         slotDateTimeLabel: "Friday, June 12, 2026 at 10:00 AM - 12:00 PM",
       }),
     ).toBe(
-      "Updated your cart to 4 participants for Friday, June 12, 2026 at 10:00 AM - 12:00 PM. Review your cart to save your payment method.",
+      "Updated your cart to 4 participants for Friday, June 12, 2026 at 10:00 AM - 12:00 PM. Review your cart to save a payment method. You will only be charged later if the vendor confirms availability.",
     );
   });
 
@@ -34,7 +34,7 @@ describe("getAddToCartSuccessMessage", () => {
         slotDateTimeLabel: "Friday, June 12, 2026 at 10:00 AM - 12:00 PM",
       }),
     ).toBe(
-      "Added 1 participant for Friday, June 12, 2026 at 10:00 AM - 12:00 PM. Review your cart to save your payment method and submit the request.",
+      "Added 1 participant for Friday, June 12, 2026 at 10:00 AM - 12:00 PM. Review your cart to save a payment method. You will only be charged later if the vendor confirms availability.",
     );
   });
 });
