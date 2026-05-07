@@ -2,15 +2,16 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import {
-  type BuyerFlowMessage,
-  getOrderStatusNotice,
-} from "@/lib/orders/buyer-flow";
+import type { BuyerFlowMessage } from "@/lib/orders/buyer-flow";
 import { collectOrderStatusAlerts } from "@/lib/orders/status-alerts";
-import type {
-  ActivityBookingWithPreview,
-  OrderWithActivityBookingsPaymentPreview,
-} from "@/lib/orders/types";
+import type { OrderWithActivityBookingsPaymentPreview } from "@/lib/orders/types";
+import {
+  type BookingDisplayState,
+  type CountdownState,
+  type UiTone,
+  getOrderCardState,
+  shouldOrdersPoll,
+} from "./my-bookings-ui";
 
 const BOOKING_REFRESH_INTERVAL_MS = 30_000;
 
@@ -37,19 +38,22 @@ const slotTimeFormatter = new Intl.DateTimeFormat("en-US", {
   minute: "2-digit",
 });
 
+type Toast = {
+  id: number;
+  tone: "success" | "warning" | "error";
+  message: string;
+};
+
+type MyBookingsClientProps = {
+  initialReturnMessage?: BuyerFlowMessage | null;
+};
+
 function redirectToLogin() {
   window.location.assign("/auth/login?redirect=/my-trip/bookings");
 }
 
 function formatCurrencyFromCents(value: number) {
   return currencyFormatter.format(value / 100);
-}
-
-function formatStatusLabel(status: string) {
-  return status
-    .split("_")
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(" ");
 }
 
 function formatParticipants(count: number) {
@@ -67,21 +71,7 @@ function formatSlotDateTime(startsAt: string, endsAt: string) {
   return `${slotDateFormatter.format(start)} - ${slotTimeFormatter.format(start)} to ${slotTimeFormatter.format(end)}`;
 }
 
-function formatCountdown(deadlineAt: string | null, now: number) {
-  if (!deadlineAt) {
-    return null;
-  }
-
-  const deadlineMs = new Date(deadlineAt).getTime();
-  if (Number.isNaN(deadlineMs)) {
-    return null;
-  }
-
-  const remainingMs = deadlineMs - now;
-  if (remainingMs <= 0) {
-    return "SLA expired, awaiting status update";
-  }
-
+function formatDurationCountdown(remainingMs: number) {
   const totalSeconds = Math.floor(remainingMs / 1000);
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -90,53 +80,32 @@ function formatCountdown(deadlineAt: string | null, now: number) {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")} left`;
 }
 
-function getOrderApprovalDeadlineAt(
-  order: OrderWithActivityBookingsPaymentPreview,
-): string | null {
-  const pendingDeadlines = order.activity_bookings
-    .filter((booking) => booking.status === "pending_approval")
-    .map((booking) => booking.approval_deadline_at)
-    .filter((deadline): deadline is string => typeof deadline === "string");
-
-  if (pendingDeadlines.length === 0) {
-    return null;
+function formatCountdownLabel(
+  countdown: CountdownState,
+  prefix: string,
+) {
+  if (countdown.kind === "active") {
+    return `${prefix}: ${formatDurationCountdown(countdown.remainingMs)}`;
   }
 
-  pendingDeadlines.sort((left, right) => left.localeCompare(right));
-  return pendingDeadlines[0] ?? null;
-}
-
-function getOrderStatusClasses(status: string) {
-  switch (status) {
-    case "awaiting_payment":
-    case "awaiting_vendor_approval":
-      return "border-amber-200 bg-amber-50 text-amber-800";
-    case "payment_pending":
-      return "border-sky-200 bg-sky-50 text-sky-700";
-    case "paid":
-      return "border-emerald-200 bg-emerald-50 text-emerald-700";
-    case "reconciliation_required":
-    case "failed":
-    case "cancelled":
-    case "declined":
-    case "expired":
-      return "border-rose-200 bg-rose-50 text-rose-700";
-    default:
-      return "border-slate-200 bg-slate-100 text-slate-700";
+  if (countdown.kind === "expired") {
+    return countdown.message;
   }
+
+  return null;
 }
 
-function getBookingStatusClasses(status: string) {
-  switch (status) {
-    case "pending_approval":
-      return "border-amber-200 bg-amber-50 text-amber-800";
-    case "confirmed":
-      return "border-emerald-200 bg-emerald-50 text-emerald-700";
-    case "declined":
-    case "expired":
-      return "border-rose-200 bg-rose-50 text-rose-700";
-    case "cancelled":
-      return "border-slate-200 bg-slate-100 text-slate-700";
+function getToneClasses(tone: UiTone) {
+  switch (tone) {
+    case "amber":
+      return "border-amber-200 bg-amber-50 text-amber-900";
+    case "emerald":
+      return "border-emerald-200 bg-emerald-50 text-emerald-800";
+    case "rose":
+      return "border-rose-200 bg-rose-50 text-rose-800";
+    case "sky":
+      return "border-sky-200 bg-sky-50 text-sky-800";
+    case "slate":
     default:
       return "border-slate-200 bg-slate-100 text-slate-700";
   }
@@ -208,25 +177,24 @@ async function createPaymentRecoverySession(orderId: string): Promise<string> {
 }
 
 type BookingLineProps = {
-  booking: ActivityBookingWithPreview;
+  bookingState: BookingDisplayState;
+  showCountdown: boolean;
 };
 
-type Toast = {
-  id: number;
-  tone: "success" | "warning" | "error";
-  message: string;
-};
+function BookingLine({ bookingState, showCountdown }: BookingLineProps) {
+  const countdownLabel = showCountdown
+    ? formatCountdownLabel(bookingState.countdown, "Approval window")
+    : null;
 
-function BookingLine({ booking }: BookingLineProps) {
   return (
     <article className="rounded-[24px] border border-[#d8e5f2] bg-[#f8fbfe] p-5">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="flex min-w-0 flex-1 gap-4">
-          <div className="h-28 w-28 shrink-0 overflow-hidden rounded-[22px] bg-[linear-gradient(135deg,#dbe8f6_0%,#8ec7ff_48%,#193059_100%)] shadow-[0_14px_36px_rgba(25,48,89,0.12)]">
-            {booking.activity_image_url ? (
+      <div className="flex flex-col gap-4">
+        <div className="flex min-w-0 flex-col gap-4 sm:flex-row">
+          <div className="h-40 w-full shrink-0 overflow-hidden rounded-[22px] bg-[linear-gradient(135deg,#dbe8f6_0%,#8ec7ff_48%,#193059_100%)] shadow-[0_14px_36px_rgba(25,48,89,0.12)] sm:h-28 sm:w-28">
+            {bookingState.booking.activity_image_url ? (
               <img
-                src={booking.activity_image_url}
-                alt={booking.activity_title}
+                src={bookingState.booking.activity_image_url}
+                alt={bookingState.booking.activity_title}
                 className="h-full w-full object-cover"
               />
             ) : (
@@ -238,50 +206,75 @@ function BookingLine({ booking }: BookingLineProps) {
             )}
           </div>
 
-          <div className="min-w-0 space-y-3">
-            <div className="flex flex-wrap items-center gap-3">
+          <div className="min-w-0 flex-1 space-y-3">
+            <div className="flex flex-wrap items-start gap-2">
               <h3
-                className="text-2xl font-bold text-[#193059]"
+                className="min-w-0 flex-1 text-2xl font-bold text-[#193059]"
                 style={{ fontFamily: "var(--font-playfair)" }}
               >
-                {booking.activity_title}
+                {bookingState.booking.activity_title}
               </h3>
-              {booking.status !== "pending_approval" ? (
+              <span
+                className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${getToneClasses(
+                  bookingState.tone,
+                )}`}
+              >
+                {bookingState.statusLabel}
+              </span>
+              {countdownLabel ? (
                 <span
-                  className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${getBookingStatusClasses(
-                    booking.status,
+                  className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${getToneClasses(
+                    bookingState.countdown.kind === "expired"
+                      ? "rose"
+                      : "amber",
                   )}`}
                 >
-                  {formatStatusLabel(booking.status)}
+                  {countdownLabel}
                 </span>
               ) : null}
             </div>
 
-            <p className="text-sm text-slate-600">
-              {formatSlotDateTime(booking.slot_starts_at, booking.slot_ends_at)}
+            <p className="text-sm font-medium leading-6 text-slate-700">
+              {bookingState.detail}
             </p>
-            <p className="text-sm text-slate-600">
-              {formatParticipants(booking.participants)}
-            </p>
-          </div>
-        </div>
 
-        <div className="rounded-2xl bg-white px-5 py-4 text-left shadow-[0_12px_32px_rgba(25,48,89,0.06)] lg:min-w-[180px]">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-            Booking Total
-          </p>
-          <p className="mt-2 text-2xl font-semibold text-[#193059]">
-            {formatCurrencyFromCents(booking.total_cents)}
-          </p>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="rounded-[20px] border border-[#d8e5f2] bg-white px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                  Slot
+                </p>
+                <p className="mt-2 text-sm font-semibold leading-6 text-[#193059]">
+                  {formatSlotDateTime(
+                    bookingState.booking.slot_starts_at,
+                    bookingState.booking.slot_ends_at,
+                  )}
+                </p>
+              </div>
+
+              <div className="rounded-[20px] border border-[#d8e5f2] bg-white px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                  Participants
+                </p>
+                <p className="mt-2 text-sm font-semibold leading-6 text-[#193059]">
+                  {formatParticipants(bookingState.booking.participants)}
+                </p>
+              </div>
+
+              <div className="rounded-[20px] border border-[#d8e5f2] bg-white px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                  Booking total
+                </p>
+                <p className="mt-2 text-sm font-semibold leading-6 text-[#193059]">
+                  {formatCurrencyFromCents(bookingState.booking.total_cents)}
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </article>
   );
 }
-
-type MyBookingsClientProps = {
-  initialReturnMessage?: BuyerFlowMessage | null;
-};
 
 export function MyBookingsClient({
   initialReturnMessage = null,
@@ -290,6 +283,7 @@ export function MyBookingsClient({
     [],
   );
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [now, setNow] = useState(() => Date.now());
@@ -299,6 +293,15 @@ export function MyBookingsClient({
   const hasLoadedRef = useRef(false);
   const previousOrdersRef = useRef<OrderWithActivityBookingsPaymentPreview[]>([]);
 
+  function pushToast(tone: Toast["tone"], message: string) {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    setToasts((current) => [...current, { id, tone, message }]);
+
+    window.setTimeout(() => {
+      setToasts((current) => current.filter((toast) => toast.id !== id));
+    }, 5000);
+  }
+
   useEffect(() => {
     let active = true;
     const isInitialLoad = !hasLoadedRef.current;
@@ -306,6 +309,8 @@ export function MyBookingsClient({
     if (isInitialLoad) {
       setLoading(true);
       setError(null);
+    } else {
+      setRefreshing(true);
     }
 
     void (async () => {
@@ -322,15 +327,7 @@ export function MyBookingsClient({
           );
 
           for (const alert of alerts) {
-            const id = Date.now() + Math.floor(Math.random() * 1000);
-            setToasts((current) => [
-              ...current,
-              { id, tone: alert.tone, message: alert.message },
-            ]);
-
-            window.setTimeout(() => {
-              setToasts((current) => current.filter((toast) => toast.id !== id));
-            }, 5000);
+            pushToast(alert.tone, alert.message);
           }
         }
 
@@ -343,18 +340,29 @@ export function MyBookingsClient({
           return;
         }
 
+        const message =
+          nextError instanceof Error
+            ? nextError.message
+            : "Unable to load your bookings right now.";
+
         if (isInitialLoad) {
           setOrders([]);
-          setError(
-            nextError instanceof Error
-              ? nextError.message
-              : "Unable to load your bookings right now.",
+          setError(message);
+        } else {
+          pushToast(
+            "error",
+            `Unable to refresh booking statuses right now. ${message}`,
           );
         }
       } finally {
-        if (active && isInitialLoad) {
+        if (!active) {
+          return;
+        }
+
+        if (isInitialLoad) {
           setLoading(false);
         }
+        setRefreshing(false);
       }
     })();
 
@@ -363,7 +371,37 @@ export function MyBookingsClient({
     };
   }, [reloadToken]);
 
+  const orderCards = orders.map((order) => getOrderCardState(order, now));
+  const shouldPoll = shouldOrdersPoll(orders);
+  const hasActiveCountdowns = orderCards.some((card) => card.hasActiveCountdown);
+
   useEffect(() => {
+    const url = new URL(window.location.href);
+    const checkoutState = url.searchParams.get("checkout");
+    const paymentRecoveryState = url.searchParams.get("payment_recovery");
+    const shouldRefreshImmediately =
+      checkoutState === "success" ||
+      checkoutState === "pending" ||
+      paymentRecoveryState === "updated";
+
+    if (!shouldRefreshImmediately) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setReloadToken((value) => value + 1);
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (loading || !shouldPoll) {
+      return;
+    }
+
     const intervalId = window.setInterval(() => {
       setReloadToken((value) => value + 1);
     }, BOOKING_REFRESH_INTERVAL_MS);
@@ -371,9 +409,13 @@ export function MyBookingsClient({
     return () => {
       window.clearInterval(intervalId);
     };
-  }, []);
+  }, [loading, shouldPoll]);
 
   useEffect(() => {
+    if (!hasActiveCountdowns) {
+      return;
+    }
+
     const intervalId = window.setInterval(() => {
       setNow(Date.now());
     }, 1000);
@@ -381,7 +423,7 @@ export function MyBookingsClient({
     return () => {
       window.clearInterval(intervalId);
     };
-  }, []);
+  }, [hasActiveCountdowns]);
 
   useEffect(() => {
     if (!initialReturnMessage) {
@@ -411,25 +453,19 @@ export function MyBookingsClient({
         window.location.assign(url);
       }
     } catch (nextError: unknown) {
-      const id = Date.now();
-      setToasts((current) => [
-        ...current,
-        {
-          id,
-          tone: "error",
-          message:
-            nextError instanceof Error
-              ? nextError.message
-              : "Unable to start payment recovery right now.",
-        },
-      ]);
-
-      window.setTimeout(() => {
-        setToasts((current) => current.filter((toast) => toast.id !== id));
-      }, 5000);
+      pushToast(
+        "error",
+        nextError instanceof Error
+          ? nextError.message
+          : "Unable to start payment recovery right now.",
+      );
     } finally {
       setRecoveringOrderId((current) => (current === orderId ? null : current));
     }
+  }
+
+  function refreshBookings() {
+    setReloadToken((value) => value + 1);
   }
 
   return (
@@ -449,7 +485,7 @@ export function MyBookingsClient({
             </span>
           </div>
 
-          <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div className="mt-4 flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
             <div>
               <h1
                 className="text-4xl font-bold md:text-5xl"
@@ -458,27 +494,42 @@ export function MyBookingsClient({
                 Your bookings
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-white/72 md:text-base">
-                Track every booking request after checkout, including vendor approval progress, charge status, and time remaining on pending approvals.
+                See what is still waiting on vendors, what has already been confirmed, when payment
+                is involved, and exactly what to do next for each order.
+              </p>
+              <p className="mt-3 text-xs font-semibold uppercase tracking-[0.22em] text-white/62">
+                {loading
+                  ? "Loading your latest booking statuses"
+                  : shouldPoll
+                    ? "Statuses refresh automatically while vendor or payment updates are still in progress."
+                    : "All current orders are settled. Refresh any time if you want to check again."}
               </p>
             </div>
-            <Link
-              href="/vacation-planning"
-              className="inline-flex items-center justify-center rounded-full border border-white/20 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/10"
-            >
-              Explore activities
-            </Link>
+
+            <div className="flex w-full flex-col gap-3 sm:flex-row xl:w-auto">
+              <button
+                type="button"
+                onClick={refreshBookings}
+                disabled={loading || refreshing}
+                className="inline-flex items-center justify-center rounded-full border border-white/20 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loading || refreshing ? "Refreshing..." : "Refresh status"}
+              </button>
+              <Link
+                href="/vacation-planning"
+                className="inline-flex items-center justify-center rounded-full border border-white/20 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/10"
+              >
+                Explore activities
+              </Link>
+            </div>
           </div>
         </section>
 
         {returnMessage ? (
           <section
-            className={`rounded-2xl border px-4 py-3 text-sm ${
-              returnMessage.tone === "success"
-                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                : returnMessage.tone === "warning"
-                  ? "border-amber-200 bg-amber-50 text-amber-900"
-                  : "border-rose-200 bg-rose-50 text-rose-700"
-            }`}
+            className={`rounded-2xl border px-4 py-3 text-sm ${getToastClasses(
+              returnMessage.tone,
+            )}`}
           >
             {returnMessage.message}
           </section>
@@ -493,7 +544,7 @@ export function MyBookingsClient({
             <p className="text-sm text-rose-700">{error}</p>
             <button
               type="button"
-              onClick={() => setReloadToken((value) => value + 1)}
+              onClick={refreshBookings}
               className="mt-4 inline-flex rounded-full border border-rose-300 px-4 py-2 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
             >
               Retry
@@ -507,8 +558,10 @@ export function MyBookingsClient({
             >
               No bookings yet
             </h2>
-            <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-600 md:text-base">
-              Once you save a payment method and submit an activity request, your order and booking status will appear here.
+            <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-slate-600 md:text-base">
+              Booking requests only appear here after checkout is completed. If you still have
+              items in your cart, they are not bookings yet until your payment method is saved and
+              the request is submitted.
             </p>
             <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link
@@ -527,144 +580,227 @@ export function MyBookingsClient({
           </section>
         ) : (
           <section className="space-y-6">
-            {orders.map((order) => {
-              const statusNotice = getOrderStatusNotice(order);
-              const isFinalizingOrder =
-                order.activity_bookings.length === 0 &&
-                (order.status === "awaiting_payment" ||
-                  order.status === "awaiting_vendor_approval");
-              const orderApprovalCountdown = formatCountdown(
-                getOrderApprovalDeadlineAt(order),
-                now,
+            {orderCards.map((card) => {
+              const orderCountdownLabel = formatCountdownLabel(
+                card.countdown,
+                "Earliest deadline",
               );
+              const bookingCountLabel = card.isFinalizing
+                ? "Booking items still syncing"
+                : `${card.order.activity_bookings.length} ${
+                    card.order.activity_bookings.length === 1
+                      ? "activity booking"
+                      : "activity bookings"
+                  }`;
 
               return (
                 <article
-                  key={order.id}
+                  key={card.order.id}
                   className="rounded-[28px] border border-[#d8e5f2] bg-white p-6 shadow-[0_20px_60px_rgba(25,48,89,0.08)]"
                 >
-                  {statusNotice && order.status !== "awaiting_vendor_approval" ? (
-                    <div
-                      className={`mb-5 rounded-[22px] border px-4 py-3 text-sm font-medium ${getToastClasses(
-                        statusNotice.tone,
-                      )}`}
-                    >
-                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                        <div>
-                          <p className="text-xs font-semibold uppercase tracking-[0.22em]">
-                            {statusNotice.title}
+                  <div className="flex flex-col gap-5 border-b border-[#e5eef7] pb-5">
+                    <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#407FC2]">
+                            Order {card.order.id.slice(0, 8)}
                           </p>
-                          <p className="mt-2">{statusNotice.message}</p>
-                          {statusNotice.failureMessage ? (
-                            <p className="mt-2 text-sm">
-                              Reason: {statusNotice.failureMessage}
-                            </p>
-                          ) : null}
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-2">
-                          {statusNotice.receiptUrl ? (
-                            <a
-                              href={statusNotice.receiptUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex rounded-full border border-current/25 bg-white/70 px-4 py-2 text-sm font-semibold transition-colors hover:bg-white"
-                            >
-                              View receipt
-                            </a>
-                          ) : null}
-
-                          {statusNotice.canRetry ? (
-                            <button
-                              type="button"
-                              onClick={() => void handlePaymentRecovery(order.id)}
-                              disabled={recoveringOrderId === order.id}
-                              className="inline-flex rounded-full border border-current/25 bg-white/70 px-4 py-2 text-sm font-semibold transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {recoveringOrderId === order.id
-                                ? "Opening payment update..."
-                                : "Update payment method"}
-                            </button>
-                          ) : null}
-
-                          {statusNotice.showContactSupport ? (
-                            <Link
-                              href="/contact"
-                              className="inline-flex rounded-full border border-current/25 bg-white/70 px-4 py-2 text-sm font-semibold transition-colors hover:bg-white"
-                            >
-                              Contact support
-                            </Link>
-                          ) : null}
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="flex flex-col gap-5 border-b border-[#e5eef7] pb-5 md:flex-row md:items-start md:justify-between">
-                    <div className="space-y-3">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#407FC2]">
-                          Order {order.id.slice(0, 8)}
-                        </p>
-                        <div className="flex flex-wrap items-center gap-2">
                           <span
-                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${getOrderStatusClasses(
-                              order.status,
+                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${getToneClasses(
+                              card.phase.tone,
                             )}`}
                           >
-                            {formatStatusLabel(order.status)}
+                            {card.phase.label}
                           </span>
-                          {order.status === "awaiting_vendor_approval" &&
-                          orderApprovalCountdown ? (
-                            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700">
-                              {orderApprovalCountdown}
-                            </span>
-                          ) : null}
+                        </div>
+
+                        <div>
+                          <h2
+                            className="text-3xl font-bold text-[#193059]"
+                            style={{ fontFamily: "var(--font-playfair)" }}
+                          >
+                            {bookingCountLabel}
+                          </h2>
+                          <p className="mt-2 text-sm text-slate-600">
+                            Placed {orderDateFormatter.format(new Date(card.order.created_at))}
+                          </p>
+                        </div>
+
+                        {card.pendingApprovalSummary || orderCountdownLabel ? (
+                          <div className="flex flex-wrap items-center gap-2">
+                            {card.pendingApprovalSummary ? (
+                              <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-900">
+                                {card.pendingApprovalSummary}
+                              </span>
+                            ) : null}
+                            {orderCountdownLabel ? (
+                              <span
+                                className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${getToneClasses(
+                                  card.countdown.kind === "expired"
+                                    ? "rose"
+                                    : "amber",
+                                )}`}
+                              >
+                                {orderCountdownLabel}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+
+                        <div className="grid gap-3 rounded-[24px] bg-[#f4f8fc] p-4 text-sm text-slate-600 sm:min-w-[240px]">
+                        <div className="flex items-center justify-between gap-4">
+                          <span>Order total</span>
+                          <span className="font-semibold text-[#193059]">
+                            {formatCurrencyFromCents(card.order.total_cents)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span>Bookings</span>
+                          <span className="font-semibold text-[#193059]">
+                            {card.isFinalizing
+                              ? "Syncing..."
+                              : card.order.activity_bookings.length}
+                          </span>
                         </div>
                       </div>
-                      <h2
-                        className="text-3xl font-bold text-[#193059]"
-                        style={{ fontFamily: "var(--font-playfair)" }}
-                      >
-                        {isFinalizingOrder
-                          ? "Booking request being finalized"
-                          : `${order.activity_bookings.length} ${
-                              order.activity_bookings.length === 1
-                                ? "activity booking"
-                                : "activity bookings"
-                            }`}
-                      </h2>
-                      <p className="text-sm text-slate-600">
-                        Placed {orderDateFormatter.format(new Date(order.created_at))}
-                      </p>
                     </div>
 
-                    <div className="grid gap-3 rounded-[24px] bg-[#f4f8fc] p-4 text-sm text-slate-600 sm:min-w-[240px]">
-                      <div className="flex items-center justify-between gap-4">
-                        <span>Order total</span>
-                        <span className="font-semibold text-[#193059]">
-                          {formatCurrencyFromCents(order.total_cents)}
-                        </span>
+                    <div
+                      className={`rounded-[24px] border px-5 py-4 ${getToneClasses(
+                        card.notice.tone,
+                      )}`}
+                    >
+                      {(() => {
+                        const showDetailBoxes =
+                          card.notice.actions.receiptUrl != null ||
+                          card.notice.actions.canRetry ||
+                          card.notice.actions.showContactSupport ||
+                          card.notice.failureMessage != null ||
+                          card.phase.kind === "payment_failed" ||
+                          card.phase.kind === "support_review";
+                        const compactNotice =
+                          card.phase.kind === "vendor_review"
+                            ? "No charge yet. We only charge confirmed bookings after vendors respond."
+                            : card.phase.kind === "payment_processing"
+                              ? "Charge in progress. This order updates automatically."
+                              : card.phase.kind === "finalizing"
+                                ? "We are still attaching booking details to this order."
+                                : card.phase.kind === "payment_complete"
+                                  ? "Payment completed successfully."
+                                  : card.phase.kind === "no_payment_collected"
+                                    ? "No payment was collected for this order."
+                                    : `${card.notice.paymentLabel} ${card.notice.nextStepLabel}`;
+
+                        return (
+                      <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                        <div className="flex-1 space-y-4">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.22em]">
+                              Order status
+                            </p>
+                            <h3 className="mt-3 text-xl font-semibold text-current">
+                              {card.notice.title}
+                            </h3>
+                            <p className="mt-2 text-sm leading-6 text-current/90">
+                              {card.notice.message}
+                            </p>
+                          </div>
+
+                          {showDetailBoxes ? (
+                            <div className="grid gap-3 md:grid-cols-2">
+                              <div className="rounded-[20px] border border-current/10 bg-white/70 px-4 py-3">
+                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-current/70">
+                                  Payment
+                                </p>
+                                <p className="mt-2 text-sm font-medium leading-6 text-current">
+                                  {card.notice.paymentLabel}
+                                </p>
+                              </div>
+                              <div className="rounded-[20px] border border-current/10 bg-white/70 px-4 py-3">
+                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-current/70">
+                                  Next step
+                                </p>
+                                <p className="mt-2 text-sm font-medium leading-6 text-current">
+                                  {card.notice.nextStepLabel}
+                                </p>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-sm font-medium leading-6 text-current/90">
+                              {compactNotice}
+                            </p>
+                          )}
+
+                          {card.notice.failureMessage ? (
+                            <div className="rounded-[20px] border border-current/10 bg-white/70 px-4 py-3">
+                              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-current/70">
+                                Failure reason
+                              </p>
+                              <p className="mt-2 text-sm font-medium leading-6 text-current">
+                                {card.notice.failureMessage}
+                              </p>
+                            </div>
+                          ) : null}
+                        </div>
+
+                        {card.notice.actions.receiptUrl ||
+                        card.notice.actions.canRetry ||
+                        card.notice.actions.showContactSupport ? (
+                          <div className="grid w-full gap-2 sm:grid-cols-2 xl:w-[260px] xl:grid-cols-1">
+                            {card.notice.actions.receiptUrl ? (
+                              <a
+                                href={card.notice.actions.receiptUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex w-full items-center justify-center rounded-full border border-current/25 bg-white/70 px-4 py-3 text-sm font-semibold text-current transition-colors hover:bg-white"
+                              >
+                                View receipt
+                              </a>
+                            ) : null}
+
+                            {card.notice.actions.canRetry ? (
+                              <button
+                                type="button"
+                                onClick={() => void handlePaymentRecovery(card.order.id)}
+                                disabled={recoveringOrderId === card.order.id}
+                                className="inline-flex w-full items-center justify-center rounded-full border border-current/25 bg-white/70 px-4 py-3 text-sm font-semibold text-current transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {recoveringOrderId === card.order.id
+                                  ? "Opening payment update..."
+                                  : "Update payment method"}
+                              </button>
+                            ) : null}
+
+                            {card.notice.actions.showContactSupport ? (
+                              <Link
+                                href="/contact"
+                                className="inline-flex w-full items-center justify-center rounded-full border border-current/25 bg-white/70 px-4 py-3 text-sm font-semibold text-current transition-colors hover:bg-white"
+                              >
+                                Contact support
+                              </Link>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
-                      <div className="flex items-center justify-between gap-4">
-                        <span>Lines</span>
-                        <span className="font-semibold text-[#193059]">
-                          {isFinalizingOrder ? "Syncing..." : order.activity_bookings.length}
-                        </span>
-                      </div>
+                        );
+                      })()}
                     </div>
                   </div>
 
                   <div className="mt-6 space-y-4">
-                    {isFinalizingOrder ? (
-                      <div className="rounded-[24px] border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-900">
+                    {card.isFinalizing ? (
+                      <div className="rounded-[24px] border border-sky-200 bg-sky-50 p-5 text-sm leading-6 text-sky-900">
                         We&apos;re still creating the booking items for this order after checkout.
-                        Refresh is automatic, and this card will update as soon as the request is
-                        fully attached to your account.
+                        Refresh is automatic while the request is being attached to your account.
                       </div>
                     ) : (
-                      order.activity_bookings.map((booking) => (
-                        <BookingLine key={booking.id} booking={booking} />
+                      card.bookingStates.map((bookingState) => (
+                        <BookingLine
+                          key={bookingState.booking.id}
+                          bookingState={bookingState}
+                          showCountdown={card.pendingApprovalCount > 1}
+                        />
                       ))
                     )}
                   </div>
