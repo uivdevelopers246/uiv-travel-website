@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { formatCurrencyFromCents } from "@/lib/utils/formatting";
+import { redirectToLogin as redirectClientToLogin } from "@/app/_shared/client-auth";
 
 type BookingStatus =
   | "pending_approval"
@@ -48,10 +50,10 @@ type Toast = {
   message: string;
 };
 
-const currencyFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-});
+type VendorApproveResponse = {
+  ok?: boolean;
+  outcome?: "approved" | "payment_failed" | "payment_review";
+};
 
 const slotDateFormatter = new Intl.DateTimeFormat("en-US", {
   weekday: "short",
@@ -66,11 +68,7 @@ const slotTimeFormatter = new Intl.DateTimeFormat("en-US", {
 });
 
 function redirectToLogin() {
-  window.location.assign("/auth/login?redirect=/my-listings/bookings");
-}
-
-function formatCurrencyFromCents(value: number) {
-  return currencyFormatter.format(value / 100);
+  redirectClientToLogin("/my-listings/bookings");
 }
 
 function formatStatusLabel(status: BookingStatus) {
@@ -211,52 +209,55 @@ export function VendorBookingsClient() {
     Record<string, "approve" | "decline">
   >({});
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const nextToastId = useRef(0);
 
   useEffect(() => {
     let active = true;
+    const timeoutId = window.setTimeout(() => {
+      setLoading(true);
+      setError(null);
+      setAccessDenied(false);
 
-    setLoading(true);
-    setError(null);
-    setAccessDenied(false);
+      void (async () => {
+        try {
+          const nextData = await fetchVendorBookings(statusFilter, activityFilter);
+          if (!active) {
+            return;
+          }
 
-    void (async () => {
-      try {
-        const nextData = await fetchVendorBookings(statusFilter, activityFilter);
-        if (!active) {
-          return;
+          setBookings(nextData.bookings);
+          setActivities(nextData.activities);
+        } catch (nextError: unknown) {
+          if (!active) {
+            return;
+          }
+
+          setBookings([]);
+
+          if (
+            nextError instanceof Error &&
+            nextError.message === "FORBIDDEN_VENDOR"
+          ) {
+            setAccessDenied(true);
+            return;
+          }
+
+          setError(
+            nextError instanceof Error
+              ? nextError.message
+              : "Unable to load booking requests right now.",
+          );
+        } finally {
+          if (active) {
+            setLoading(false);
+          }
         }
-
-        setBookings(nextData.bookings);
-        setActivities(nextData.activities);
-      } catch (nextError: unknown) {
-        if (!active) {
-          return;
-        }
-
-        setBookings([]);
-
-        if (
-          nextError instanceof Error &&
-          nextError.message === "FORBIDDEN_VENDOR"
-        ) {
-          setAccessDenied(true);
-          return;
-        }
-
-        setError(
-          nextError instanceof Error
-            ? nextError.message
-            : "Unable to load booking requests right now.",
-        );
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    })();
+      })();
+    }, 0);
 
     return () => {
       active = false;
+      window.clearTimeout(timeoutId);
     };
   }, [activityFilter, reloadToken, statusFilter]);
 
@@ -271,7 +272,8 @@ export function VendorBookingsClient() {
   }, []);
 
   function pushToast(tone: Toast["tone"], message: string) {
-    const id = Date.now() + Math.floor(Math.random() * 1000);
+    nextToastId.current += 1;
+    const id = nextToastId.current;
     setToasts((current) => [...current, { id, tone, message }]);
 
     window.setTimeout(() => {
@@ -302,12 +304,25 @@ export function VendorBookingsClient() {
         );
       }
 
-      pushToast(
-        "success",
-        action === "approve"
-          ? "Booking approved."
-          : "Booking declined.",
-      );
+      const result = payload as VendorApproveResponse | null;
+      if (action === "approve" && result?.outcome === "payment_failed") {
+        pushToast(
+          "error",
+          "Approval was recorded, but payment failed. The buyer must update payment before this booking can continue.",
+        );
+      } else if (action === "approve" && result?.outcome === "payment_review") {
+        pushToast(
+          "error",
+          "Approval was recorded, but the payment result needs manual review before this booking can continue.",
+        );
+      } else {
+        pushToast(
+          "success",
+          action === "approve"
+            ? "Booking approved."
+            : "Booking declined.",
+        );
+      }
       setReloadToken((value) => value + 1);
     } catch (nextError: unknown) {
       pushToast(

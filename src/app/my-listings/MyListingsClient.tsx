@@ -127,7 +127,7 @@ export function MyListingsClient() {
         {/* Header */}
         <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
-            <h1 
+            <h1
               className="text-4xl font-bold text-[#193059] mb-2"
               style={{ fontFamily: 'var(--font-playfair)' }}
             >

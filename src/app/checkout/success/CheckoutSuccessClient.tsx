@@ -71,43 +71,43 @@ export function CheckoutSuccessClient({
 
   useEffect(() => {
     if (!orderId) {
-      setLoading(false);
-      setOrder(null);
-      setError(null);
       return;
     }
 
     let active = true;
-    setLoading(true);
+    const timeoutId = window.setTimeout(() => {
+      setLoading(true);
 
-    void (async () => {
-      try {
-        const nextOrder = await fetchOrder(orderId);
-        if (!active) {
-          return;
-        }
+      void (async () => {
+        try {
+          const nextOrder = await fetchOrder(orderId);
+          if (!active) {
+            return;
+          }
 
-        setOrder(nextOrder);
-        setError(null);
-      } catch (nextError: unknown) {
-        if (!active) {
-          return;
-        }
+          setOrder(nextOrder);
+          setError(null);
+        } catch (nextError: unknown) {
+          if (!active) {
+            return;
+          }
 
-        setError(
-          nextError instanceof Error
-            ? nextError.message
-            : "Unable to load your order right now.",
-        );
-      } finally {
-        if (active) {
-          setLoading(false);
+          setError(
+            nextError instanceof Error
+              ? nextError.message
+              : "Unable to load your order right now.",
+          );
+        } finally {
+          if (active) {
+            setLoading(false);
+          }
         }
-      }
-    })();
+      })();
+    }, 0);
 
     return () => {
       active = false;
+      window.clearTimeout(timeoutId);
     };
   }, [orderId, reloadToken]);
 

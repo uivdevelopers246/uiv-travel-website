@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { ActivityBookingWithPreview, OrderWithActivityBookingsPaymentPreview } from "@/lib/orders/types";
 
 import {
+  getOrderIdsToPoll,
   getOrderCardState,
+  mergePolledOrderResults,
   shouldOrderPoll,
   shouldOrdersPoll,
 } from "./my-bookings-ui";
@@ -217,10 +219,16 @@ describe("getOrderCardState", () => {
       canRetry: true,
       showContactSupport: false,
     });
+    expect(retryable.bookingStates[0]?.detail).toBe(
+      "Vendor confirmed this booking, but the charge failed. Update your payment method to send it back for vendor confirmation.",
+    );
     expect(supportOnly.notice.actions).toMatchObject({
       canRetry: false,
       showContactSupport: true,
     });
+    expect(supportOnly.bookingStates[0]?.detail).toBe(
+      "Vendor confirmed this booking, but the charge failed and now needs support to finish.",
+    );
   });
 
   it("surfaces reconciliation-required orders as support review", () => {
@@ -268,5 +276,217 @@ describe("polling decisions", () => {
     expect(shouldOrderPoll(settledOrder)).toBe(false);
     expect(shouldOrdersPoll([liveOrder, settledOrder])).toBe(true);
     expect(shouldOrdersPoll([settledOrder])).toBe(false);
+  });
+
+  it("selects only active order ids for polling", () => {
+    const liveOrder = makeOrder();
+    const finalizingOrder = makeOrder({
+      id: "22222222-2222-2222-2222-222222222222",
+      status: "awaiting_payment",
+      activity_bookings: [],
+    });
+    const settledOrder = makeOrder({
+      id: "33333333-3333-3333-3333-333333333333",
+      status: "paid",
+      payment_summary: {
+        status: "paid",
+        receipt_url: null,
+        failure_message: null,
+        can_retry_with_payment_method_update: false,
+        show_contact_support: false,
+      },
+      activity_bookings: [
+        makeBooking({
+          status: "confirmed",
+          approval_deadline_at: null,
+        }),
+      ],
+    });
+
+    expect(getOrderIdsToPoll([liveOrder, finalizingOrder, settledOrder])).toEqual([
+      liveOrder.id,
+      finalizingOrder.id,
+    ]);
+  });
+
+  it("merges successful polled orders without reordering the list", () => {
+    const liveOrder = makeOrder();
+    const settledOrder = makeOrder({
+      id: "22222222-2222-2222-2222-222222222222",
+      status: "paid",
+      payment_summary: {
+        status: "paid",
+        receipt_url: "https://example.com/receipt",
+        failure_message: null,
+        can_retry_with_payment_method_update: false,
+        show_contact_support: false,
+      },
+      activity_bookings: [
+        makeBooking({
+          id: "booking-2",
+          status: "confirmed",
+          approval_deadline_at: null,
+          order_id: "22222222-2222-2222-2222-222222222222",
+        }),
+      ],
+    });
+    const updatedLiveOrder = {
+      ...liveOrder,
+      status: "payment_pending" as const,
+      stripe_payment_intent_id: "pi_updated",
+      payment_summary: {
+        status: "processing" as const,
+        receipt_url: null,
+        failure_message: null,
+        can_retry_with_payment_method_update: false,
+        show_contact_support: false,
+      },
+    };
+
+    const merged = mergePolledOrderResults([liveOrder, settledOrder], [
+      {
+        orderId: liveOrder.id,
+        result: {
+          status: "fulfilled",
+          value: updatedLiveOrder,
+        },
+      },
+    ]);
+
+    expect(merged).toEqual([updatedLiveOrder, settledOrder]);
+  });
+
+  it("keeps historical orders untouched when polling returns partial results", () => {
+    const liveOrder = makeOrder();
+    const historyOrder = makeOrder({
+      id: "22222222-2222-2222-2222-222222222222",
+      status: "failed",
+      payment_summary: {
+        status: "failed",
+        receipt_url: null,
+        failure_message: "Card declined",
+        can_retry_with_payment_method_update: true,
+        show_contact_support: false,
+      },
+      activity_bookings: [
+        makeBooking({
+          id: "booking-2",
+          status: "confirmed",
+          approval_deadline_at: null,
+          order_id: "22222222-2222-2222-2222-222222222222",
+        }),
+      ],
+    });
+
+    const merged = mergePolledOrderResults([liveOrder, historyOrder], [
+      {
+        orderId: liveOrder.id,
+        result: {
+          status: "fulfilled",
+          value: {
+            ...liveOrder,
+            status: "payment_pending" as const,
+            stripe_payment_intent_id: "pi_next",
+            payment_summary: {
+              status: "processing" as const,
+              receipt_url: null,
+              failure_message: null,
+              can_retry_with_payment_method_update: false,
+              show_contact_support: false,
+            },
+          },
+        },
+      },
+    ]);
+
+    expect(merged[1]).toBe(historyOrder);
+  });
+
+  it("applies successful poll updates even when another active order poll fails", () => {
+    const firstLiveOrder = makeOrder();
+    const secondLiveOrder = makeOrder({
+      id: "22222222-2222-2222-2222-222222222222",
+    });
+    const updatedFirstLiveOrder = {
+      ...firstLiveOrder,
+      status: "payment_pending" as const,
+      stripe_payment_intent_id: "pi_success",
+      payment_summary: {
+        status: "processing" as const,
+        receipt_url: null,
+        failure_message: null,
+        can_retry_with_payment_method_update: false,
+        show_contact_support: false,
+      },
+    };
+
+    const merged = mergePolledOrderResults([firstLiveOrder, secondLiveOrder], [
+      {
+        orderId: firstLiveOrder.id,
+        result: {
+          status: "fulfilled",
+          value: updatedFirstLiveOrder,
+        },
+      },
+      {
+        orderId: secondLiveOrder.id,
+        result: {
+          status: "rejected",
+          reason: new Error("Stripe timeout"),
+        },
+      },
+    ]);
+
+    expect(merged).toEqual([updatedFirstLiveOrder, secondLiveOrder]);
+  });
+
+  it("keeps the cached order when a polled order is not returned", () => {
+    const liveOrder = makeOrder();
+
+    const merged = mergePolledOrderResults([liveOrder], [
+      {
+        orderId: liveOrder.id,
+        result: {
+          status: "fulfilled",
+          value: null,
+        },
+      },
+    ]);
+
+    expect(merged).toEqual([liveOrder]);
+  });
+
+  it("stops polling after a live order settles on the next merge", () => {
+    const liveOrder = makeOrder();
+    const settledOrder = {
+      ...liveOrder,
+      status: "paid" as const,
+      payment_summary: {
+        status: "paid" as const,
+        receipt_url: "https://example.com/receipt",
+        failure_message: null,
+        can_retry_with_payment_method_update: false,
+        show_contact_support: false,
+      },
+      activity_bookings: [
+        makeBooking({
+          id: "booking-confirmed",
+          status: "confirmed",
+          approval_deadline_at: null,
+        }),
+      ],
+    };
+
+    const merged = mergePolledOrderResults([liveOrder], [
+      {
+        orderId: liveOrder.id,
+        result: {
+          status: "fulfilled",
+          value: settledOrder,
+        },
+      },
+    ]);
+
+    expect(shouldOrdersPoll(merged)).toBe(false);
   });
 });

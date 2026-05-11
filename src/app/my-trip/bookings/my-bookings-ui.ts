@@ -72,6 +72,11 @@ export type OrderCardState = {
   countdown: CountdownState;
 };
 
+export type PolledOrderResult = {
+  orderId: string;
+  result: PromiseSettledResult<OrderWithActivityBookingsPaymentPreview | null>;
+};
+
 function pluralize(count: number, singular: string, plural: string) {
   return count === 1 ? singular : plural;
 }
@@ -156,6 +161,33 @@ export function shouldOrdersPoll(
   orders: OrderWithActivityBookingsPaymentPreview[],
 ): boolean {
   return orders.some((order) => shouldOrderPoll(order));
+}
+
+export function getOrderIdsToPoll(
+  orders: OrderWithActivityBookingsPaymentPreview[],
+): string[] {
+  return orders.filter((order) => shouldOrderPoll(order)).map((order) => order.id);
+}
+
+export function mergePolledOrderResults(
+  orders: OrderWithActivityBookingsPaymentPreview[],
+  polledResults: PolledOrderResult[],
+): OrderWithActivityBookingsPaymentPreview[] {
+  const updatesByOrderId = new Map<string, OrderWithActivityBookingsPaymentPreview>();
+
+  for (const polledResult of polledResults) {
+    if (polledResult.result.status !== "fulfilled" || !polledResult.result.value) {
+      continue;
+    }
+
+    updatesByOrderId.set(polledResult.orderId, polledResult.result.value);
+  }
+
+  if (updatesByOrderId.size === 0) {
+    return orders;
+  }
+
+  return orders.map((order) => updatesByOrderId.get(order.id) ?? order);
 }
 
 function getOrderPhaseState(
@@ -283,7 +315,7 @@ function getOrderNextStepLabel(
     case "failed":
       return order.payment_summary?.show_contact_support
         ? "Contact support to finish the confirmed bookings on this order."
-        : "Update your payment method to retry the confirmed bookings.";
+        : "Update your payment method to send these bookings back for vendor confirmation.";
     case "reconciliation_required":
       return "Contact support so we can review the payment result.";
     case "declined":
@@ -349,7 +381,9 @@ function getBookingStatusState(
             : order.status === "payment_pending"
               ? "Vendor confirmed this booking. The charge is now processing."
               : order.status === "failed"
-                ? "Vendor confirmed this booking, but payment has not completed yet."
+                ? order.payment_summary?.show_contact_support
+                  ? "Vendor confirmed this booking, but the charge failed and now needs support to finish."
+                  : "Vendor confirmed this booking, but the charge failed. Update your payment method to send it back for vendor confirmation."
                 : order.status === "reconciliation_required"
                   ? "Vendor confirmed this booking, but the payment result needs manual review."
                   : "Vendor confirmed this booking. We will charge it after the remaining bookings are resolved.",

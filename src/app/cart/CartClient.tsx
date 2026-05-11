@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { formatCurrencyFromCents, formatSlotDateTime } from "@/lib/utils/formatting";
 import type { CartLineWithPreview } from "@/lib/cart/types";
+import { redirectToLogin } from "@/app/_shared/client-auth";
+import { getSemanticNoticeClasses } from "@/app/_shared/client-tone";
 import {
   type CartBannerTone,
   formatParticipantsLabel,
@@ -13,7 +16,6 @@ import {
   getDraftLineTotalCents,
   getLineParticipants,
   getLineTotalCents,
-  getUnitPriceCents,
 } from "./cart-ui";
 
 type StatusMessage = {
@@ -29,46 +31,11 @@ type BusyAction =
   | { lineId: string; action: "update" | "remove" }
   | null;
 
-const currencyFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-});
-
-const dateFormatter = new Intl.DateTimeFormat("en-US", {
-  weekday: "short",
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-});
-
-const timeFormatter = new Intl.DateTimeFormat("en-US", {
-  hour: "numeric",
-  minute: "2-digit",
-});
-
 const CART_REFRESH_ERROR_MESSAGES = new Set([
   "This slot is no longer available",
   "Not enough spots left for this time slot",
   "Activity is not available for booking",
 ]);
-
-function redirectToLogin() {
-  window.location.assign("/auth/login?redirect=/cart");
-}
-
-function formatCurrencyFromCents(value: number) {
-  return currencyFormatter.format(value / 100);
-}
-
-function formatSlotDateTime(startsAt: string, endsAt: string) {
-  if (!startsAt || !endsAt) {
-    return "Date and time unavailable";
-  }
-
-  const start = new Date(startsAt);
-  const end = new Date(endsAt);
-  return `${dateFormatter.format(start)} - ${timeFormatter.format(start)} to ${timeFormatter.format(end)}`;
-}
 
 function shouldRefreshCartAfterError(message: string) {
   return CART_REFRESH_ERROR_MESSAGES.has(message);
@@ -92,29 +59,15 @@ function clampDraftParticipants(
 }
 
 function getMessageClasses(tone: CartBannerTone) {
-  switch (tone) {
-    case "success":
-      return "border-emerald-200 bg-emerald-50 text-emerald-800";
-    case "warning":
-      return "border-amber-200 bg-amber-50 text-amber-900";
-    case "error":
-    default:
-      return "border-rose-200 bg-rose-50 text-rose-700";
-  }
+  return tone === "error"
+    ? "border-rose-200 bg-rose-50 text-rose-700"
+    : getSemanticNoticeClasses(tone);
 }
 
 function getAvailabilityClasses(
   tone: ReturnType<typeof getCartLineAvailabilityState>["tone"],
 ) {
-  switch (tone) {
-    case "success":
-      return "border-emerald-200 bg-emerald-50 text-emerald-800";
-    case "warning":
-      return "border-amber-200 bg-amber-50 text-amber-900";
-    case "error":
-    default:
-      return "border-rose-200 bg-rose-50 text-rose-800";
-  }
+  return getSemanticNoticeClasses(tone);
 }
 
 async function fetchCartLines(): Promise<CartLineWithPreview[]> {
@@ -123,7 +76,7 @@ async function fetchCartLines(): Promise<CartLineWithPreview[]> {
   });
 
   if (response.status === 401) {
-    redirectToLogin();
+    redirectToLogin("/cart");
     return [];
   }
 
@@ -237,10 +190,12 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
   useEffect(() => {
     let active = true;
 
-    setLoading(true);
-    setError(null);
-
     void (async () => {
+      if (active) {
+        setLoading(true);
+        setError(null);
+      }
+
       try {
         const nextLines = await fetchCartLines();
         if (!active) {
@@ -308,7 +263,7 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
       });
 
       if (response.status === 401) {
-        redirectToLogin();
+        redirectToLogin("/cart");
         return;
       }
 
@@ -379,7 +334,7 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
       });
 
       if (response.status === 401) {
-        redirectToLogin();
+        redirectToLogin("/cart");
         return;
       }
 
@@ -426,7 +381,7 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
       });
 
       if (response.status === 401) {
-        redirectToLogin();
+        redirectToLogin("/cart");
         return;
       }
 

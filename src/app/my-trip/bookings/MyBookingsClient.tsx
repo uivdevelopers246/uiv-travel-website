@@ -2,6 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { redirectToLogin } from "@/app/_shared/client-auth";
+import { getSemanticNoticeClasses } from "@/app/_shared/client-tone";
+import {
+  formatCurrencyFromCents,
+  formatParticipantsLabel,
+  formatSlotDateTime,
+} from "@/lib/utils/formatting";
 import type { BuyerFlowMessage } from "@/lib/orders/buyer-flow";
 import { collectOrderStatusAlerts } from "@/lib/orders/status-alerts";
 import type { OrderWithActivityBookingsPaymentPreview } from "@/lib/orders/types";
@@ -9,33 +16,18 @@ import {
   type BookingDisplayState,
   type CountdownState,
   type UiTone,
+  getOrderIdsToPoll,
   getOrderCardState,
+  mergePolledOrderResults,
   shouldOrdersPoll,
 } from "./my-bookings-ui";
 
 const BOOKING_REFRESH_INTERVAL_MS = 30_000;
 
-const currencyFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-});
-
 const orderDateFormatter = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
   year: "numeric",
-});
-
-const slotDateFormatter = new Intl.DateTimeFormat("en-US", {
-  weekday: "short",
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-});
-
-const slotTimeFormatter = new Intl.DateTimeFormat("en-US", {
-  hour: "numeric",
-  minute: "2-digit",
 });
 
 type Toast = {
@@ -48,28 +40,7 @@ type MyBookingsClientProps = {
   initialReturnMessage?: BuyerFlowMessage | null;
 };
 
-function redirectToLogin() {
-  window.location.assign("/auth/login?redirect=/my-trip/bookings");
-}
-
-function formatCurrencyFromCents(value: number) {
-  return currencyFormatter.format(value / 100);
-}
-
-function formatParticipants(count: number) {
-  return `${count} ${count === 1 ? "participant" : "participants"}`;
-}
-
-function formatSlotDateTime(startsAt: string, endsAt: string) {
-  if (!startsAt || !endsAt) {
-    return "Date and time unavailable";
-  }
-
-  const start = new Date(startsAt);
-  const end = new Date(endsAt);
-
-  return `${slotDateFormatter.format(start)} - ${slotTimeFormatter.format(start)} to ${slotTimeFormatter.format(end)}`;
-}
+type RefreshMode = "full" | "poll";
 
 function formatDurationCountdown(remainingMs: number) {
   const totalSeconds = Math.floor(remainingMs / 1000);
@@ -112,24 +83,21 @@ function getToneClasses(tone: UiTone) {
 }
 
 function getToastClasses(tone: Toast["tone"]) {
-  switch (tone) {
-    case "success":
-      return "border-emerald-200 bg-emerald-50 text-emerald-800";
-    case "warning":
-      return "border-amber-200 bg-amber-50 text-amber-900";
-    case "error":
-    default:
-      return "border-rose-200 bg-rose-50 text-rose-800";
-  }
+  return getSemanticNoticeClasses(tone);
 }
 
-async function fetchOrders(): Promise<OrderWithActivityBookingsPaymentPreview[]> {
-  const response = await fetch("/api/orders", {
+async function fetchOrders(
+  orderId?: string,
+): Promise<OrderWithActivityBookingsPaymentPreview[]> {
+  const path = orderId
+    ? `/api/orders?orderId=${encodeURIComponent(orderId)}`
+    : "/api/orders";
+  const response = await fetch(path, {
     cache: "no-store",
   });
 
   if (response.status === 401) {
-    redirectToLogin();
+    redirectToLogin("/my-trip/bookings");
     return [];
   }
 
@@ -150,13 +118,38 @@ async function fetchOrders(): Promise<OrderWithActivityBookingsPaymentPreview[]>
   return payload as OrderWithActivityBookingsPaymentPreview[];
 }
 
+async function fetchOrder(
+  orderId: string,
+): Promise<OrderWithActivityBookingsPaymentPreview | null> {
+  const orders = await fetchOrders(orderId);
+  return orders[0] ?? null;
+}
+
+async function pollOrders(
+  currentOrders: OrderWithActivityBookingsPaymentPreview[],
+): Promise<OrderWithActivityBookingsPaymentPreview[]> {
+  const orderIds = getOrderIdsToPoll(currentOrders);
+  if (orderIds.length === 0) {
+    return currentOrders;
+  }
+
+  const results = await Promise.allSettled(orderIds.map((orderId) => fetchOrder(orderId)));
+  return mergePolledOrderResults(
+    currentOrders,
+    orderIds.map((orderId, index) => ({
+      orderId,
+      result: results[index]!,
+    })),
+  );
+}
+
 async function createPaymentRecoverySession(orderId: string): Promise<string> {
   const response = await fetch(`/api/orders/${orderId}/payment-recovery`, {
     method: "POST",
   });
 
   if (response.status === 401) {
-    redirectToLogin();
+    redirectToLogin("/my-trip/bookings");
     return "";
   }
 
@@ -256,7 +249,7 @@ function BookingLine({ bookingState, showCountdown }: BookingLineProps) {
                   Participants
                 </p>
                 <p className="mt-2 text-sm font-semibold leading-6 text-[#193059]">
-                  {formatParticipants(bookingState.booking.participants)}
+                  {formatParticipantsLabel(bookingState.booking.participants)}
                 </p>
               </div>
 
@@ -286,12 +279,18 @@ export function MyBookingsClient({
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [refreshMode, setRefreshMode] = useState<RefreshMode>("full");
   const [now, setNow] = useState(() => Date.now());
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [recoveringOrderId, setRecoveringOrderId] = useState<string | null>(null);
   const returnMessage = initialReturnMessage;
   const hasLoadedRef = useRef(false);
   const previousOrdersRef = useRef<OrderWithActivityBookingsPaymentPreview[]>([]);
+
+  function requestRefresh(mode: RefreshMode) {
+    setRefreshMode(mode);
+    setReloadToken((value) => value + 1);
+  }
 
   function pushToast(tone: Toast["tone"], message: string) {
     const id = Date.now() + Math.floor(Math.random() * 1000);
@@ -315,7 +314,10 @@ export function MyBookingsClient({
 
     void (async () => {
       try {
-        const nextOrders = await fetchOrders();
+        const nextOrders =
+          refreshMode === "poll" && hasLoadedRef.current
+            ? await pollOrders(previousOrdersRef.current)
+            : await fetchOrders();
         if (!active) {
           return;
         }
@@ -369,7 +371,7 @@ export function MyBookingsClient({
     return () => {
       active = false;
     };
-  }, [reloadToken]);
+  }, [reloadToken, refreshMode]);
 
   const orderCards = orders.map((order) => getOrderCardState(order, now));
   const shouldPoll = shouldOrdersPoll(orders);
@@ -389,6 +391,7 @@ export function MyBookingsClient({
     }
 
     const timeoutId = window.setTimeout(() => {
+      setRefreshMode("full");
       setReloadToken((value) => value + 1);
     }, 0);
 
@@ -403,6 +406,7 @@ export function MyBookingsClient({
     }
 
     const intervalId = window.setInterval(() => {
+      setRefreshMode("poll");
       setReloadToken((value) => value + 1);
     }, BOOKING_REFRESH_INTERVAL_MS);
 
@@ -465,7 +469,7 @@ export function MyBookingsClient({
   }
 
   function refreshBookings() {
-    setReloadToken((value) => value + 1);
+    requestRefresh("full");
   }
 
   return (

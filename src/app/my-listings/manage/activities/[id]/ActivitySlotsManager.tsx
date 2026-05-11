@@ -144,7 +144,13 @@ export function ActivitySlotsManager({ activityId }: Props) {
   }, [activityId]);
 
   useEffect(() => {
-    void loadSlots();
+    const timeoutId = window.setTimeout(() => {
+      void loadSlots();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
   }, [loadSlots]);
 
   const editingSlot = modalState?.mode === "edit" ? modalState.slot : null;

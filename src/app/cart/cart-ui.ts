@@ -1,4 +1,7 @@
+import { formatParticipantsLabel, formatSpotLabel } from "@/lib/utils/formatting";
 import type { CartLineWithPreview } from "@/lib/cart/types";
+
+export { formatParticipantsLabel, formatSpotLabel };
 
 export type CartBannerTone = "success" | "warning" | "error";
 
@@ -39,24 +42,12 @@ export type CheckoutCallToActionState = {
   blockingMessage: string | null;
 };
 
-function formatCount(count: number, singular: string, plural: string): string {
-  return `${count} ${count === 1 ? singular : plural}`;
-}
-
 function normalizeWholeNumber(value: number | null | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return 0;
   }
 
   return Math.max(0, Math.trunc(value));
-}
-
-export function formatParticipantsLabel(count: number): string {
-  return formatCount(count, "participant", "participants");
-}
-
-export function formatSpotLabel(count: number): string {
-  return formatCount(count, "spot", "spots");
 }
 
 export function getLineParticipants(line: CartLineWithPreview): number {
