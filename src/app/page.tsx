@@ -97,7 +97,7 @@ export default async function Home() {
       <section className="relative flex min-h-[90vh] items-center justify-center overflow-hidden max-[1249px]:min-h-[68vh] max-[1249px]:items-start max-[1249px]:pt-28">
         <div className="absolute inset-0">
           <Image
-            src="/images/hero/RockBeach.jpeg"
+            src="/images/hero/RockBeach.webp"
             alt="Rock beach"
             fill
             priority
