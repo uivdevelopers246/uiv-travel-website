@@ -14,6 +14,7 @@ import {
   getOrderById,
   markOrderReconciliationRequiredAfterSettlementMismatch,
   listOrdersWithActivityBookingsPreview,
+  requeueFailedOrderForVendorApproval,
   updateOrderStatus,
   updateOrderStripeCheckoutSession,
   upsertCheckoutSetupOrderFromCart,
@@ -556,6 +557,68 @@ describe("markOrderReconciliationRequiredAfterSettlementMismatch", () => {
     ).rejects.toThrow(
       "Could not mark order reconciliation_required after settlement mismatch",
     );
+  });
+});
+
+describe("requeueFailedOrderForVendorApproval", () => {
+  it("moves a retry-eligible failed order back to awaiting_vendor_approval", async () => {
+    const updated = baseOrder({
+      status: "awaiting_vendor_approval",
+      stripe_customer_id: "cus_recovery",
+      stripe_setup_intent_id: "seti_recovery",
+      stripe_payment_intent_id: null,
+      settlement_charge_attempt_count: 0,
+    });
+    const ordersQuery: Record<string, unknown> = {
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: updated, error: null }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn(() => ordersQuery),
+    };
+
+    const row = await requeueFailedOrderForVendorApproval(supabase as never, {
+      orderId,
+      stripeCustomerId: "cus_recovery",
+      stripeSetupIntentId: "seti_recovery",
+    });
+
+    expect(row).toEqual(updated);
+    expect(ordersQuery.update).toHaveBeenCalledWith({
+      status: "awaiting_vendor_approval",
+      stripe_customer_id: "cus_recovery",
+      stripe_setup_intent_id: "seti_recovery",
+      stripe_payment_intent_id: null,
+      settlement_charge_attempt_count: 0,
+    });
+    expect(ordersQuery.eq).toHaveBeenCalledWith("id", orderId);
+    expect(ordersQuery.eq).toHaveBeenCalledWith("status", "failed");
+    expect(ordersQuery.eq).toHaveBeenCalledWith(
+      "settlement_charge_attempt_count",
+      2,
+    );
+  });
+
+  it("returns null when the failed order is no longer eligible", async () => {
+    const ordersQuery: Record<string, unknown> = {
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn(() => ordersQuery),
+    };
+
+    const row = await requeueFailedOrderForVendorApproval(supabase as never, {
+      orderId,
+      stripeCustomerId: "cus_recovery",
+      stripeSetupIntentId: "seti_recovery",
+    });
+
+    expect(row).toBeNull();
   });
 });
 

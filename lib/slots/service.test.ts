@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- Supabase's fluent query builder is mocked dynamically throughout this legacy test file. */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/activities/service", () => ({

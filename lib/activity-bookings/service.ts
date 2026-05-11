@@ -376,3 +376,32 @@ export async function declineAllPendingActivityBookingsForOrder(
     );
   }
 }
+
+/**
+ * Reopens **`confirmed`** rows on a failed order back to **`pending_approval`** with a fresh SLA
+ * so vendors must accept them again before any new settlement attempt.
+ */
+export async function reopenConfirmedActivityBookingsForOrder(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+  expiresAt: string,
+): Promise<ActivityBooking[]> {
+  const { data, error } = await supabase
+    .from("activity_bookings")
+    .update({
+      status: "pending_approval",
+      expires_at: expiresAt,
+    })
+    .eq("order_id", orderId)
+    .eq("status", "confirmed")
+    .select("*");
+
+  if (error) {
+    throw bookingServiceError(
+      "Could not reopen confirmed activity bookings for order",
+      error,
+    );
+  }
+
+  return (data ?? []) as ActivityBooking[];
+}

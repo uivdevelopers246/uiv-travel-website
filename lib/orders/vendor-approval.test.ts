@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import {
+  approveActivityBookingAsVendor,
   declineActivityOrderAsAdmin,
   syncOrderDeclinedWhenNoPendingHoldsRemain,
 } from "./vendor-approval";
@@ -8,6 +9,8 @@ import * as orderService from "./service";
 import * as activityBookingsService from "@/lib/activity-bookings/service";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 import { tryBeginSettlementChargeForOrder } from "@/lib/orders/settlement";
+import { getVendorIdForCurrentUser } from "@/lib/vendors/ownership";
+import { safeSendBookingStatusEmailHook } from "@/lib/orders/status-email-hooks";
 
 vi.mock("@/lib/supabase/service-role", () => ({
   createServiceRoleClient: vi.fn(),
@@ -15,6 +18,14 @@ vi.mock("@/lib/supabase/service-role", () => ({
 
 vi.mock("@/lib/orders/settlement", () => ({
   tryBeginSettlementChargeForOrder: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@/lib/vendors/ownership", () => ({
+  getVendorIdForCurrentUser: vi.fn(),
+}));
+
+vi.mock("@/lib/orders/status-email-hooks", () => ({
+  safeSendBookingStatusEmailHook: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("./service", async () => {
@@ -34,6 +45,8 @@ vi.mock("@/lib/activity-bookings/service", async () => {
   return {
     ...actual,
     listActivityBookings: vi.fn(),
+    getActivityBookingById: vi.fn(),
+    confirmPendingActivityBookingForVendor: vi.fn(),
     declineAllPendingActivityBookingsForOrder: vi.fn().mockResolvedValue(undefined),
   };
 });
@@ -76,6 +89,57 @@ describe("syncOrderDeclinedWhenNoPendingHoldsRemain", () => {
     await syncOrderDeclinedWhenNoPendingHoldsRemain(mockSupabase, "order-1");
 
     expect(orderService.updateOrderStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe("approveActivityBookingAsVendor", () => {
+  const userSupabase = {} as never;
+  const serviceStub = {} as never;
+
+  beforeEach(() => {
+    vi.mocked(orderService.getOrderById).mockReset();
+    vi.mocked(createServiceRoleClient).mockReturnValue(serviceStub);
+    vi.mocked(getVendorIdForCurrentUser).mockResolvedValue("vendor-1");
+    vi.mocked(activityBookingsService.getActivityBookingById).mockResolvedValue({
+      id: "booking-1",
+      status: "pending_approval",
+      vendor_id: "vendor-1",
+      order_id: "order-1",
+    } as never);
+    vi.mocked(activityBookingsService.confirmPendingActivityBookingForVendor).mockResolvedValue(
+      1,
+    );
+    vi.mocked(activityBookingsService.listActivityBookings).mockResolvedValue(
+      [] as never,
+    );
+  });
+
+  it("returns payment_failed and skips booking_confirmed notifications when settlement fails immediately", async () => {
+    vi.mocked(orderService.getOrderById)
+      .mockResolvedValueOnce({
+        id: "order-1",
+        status: "awaiting_vendor_approval",
+      } as never)
+      .mockResolvedValueOnce({
+        id: "order-1",
+        status: "awaiting_vendor_approval",
+      } as never)
+      .mockResolvedValueOnce({
+        id: "order-1",
+        status: "failed",
+      } as never);
+
+    const result = await approveActivityBookingAsVendor(userSupabase, "booking-1");
+
+    expect(result).toEqual({ outcome: "payment_failed" });
+    expect(
+      activityBookingsService.confirmPendingActivityBookingForVendor,
+    ).toHaveBeenCalledWith(serviceStub, "booking-1", "vendor-1");
+    expect(tryBeginSettlementChargeForOrder).toHaveBeenCalledWith(
+      serviceStub,
+      "order-1",
+    );
+    expect(safeSendBookingStatusEmailHook).not.toHaveBeenCalled();
   });
 });
 

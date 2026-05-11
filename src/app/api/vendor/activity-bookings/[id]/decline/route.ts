@@ -4,6 +4,7 @@ import { declineActivityBookingAsVendor } from "@/lib/orders/vendor-approval";
 import {
   forbidden,
   parseUuidParam,
+  requireSameOriginPost,
   requireRole,
   serverError,
   unauthorized,
@@ -39,9 +40,14 @@ function mapError(error: unknown): NextResponse | null {
 }
 
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const originError = requireSameOriginPost(req);
+  if (originError) {
+    return originError;
+  }
+
   const resolved = await params;
   const parsed = parseUuidParam(resolved?.id, "booking");
   if ("response" in parsed) {

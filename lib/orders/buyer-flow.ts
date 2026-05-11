@@ -84,7 +84,7 @@ export function getBuyerFlowMessageFromSearchParams(
     return {
       tone: "success",
       message:
-        "Your payment method was updated. We'll retry the charge for any confirmed bookings.",
+        "Your payment method was updated. The request is back in vendor review, and vendors will need to confirm it again before any charge is attempted.",
     };
   }
   if (paymentRecovery === "cancelled") {
@@ -158,7 +158,7 @@ export function getOrderStatusNotice(
         message:
           order.payment_summary?.show_contact_support
             ? "We couldn't complete the retry for this order. Contact support to finish the booking."
-            : "We couldn't complete the charge for the confirmed bookings. Update your payment method to retry.",
+            : "We couldn't complete the charge for the confirmed bookings. Update your payment method to send the request back through vendor review before another charge is attempted.",
         failureMessage: order.payment_summary?.failure_message ?? null,
         receiptUrl: null,
         canRetry:

@@ -75,6 +75,18 @@ describe("getBuyerFlowMessageFromSearchParams", () => {
         "Payment method update was canceled. Confirmed bookings will stay unpaid until you retry.",
     });
   });
+
+  it("maps payment recovery success to a vendor-review banner", () => {
+    expect(
+      getBuyerFlowMessageFromSearchParams(
+        new URLSearchParams("payment_recovery=updated"),
+      ),
+    ).toEqual({
+      tone: "success",
+      message:
+        "Your payment method was updated. The request is back in vendor review, and vendors will need to confirm it again before any charge is attempted.",
+    });
+  });
 });
 
 describe("getCheckoutSuccessState", () => {

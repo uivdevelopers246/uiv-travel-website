@@ -599,6 +599,153 @@ describe("fulfillSetupIntentSucceeded", () => {
       stripe_event_id: "evt_seti_success",
     });
   });
+
+  it("reopens confirmed bookings and sends the order back to vendor review for payment recovery", async () => {
+    let step = 0;
+    const supabase = {
+      from: vi.fn(() => {
+        step += 1;
+        if (step === 1) {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+          };
+        }
+        if (step === 2) {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: {
+                id: "order-1",
+                status: "failed",
+                currency: "usd",
+                stripe_payment_intent_id: "pi_failed_2",
+                settlement_charge_attempt_count: 2,
+                stripe_setup_intent_id: "seti_old",
+              },
+              error: null,
+            }),
+          };
+        }
+        if (step === 3) {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            order: vi.fn().mockReturnThis(),
+            range: vi.fn().mockResolvedValue({
+              data: [{ id: "booking-1", status: "confirmed", total_cents: 3000 }],
+              error: null,
+            }),
+          };
+        }
+        if (step === 4) {
+          return {
+            update: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            select: vi.fn().mockResolvedValue({
+              data: [
+                {
+                  id: "booking-1",
+                  status: "pending_approval",
+                  expires_at: "2026-02-01T00:00:00.000Z",
+                },
+              ],
+              error: null,
+            }),
+          };
+        }
+        if (step === 5) {
+          return {
+            update: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            select: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: {
+                id: "order-1",
+                status: "awaiting_vendor_approval",
+                stripe_setup_intent_id: "seti_1",
+                stripe_payment_intent_id: null,
+                settlement_charge_attempt_count: 0,
+              },
+              error: null,
+            }),
+          };
+        }
+        if (step === 6) {
+          return {
+            insert: vi.fn().mockResolvedValue({ error: null }),
+          };
+        }
+        throw new Error(`Unexpected step ${step}`);
+      }),
+    };
+
+    const result = await fulfillSetupIntentSucceeded(
+      setupIntentSucceededEvent({
+        metadata: {
+          order_id: "order-1",
+          flow: "m4c_payment_recovery",
+        },
+      }),
+      supabase as never,
+    );
+
+    expect(result).toEqual({ status: "success" });
+    expect(supabase.from).toHaveBeenCalledWith("activity_bookings");
+    expect(supabase.from).toHaveBeenCalledWith("orders");
+    expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
+  });
+
+  it("treats payment recovery as already fulfilled when a prior webhook already requeued the order", async () => {
+    let step = 0;
+    const supabase = {
+      from: vi.fn(() => {
+        step += 1;
+        if (step === 1) {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+          };
+        }
+        if (step === 2) {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: {
+                id: "order-1",
+                status: "awaiting_vendor_approval",
+                stripe_setup_intent_id: "seti_1",
+                stripe_payment_intent_id: null,
+              },
+              error: null,
+            }),
+          };
+        }
+        if (step === 3) {
+          return {
+            insert: vi.fn().mockResolvedValue({ error: null }),
+          };
+        }
+        throw new Error(`Unexpected step ${step}`);
+      }),
+    };
+
+    const result = await fulfillSetupIntentSucceeded(
+      setupIntentSucceededEvent({
+        metadata: {
+          order_id: "order-1",
+          flow: "m4c_payment_recovery",
+        },
+      }),
+      supabase as never,
+    );
+
+    expect(result).toEqual({ status: "already_fulfilled" });
+  });
 });
 
 describe("fulfillSettlementPaymentIntentSucceeded", () => {

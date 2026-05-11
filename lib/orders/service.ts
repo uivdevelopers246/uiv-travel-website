@@ -525,36 +525,35 @@ export async function attachSettlementRetryPaymentIntent(
 }
 
 /**
- * M4-C: after the built-in retry has failed, the buyer can update their payment method once and
- * trigger a final settlement attempt. Stores the new SetupIntent + PaymentIntent together.
+ * After a retry-eligible failure, a buyer can update the saved payment method and send the
+ * previously confirmed bookings back through vendor review before any new settlement attempt.
  */
-export async function attachSettlementRecoveryPaymentIntent(
+export async function requeueFailedOrderForVendorApproval(
   supabase: SupabaseClient<Database>,
   input: {
     orderId: string;
     stripeCustomerId: string;
     stripeSetupIntentId: string;
-    newStripePaymentIntentId: string;
   },
 ): Promise<Order | null> {
   const { data, error } = await supabase
     .from("orders")
     .update({
-      status: "payment_pending",
+      status: "awaiting_vendor_approval",
       stripe_customer_id: input.stripeCustomerId,
       stripe_setup_intent_id: input.stripeSetupIntentId,
-      stripe_payment_intent_id: input.newStripePaymentIntentId,
-      settlement_charge_attempt_count: 3,
+      stripe_payment_intent_id: null,
+      settlement_charge_attempt_count: 0,
     })
     .eq("id", input.orderId)
     .eq("status", "failed")
-    .in("settlement_charge_attempt_count", [2, 3])
+    .eq("settlement_charge_attempt_count", 2)
     .select("*")
     .maybeSingle();
 
   if (error) {
     throw orderServiceError(
-      "Could not attach settlement recovery PaymentIntent",
+      "Could not requeue failed order for vendor approval",
       error,
     );
   }

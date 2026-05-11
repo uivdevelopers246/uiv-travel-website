@@ -12,6 +12,7 @@ import {
   parseOptionalUuidParam,
 } from "@/lib/activity-bookings/route-utils";
 import type { ActivityBookingStatus } from "@/lib/activity-bookings/constants";
+import { serverError } from "@/api-shared/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -65,14 +66,8 @@ export async function GET(req: Request) {
   let vendor;
   try {
     vendor = await getVendorByOwner(supabase, user.id);
-  } catch (error: unknown) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Failed to resolve vendor",
-      },
-      { status: 500 },
-    );
+  } catch {
+    return serverError("Something went wrong. Please try again.");
   }
 
   if (!vendor) {
@@ -112,15 +107,7 @@ export async function GET(req: Request) {
     ]);
 
     return NextResponse.json({ bookings, activities });
-  } catch (error: unknown) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to load vendor bookings",
-      },
-      { status: 500 },
-    );
+  } catch {
+    return serverError("Something went wrong. Please try again.");
   }
 }

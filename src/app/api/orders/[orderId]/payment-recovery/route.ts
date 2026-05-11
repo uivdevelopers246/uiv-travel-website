@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/server";
 import {
   badRequest,
   parseUuidParam,
+  requireSameOriginPost,
   requireRole,
   serverError,
   unauthorized,
@@ -18,10 +19,28 @@ import {
 
 export const dynamic = "force-dynamic";
 
+function handlePaymentRecoveryPostError(error: unknown) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : "Something went wrong. Please try again.";
+
+  if (message === "Unauthorized") {
+    return unauthorized();
+  }
+
+  return serverError("Something went wrong. Please try again.");
+}
+
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ orderId: string }> },
 ) {
+  const originError = requireSameOriginPost(req);
+  if (originError) {
+    return originError;
+  }
+
   const resolved = await params;
   const parsed = parseUuidParam(resolved?.orderId, "order");
   if ("response" in parsed) {
@@ -79,11 +98,6 @@ export async function POST(
 
     return NextResponse.json({ url: session.url });
   } catch (error: unknown) {
-    const message =
-      error instanceof Error ? error.message : "Something went wrong.";
-    if (message === "Unauthorized") {
-      return unauthorized();
-    }
-    return serverError(message);
+    return handlePaymentRecoveryPostError(error);
   }
 }

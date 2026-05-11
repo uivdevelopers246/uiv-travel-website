@@ -39,6 +39,38 @@ export function serverError(message: string) {
   return jsonError(message, 500);
 }
 
+export function requireSameOriginPost(req: Request): NextResponse | null {
+  const origin = req.headers.get("origin");
+  if (!origin) {
+    return null;
+  }
+
+  let originUrl: URL;
+  try {
+    originUrl = new URL(origin);
+  } catch {
+    return forbidden("Cross-origin request blocked");
+  }
+
+  const requestUrl = new URL(req.url);
+  const allowedOrigins = new Set([requestUrl.origin]);
+  const forwardedHost =
+    req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+
+  if (forwardedHost) {
+    const forwardedProto =
+      req.headers.get("x-forwarded-proto") ??
+      requestUrl.protocol.replace(/:$/, "");
+    allowedOrigins.add(`${forwardedProto}://${forwardedHost}`);
+  }
+
+  if (!allowedOrigins.has(originUrl.origin)) {
+    return forbidden("Cross-origin request blocked");
+  }
+
+  return null;
+}
+
 export async function parseJsonBody(req: Request): Promise<JsonBodyResult> {
   try {
     const body: unknown = await req.json();

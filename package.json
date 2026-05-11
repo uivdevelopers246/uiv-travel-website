@@ -17,9 +17,10 @@
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.89.0",
     "mapbox-gl": "^3.20.0",
-    "next": "^16.1.6",
+    "next": "^16.2.6",
     "react": "19.2.0",
     "react-dom": "19.2.0",
+    "server-only": "^0.0.1",
     "stripe": "^22.0.0"
   },
   "devDependencies": {
@@ -34,5 +35,8 @@
     "tailwindcss": "^4",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
+  },
+  "overrides": {
+    "postcss": "8.5.14"
   }
 }

@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { Mock } from "vitest";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
+import type { Database } from "@/supabase/types/database";
 import { runPendingApprovalExpirySweep } from "./pending-approval-expiry";
 import * as vendorApproval from "./vendor-approval";
 import * as statusEmailHooks from "./status-email-hooks";
@@ -34,7 +37,10 @@ vi.mock("@/lib/activity-bookings/service", () => ({
 const mockSupabase = {
   from: vi.fn(),
   rpc: vi.fn(),
-} as any;
+} as unknown as SupabaseClient<Database> & {
+  from: Mock;
+  rpc: Mock;
+};
 
 beforeEach(() => {
   vi.clearAllMocks();

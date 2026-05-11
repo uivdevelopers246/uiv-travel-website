@@ -8,6 +8,7 @@ import {
   parseOptionalStatusParam,
   parseOptionalUuidParam,
 } from "@/lib/activity-bookings/route-utils";
+import { serverError } from "@/api-shared/route-helpers";
 
 export async function GET(req: Request) {
   const supabase = await createClient();
@@ -26,10 +27,8 @@ export async function GET(req: Request) {
   let vendor;
   try {
     vendor = await getVendorByOwner(supabase, user.id);
-  } catch (error: unknown) {
-    const message =
-      error instanceof Error ? error.message : "Failed to resolve vendor";
-    return NextResponse.json({ error: message }, { status: 500 });
+  } catch {
+    return serverError("Something went wrong. Please try again.");
   }
 
   if (!vendor) {
@@ -73,9 +72,7 @@ export async function GET(req: Request) {
       offset,
     });
     return NextResponse.json(bookings);
-  } catch (error: unknown) {
-    const message =
-      error instanceof Error ? error.message : "Failed to list activity bookings";
-    return NextResponse.json({ error: message }, { status: 500 });
+  } catch {
+    return serverError("Something went wrong. Please try again.");
   }
 }

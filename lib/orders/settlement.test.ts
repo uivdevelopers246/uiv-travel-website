@@ -5,8 +5,11 @@ import type { Database } from "@/supabase/types/database";
 const orderServiceMocks = vi.hoisted(() => ({
   getOrderById: vi.fn(),
   attachFirstSettlementPaymentIntent: vi.fn(),
+  attachSettlementRetryPaymentIntent: vi.fn(),
+  markOrderFailedAfterSettlementExhausted: vi.fn(),
   paymentIntentCancel: vi.fn().mockResolvedValue({}),
   paymentIntentRetrieve: vi.fn(),
+  safeSendOrderStatusEmailHook: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("./service", async (importOriginal) => {
@@ -15,8 +18,16 @@ vi.mock("./service", async (importOriginal) => {
     ...actual,
     getOrderById: orderServiceMocks.getOrderById,
     attachFirstSettlementPaymentIntent: orderServiceMocks.attachFirstSettlementPaymentIntent,
+    attachSettlementRetryPaymentIntent:
+      orderServiceMocks.attachSettlementRetryPaymentIntent,
+    markOrderFailedAfterSettlementExhausted:
+      orderServiceMocks.markOrderFailedAfterSettlementExhausted,
   };
 });
+
+vi.mock("./status-email-hooks", () => ({
+  safeSendOrderStatusEmailHook: orderServiceMocks.safeSendOrderStatusEmailHook,
+}));
 
 vi.mock("@/lib/stripe/server", () => ({
   getStripe: vi.fn(() => ({
@@ -49,6 +60,8 @@ describe("tryBeginSettlementChargeForOrder", () => {
     vi.mocked(listActivityBookings).mockReset();
     orderServiceMocks.getOrderById.mockReset();
     orderServiceMocks.attachFirstSettlementPaymentIntent.mockReset();
+    orderServiceMocks.attachSettlementRetryPaymentIntent.mockReset();
+    orderServiceMocks.markOrderFailedAfterSettlementExhausted.mockReset();
     orderServiceMocks.paymentIntentCancel.mockReset();
     orderServiceMocks.paymentIntentCancel.mockResolvedValue({});
     orderServiceMocks.paymentIntentRetrieve.mockReset();
@@ -56,6 +69,8 @@ describe("tryBeginSettlementChargeForOrder", () => {
       id: "pi_settlement_1",
       status: "requires_payment_method",
     });
+    orderServiceMocks.safeSendOrderStatusEmailHook.mockReset();
+    orderServiceMocks.safeSendOrderStatusEmailHook.mockResolvedValue(undefined);
   });
 
   it("returns early when order is not awaiting_vendor_approval", async () => {
@@ -154,7 +169,7 @@ describe("tryBeginSettlementChargeForOrder", () => {
     expect(createSettlementPaymentIntentForOrder).toHaveBeenCalledWith({
       order: expect.objectContaining({ id: orderId }),
       amountCents: 2500,
-      idempotencyKey: `m4c-settlement-${orderId}-1`,
+      idempotencyKey: `m4c-settlement-${orderId}-seti_1-1`,
     });
     expect(orderServiceMocks.attachFirstSettlementPaymentIntent).toHaveBeenCalledWith(
       supabase,
@@ -162,6 +177,120 @@ describe("tryBeginSettlementChargeForOrder", () => {
       "pi_settlement_1",
     );
     expect(orderServiceMocks.paymentIntentCancel).not.toHaveBeenCalled();
+  });
+
+  it("stores an immediate first-attempt failure and schedules the built-in retry", async () => {
+    orderServiceMocks.getOrderById.mockResolvedValue({
+      id: orderId,
+      status: "awaiting_vendor_approval",
+      stripe_payment_intent_id: null,
+      stripe_customer_id: "cus_1",
+      stripe_setup_intent_id: "seti_1",
+      currency: "usd",
+    } as Awaited<ReturnType<typeof orderServiceMocks.getOrderById>>);
+    vi.mocked(listActivityBookings).mockResolvedValue([
+      { status: "confirmed", total_cents: 2500 },
+    ] as Awaited<ReturnType<typeof listActivityBookings>>);
+    vi.mocked(createSettlementPaymentIntentForOrder)
+      .mockRejectedValueOnce({
+        payment_intent: {
+          id: "pi_failed_1",
+          status: "requires_payment_method",
+        },
+      })
+      .mockResolvedValueOnce({
+        id: "pi_retry_2",
+      } as Awaited<ReturnType<typeof createSettlementPaymentIntentForOrder>>);
+    orderServiceMocks.attachFirstSettlementPaymentIntent.mockResolvedValue({
+      id: orderId,
+      stripe_payment_intent_id: "pi_failed_1",
+    } as Awaited<ReturnType<typeof orderServiceMocks.attachFirstSettlementPaymentIntent>>);
+    orderServiceMocks.attachSettlementRetryPaymentIntent.mockResolvedValue({
+      id: orderId,
+      stripe_payment_intent_id: "pi_retry_2",
+    } as Awaited<ReturnType<typeof orderServiceMocks.attachSettlementRetryPaymentIntent>>);
+
+    await expect(tryBeginSettlementChargeForOrder(supabase, orderId)).resolves.toBeUndefined();
+
+    expect(orderServiceMocks.attachFirstSettlementPaymentIntent).toHaveBeenCalledWith(
+      supabase,
+      orderId,
+      "pi_failed_1",
+    );
+    expect(orderServiceMocks.attachSettlementRetryPaymentIntent).toHaveBeenCalledWith(
+      supabase,
+      {
+        orderId,
+        priorStripePaymentIntentId: "pi_failed_1",
+        newStripePaymentIntentId: "pi_retry_2",
+      },
+    );
+    expect(createSettlementPaymentIntentForOrder).toHaveBeenNthCalledWith(2, {
+      order: expect.objectContaining({ id: orderId }),
+      amountCents: 2500,
+      idempotencyKey: `m4c-settlement-${orderId}-seti_1-2`,
+    });
+    expect(orderServiceMocks.markOrderFailedAfterSettlementExhausted).not.toHaveBeenCalled();
+  });
+
+  it("marks the order failed when the built-in retry also fails immediately", async () => {
+    orderServiceMocks.getOrderById.mockResolvedValue({
+      id: orderId,
+      status: "awaiting_vendor_approval",
+      stripe_payment_intent_id: null,
+      stripe_customer_id: "cus_1",
+      stripe_setup_intent_id: "seti_1",
+      currency: "usd",
+    } as Awaited<ReturnType<typeof orderServiceMocks.getOrderById>>);
+    vi.mocked(listActivityBookings).mockResolvedValue([
+      { status: "confirmed", total_cents: 2500 },
+    ] as Awaited<ReturnType<typeof listActivityBookings>>);
+    vi.mocked(createSettlementPaymentIntentForOrder)
+      .mockRejectedValueOnce({
+        payment_intent: {
+          id: "pi_failed_1",
+          status: "requires_payment_method",
+        },
+      })
+      .mockRejectedValueOnce({
+        payment_intent: {
+          id: "pi_failed_2",
+          status: "requires_payment_method",
+        },
+      });
+    orderServiceMocks.attachFirstSettlementPaymentIntent.mockResolvedValue({
+      id: orderId,
+      stripe_payment_intent_id: "pi_failed_1",
+    } as Awaited<ReturnType<typeof orderServiceMocks.attachFirstSettlementPaymentIntent>>);
+    orderServiceMocks.attachSettlementRetryPaymentIntent.mockResolvedValue({
+      id: orderId,
+      stripe_payment_intent_id: "pi_failed_2",
+    } as Awaited<ReturnType<typeof orderServiceMocks.attachSettlementRetryPaymentIntent>>);
+    orderServiceMocks.markOrderFailedAfterSettlementExhausted.mockResolvedValue({
+      id: orderId,
+      status: "failed",
+    } as Awaited<ReturnType<typeof orderServiceMocks.markOrderFailedAfterSettlementExhausted>>);
+
+    await expect(tryBeginSettlementChargeForOrder(supabase, orderId)).resolves.toBeUndefined();
+
+    expect(orderServiceMocks.attachSettlementRetryPaymentIntent).toHaveBeenCalledWith(
+      supabase,
+      {
+        orderId,
+        priorStripePaymentIntentId: "pi_failed_1",
+        newStripePaymentIntentId: "pi_failed_2",
+      },
+    );
+    expect(
+      orderServiceMocks.markOrderFailedAfterSettlementExhausted,
+    ).toHaveBeenCalledWith(supabase, orderId, "pi_failed_2");
+    expect(orderServiceMocks.safeSendOrderStatusEmailHook).toHaveBeenCalledWith(
+      supabase,
+      {
+        orderId,
+        event: "payment_failed",
+      },
+    );
   });
 
   it("does not cancel when webhook already marked order paid with the same PaymentIntent", async () => {

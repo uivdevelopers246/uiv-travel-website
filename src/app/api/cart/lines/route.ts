@@ -9,6 +9,7 @@ import {
   badRequest,
   parseJsonBody,
   parseUuidParam,
+  requireSameOriginPost,
   requireRole,
 } from "@/api-shared/route-helpers";
 
@@ -35,6 +36,11 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const originError = requireSameOriginPost(req);
+  if (originError) {
+    return originError;
+  }
+
   const supabase = await createClient();
   const roleResult = await requireRole(supabase, ["user", "vendor", "admin"]);
   if ("response" in roleResult) {

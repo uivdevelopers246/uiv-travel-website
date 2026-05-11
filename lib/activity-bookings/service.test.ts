@@ -1,64 +1,120 @@
 import { describe, it, expect, vi } from "vitest";
+import type { Mock } from "vitest";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/supabase/types/database";
 import {
   cancelActivityBooking,
   cancelActivityBookingsForOrder,
   createActivityBookingAfterPayment,
   getActivityBookingById,
   listActivityBookings,
+  reopenConfirmedActivityBookingsForOrder,
   setActivityBookingCompleted,
 } from "./service";
 
+type MockSupabase<T extends object> = SupabaseClient<Database> & T;
+
+type RpcSupabaseMock = {
+  rpc: Mock;
+};
+
+type FromSupabaseMock<TQuery> = {
+  from: Mock<() => TQuery>;
+};
+
+type SetCompletedQueryMock = {
+  update: Mock;
+  eq: Mock;
+  select: Mock;
+  single: Mock;
+};
+
+type ListBookingsQueryMock = {
+  select: Mock;
+  eq: Mock;
+  order: Mock;
+  range: Mock;
+};
+
+type GetByIdQueryMock = {
+  select: Mock;
+  eq: Mock;
+  maybeSingle: Mock;
+};
+
+type ReopenConfirmedQueryMock = {
+  update: Mock;
+  eq: Mock;
+  select: Mock;
+};
+
+function asSupabase<T extends object>(value: T): MockSupabase<T> {
+  return value as unknown as MockSupabase<T>;
+}
+
 function makeMockSupabaseForCreateBooking() {
-  const supabase: any = {
+  const supabase = asSupabase<RpcSupabaseMock>({
     rpc: vi.fn(),
-  };
+  });
   return { supabase };
 }
 
 function makeMockSupabaseForSetCompleted() {
-  const bookingsQuery: any = {
+  const bookingsQuery: SetCompletedQueryMock = {
     update: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     select: vi.fn().mockReturnThis(),
     single: vi.fn(),
   };
-  const supabase: any = {
+  const supabase = asSupabase<FromSupabaseMock<SetCompletedQueryMock>>({
     from: vi.fn(() => bookingsQuery),
-  };
+  });
   return { supabase, bookingsQuery };
 }
 
 function makeMockSupabaseForListBookings() {
-  const query: any = {
+  const query: ListBookingsQueryMock = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
     range: vi.fn(),
   };
-  const supabase: any = {
+  const supabase = asSupabase<FromSupabaseMock<ListBookingsQueryMock>>({
     from: vi.fn(() => query),
-  };
+  });
   return { supabase, query };
 }
 
 function makeMockSupabaseForGetById() {
-  const query: any = {
+  const query: GetByIdQueryMock = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn(),
   };
-  const supabase: any = {
+  const supabase = asSupabase<FromSupabaseMock<GetByIdQueryMock>>({
     from: vi.fn(() => query),
-  };
+  });
   return { supabase, query };
 }
 
 function makeMockSupabaseForCancel() {
   return {
-    supabase: {
+    supabase: asSupabase<RpcSupabaseMock>({
       rpc: vi.fn(),
-    } as any,
+    }),
   };
+}
+
+function makeMockSupabaseForReopenConfirmed() {
+  const query: ReopenConfirmedQueryMock = {
+    update: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    select: vi.fn(),
+  };
+  const supabase = asSupabase<FromSupabaseMock<ReopenConfirmedQueryMock>>({
+    from: vi.fn(() => query),
+  });
+  return { supabase, query };
 }
 
 const baseCreateInput = {
@@ -312,6 +368,47 @@ describe("activity-bookings service (reads + cancel)", () => {
       cancelActivityBookingsForOrder(supabase, "bad-order"),
     ).rejects.toThrow(
       "Could not cancel activity bookings for order: order not found",
+    );
+  });
+
+  it("reopenConfirmedActivityBookingsForOrder: reopens confirmed rows with a fresh SLA", async () => {
+    const { supabase, query } = makeMockSupabaseForReopenConfirmed();
+    const rows = [
+      { id: "booking-1", status: "pending_approval", expires_at: "2026-01-05T00:00:00.000Z" },
+    ];
+    query.select.mockResolvedValueOnce({ data: rows, error: null });
+
+    const result = await reopenConfirmedActivityBookingsForOrder(
+      supabase,
+      "order-1",
+      "2026-01-05T00:00:00.000Z",
+    );
+
+    expect(supabase.from).toHaveBeenCalledWith("activity_bookings");
+    expect(query.update).toHaveBeenCalledWith({
+      status: "pending_approval",
+      expires_at: "2026-01-05T00:00:00.000Z",
+    });
+    expect(query.eq).toHaveBeenCalledWith("order_id", "order-1");
+    expect(query.eq).toHaveBeenCalledWith("status", "confirmed");
+    expect(result).toEqual(rows);
+  });
+
+  it("reopenConfirmedActivityBookingsForOrder: wraps update errors", async () => {
+    const { supabase, query } = makeMockSupabaseForReopenConfirmed();
+    query.select.mockResolvedValueOnce({
+      data: null,
+      error: { message: "write blocked" },
+    });
+
+    await expect(
+      reopenConfirmedActivityBookingsForOrder(
+        supabase,
+        "order-1",
+        "2026-01-05T00:00:00.000Z",
+      ),
+    ).rejects.toThrow(
+      "Could not reopen confirmed activity bookings for order: write blocked",
     );
   });
 });

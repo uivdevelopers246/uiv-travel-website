@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { ActivityBooking } from "@/lib/activity-bookings/service";
 import type { Order } from "@/lib/orders/types";
+import type { Database } from "@/supabase/types/database";
 import {
   sendBookingStatusEmailHook,
   sendOrderStatusEmailHook,
@@ -111,7 +113,7 @@ function makeSupabase() {
         }),
       },
     },
-  } as any;
+  } as unknown as SupabaseClient<Database>;
 }
 
 beforeEach(() => {

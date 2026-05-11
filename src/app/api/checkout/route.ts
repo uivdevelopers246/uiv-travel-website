@@ -17,6 +17,7 @@ import { handleCartRouteError } from "@/api-shared/cart-route-errors";
 import {
   badRequest,
   notFound,
+  requireSameOriginPost,
   requireRole,
   serverError,
 } from "@/api-shared/route-helpers";
@@ -47,7 +48,12 @@ function handleCheckoutPostError(error: unknown): NextResponse {
   return handleCartRouteError(error);
 }
 
-export async function POST() {
+export async function POST(req: Request) {
+  const originError = requireSameOriginPost(req);
+  if (originError) {
+    return originError;
+  }
+
   const supabase = await createClient();
   const roleResult = await requireRole(supabase, ["user", "vendor", "admin"]);
   if ("response" in roleResult) {

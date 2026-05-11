@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  buildSettlementIdempotencyKey,
   computeConfirmedSettlementTotalCents,
   orderBookingsFullyResolvedForSettlement,
 } from "./settlement-utils";
@@ -57,5 +58,13 @@ describe("orderBookingsFullyResolvedForSettlement", () => {
         { status: "cancelled" },
       ]),
     ).toBe(true);
+  });
+});
+
+describe("buildSettlementIdempotencyKey", () => {
+  it("includes the current setup intent so recovery cycles do not reuse old keys", () => {
+    expect(
+      buildSettlementIdempotencyKey("order-1", "seti_recovery_1", 1),
+    ).toBe("m4c-settlement-order-1-seti_recovery_1-1");
   });
 });

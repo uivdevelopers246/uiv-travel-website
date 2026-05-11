@@ -19,6 +19,13 @@ import { tryBeginSettlementChargeForOrder } from "@/lib/orders/settlement";
 import { safeSendBookingStatusEmailHook } from "@/lib/orders/status-email-hooks";
 
 export type ApproveActivityOrderResult = { confirmedCount: number };
+export type BookingApprovalOutcome =
+  | "approved"
+  | "payment_failed"
+  | "payment_review";
+export type BookingApprovalResult = {
+  outcome: BookingApprovalOutcome;
+};
 
 function terminalNonConfirmedStatus(status: string): boolean {
   return (
@@ -92,13 +99,30 @@ async function loadOrderForApprovalOrThrow(
   return order;
 }
 
+async function getBookingApprovalResult(
+  supabaseService: SupabaseClient<Database>,
+  orderId: string,
+): Promise<BookingApprovalResult> {
+  const order = await loadOrderForApprovalOrThrow(supabaseService, orderId);
+
+  if (order.status === "failed") {
+    return { outcome: "payment_failed" };
+  }
+
+  if (order.status === "reconciliation_required") {
+    return { outcome: "payment_review" };
+  }
+
+  return { outcome: "approved" };
+}
+
 /**
  * Vendor: approve a **single** pending booking (no Stripe). Use once per line item the vendor accepts.
  */
 export async function approveActivityBookingAsVendor(
   userSupabase: SupabaseClient<Database>,
   bookingId: string,
-): Promise<void> {
+): Promise<BookingApprovalResult> {
   const vendorId = await getVendorIdForCurrentUser(userSupabase);
   const booking = await getActivityBookingById(userSupabase, bookingId);
   if (!booking) {
@@ -131,10 +155,14 @@ export async function approveActivityBookingAsVendor(
     throw new Error("Could not confirm booking");
   }
   await syncOrderM4cAfterBookingChange(service, booking.order_id);
-  await safeSendBookingStatusEmailHook(service, {
-    bookingId,
-    event: "booking_confirmed",
-  });
+  const result = await getBookingApprovalResult(service, booking.order_id);
+  if (result.outcome === "approved") {
+    await safeSendBookingStatusEmailHook(service, {
+      bookingId,
+      event: "booking_confirmed",
+    });
+  }
+  return result;
 }
 
 /**
@@ -180,7 +208,7 @@ export async function declineActivityBookingAsVendor(
  */
 export async function approveActivityBookingAsAdmin(
   bookingId: string,
-): Promise<void> {
+): Promise<BookingApprovalResult> {
   const service = createServiceRoleClient();
   const booking = await getActivityBookingById(service, bookingId);
   if (!booking) {
@@ -205,10 +233,14 @@ export async function approveActivityBookingAsAdmin(
     throw new Error("Could not confirm booking");
   }
   await syncOrderM4cAfterBookingChange(service, booking.order_id);
-  await safeSendBookingStatusEmailHook(service, {
-    bookingId,
-    event: "booking_confirmed",
-  });
+  const result = await getBookingApprovalResult(service, booking.order_id);
+  if (result.outcome === "approved") {
+    await safeSendBookingStatusEmailHook(service, {
+      bookingId,
+      event: "booking_confirmed",
+    });
+  }
+  return result;
 }
 
 /**
@@ -245,7 +277,7 @@ export async function declineActivityBookingAsAdmin(
  */
 export async function approveActivityOrderAsAdmin(
   orderId: string,
-): Promise<ApproveActivityOrderResult> {
+): Promise<ApproveActivityOrderResult & BookingApprovalResult> {
   const service = createServiceRoleClient();
   const order = await loadOrderForApprovalOrThrow(service, orderId);
   if (!orderAllowsVendorApproval(order)) {
@@ -268,13 +300,16 @@ export async function approveActivityOrderAsAdmin(
     orderId,
   );
   await syncOrderM4cAfterBookingChange(service, orderId);
-  for (const booking of pending) {
-    await safeSendBookingStatusEmailHook(service, {
-      bookingId: booking.id,
-      event: "booking_confirmed",
-    });
+  const result = await getBookingApprovalResult(service, orderId);
+  if (result.outcome === "approved") {
+    for (const booking of pending) {
+      await safeSendBookingStatusEmailHook(service, {
+        bookingId: booking.id,
+        event: "booking_confirmed",
+      });
+    }
   }
-  return { confirmedCount };
+  return { confirmedCount, ...result };
 }
 
 /**

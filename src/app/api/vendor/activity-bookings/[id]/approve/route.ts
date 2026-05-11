@@ -4,6 +4,7 @@ import { approveActivityBookingAsVendor } from "@/lib/orders/vendor-approval";
 import {
   forbidden,
   parseUuidParam,
+  requireSameOriginPost,
   requireRole,
   serverError,
   unauthorized,
@@ -40,9 +41,14 @@ function mapError(error: unknown): NextResponse | null {
 }
 
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const originError = requireSameOriginPost(req);
+  if (originError) {
+    return originError;
+  }
+
   const resolved = await params;
   const parsed = parseUuidParam(resolved?.id, "booking");
   if ("response" in parsed) {
@@ -56,8 +62,8 @@ export async function POST(
   }
 
   try {
-    await approveActivityBookingAsVendor(supabase, parsed.id);
-    return NextResponse.json({ ok: true });
+    const result = await approveActivityBookingAsVendor(supabase, parsed.id);
+    return NextResponse.json({ ok: true, outcome: result.outcome });
   } catch (error: unknown) {
     const mapped = mapError(error);
     if (mapped) {

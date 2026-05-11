@@ -9,6 +9,7 @@ import {
   badRequest,
   parseJsonBody,
   parseUuidParam,
+  requireSameOriginPost,
   requireRole,
 } from "@/api-shared/route-helpers";
 
@@ -23,6 +24,11 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const originError = requireSameOriginPost(req);
+  if (originError) {
+    return originError;
+  }
+
   const resolvedParams = await params;
   const parsedParam = parseUuidParam(resolvedParams?.id, "cart line");
   if ("response" in parsedParam) {
@@ -59,9 +65,14 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const originError = requireSameOriginPost(req);
+  if (originError) {
+    return originError;
+  }
+
   const resolvedParams = await params;
   const parsedParam = parseUuidParam(resolvedParams?.id, "cart line");
   if ("response" in parsedParam) {

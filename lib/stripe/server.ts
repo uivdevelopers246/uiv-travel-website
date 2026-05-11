@@ -1,3 +1,5 @@
+import "server-only";
+
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
 
@@ -6,6 +8,7 @@ import {
   cancelActivityBookingsForOrder,
   createActivityBookingAfterPayment,
   listActivityBookings,
+  reopenConfirmedActivityBookingsForOrder,
 } from "@/lib/activity-bookings/service";
 import { bookingPendingApprovalExpiresAtIso } from "@/lib/activity-bookings/sla";
 import { CART_LINE_TYPE_ACTIVITY } from "@/lib/cart/constants";
@@ -17,13 +20,16 @@ import {
   STRIPE_METADATA_FLOW_M4C_SETTLEMENT,
   STRIPE_METADATA_ORDER_ID_KEY,
 } from "@/lib/orders/constants";
-import { computeConfirmedSettlementTotalCents } from "@/lib/orders/settlement-utils";
 import {
-  attachSettlementRecoveryPaymentIntent,
+  buildSettlementIdempotencyKey,
+  computeConfirmedSettlementTotalCents,
+} from "@/lib/orders/settlement-utils";
+import {
   attachSettlementRetryPaymentIntent,
   getOrderById,
   markOrderFailedAfterSettlementExhausted,
   markOrderReconciliationRequiredAfterSettlementMismatch,
+  requeueFailedOrderForVendorApproval,
   revertOrderToAwaitingPaymentAfterSetupFailure,
   updateOrderAwaitingVendorApprovalFromSetup,
   updateOrderPaidAfterSettlementCapture,
@@ -528,6 +534,14 @@ async function fulfillM4cSettlementRecoveryAfterSetupSaved(
     return { status: "order_not_found" };
   }
 
+  if (
+    order.status === "awaiting_vendor_approval" &&
+    order.stripe_setup_intent_id === ctx.setupIntentId
+  ) {
+    await insertStripeWebhookEvent(supabase, eventId);
+    return { status: "already_fulfilled" };
+  }
+
   if (order.status === "paid" || order.status === "payment_pending") {
     await insertStripeWebhookEvent(supabase, eventId);
     return { status: "already_fulfilled" };
@@ -542,34 +556,37 @@ async function fulfillM4cSettlementRecoveryAfterSetupSaved(
     orderId: order.id,
     limit: 500,
   });
-  const amountCents = computeConfirmedSettlementTotalCents(bookings);
-  if (amountCents <= 0) {
+  const confirmedBookings = bookings.filter((booking) => booking.status === "confirmed");
+  const pendingApprovalBookings = bookings.filter(
+    (booking) => booking.status === "pending_approval",
+  );
+
+  if (confirmedBookings.length === 0 && pendingApprovalBookings.length === 0) {
     await insertStripeWebhookEvent(supabase, eventId);
     return { status: "ignored", reason: "order_not_recoverable" };
   }
 
-  const recoveryPi = await createSettlementPaymentIntentForOrder({
-    order: {
-      ...order,
-      stripe_customer_id: ctx.stripeCustomerId,
-      stripe_setup_intent_id: ctx.setupIntentId,
-    },
-    amountCents,
-    idempotencyKey: `m4c-settlement-${order.id}-recovery-${ctx.setupIntentId}`,
-  });
+  if (confirmedBookings.length > 0) {
+    await reopenConfirmedActivityBookingsForOrder(
+      supabase,
+      order.id,
+      bookingPendingApprovalExpiresAtIso(),
+    );
+  }
 
-  const attached = await attachSettlementRecoveryPaymentIntent(supabase, {
+  const requeued = await requeueFailedOrderForVendorApproval(supabase, {
     orderId: order.id,
     stripeCustomerId: ctx.stripeCustomerId,
     stripeSetupIntentId: ctx.setupIntentId,
-    newStripePaymentIntentId: recoveryPi.id,
   });
 
-  if (!attached) {
-    await getStripe().paymentIntents.cancel(recoveryPi.id);
+  if (!requeued) {
     const fresh = await getOrderById(supabase, order.id);
     await insertStripeWebhookEvent(supabase, eventId);
-    if (fresh?.status === "payment_pending" || fresh?.status === "paid") {
+    if (
+      fresh?.status === "awaiting_vendor_approval" &&
+      fresh.stripe_setup_intent_id === ctx.setupIntentId
+    ) {
       return { status: "already_fulfilled" };
     }
     return { status: "ignored", reason: "order_not_recoverable" };
@@ -960,7 +977,11 @@ export async function fulfillSettlementPaymentIntentPaymentFailed(
     const retryPi = await createSettlementPaymentIntentForOrder({
       order,
       amountCents,
-      idempotencyKey: `m4c-settlement-${orderId}-2`,
+      idempotencyKey: buildSettlementIdempotencyKey(
+        orderId,
+        order.stripe_setup_intent_id!,
+        2,
+      ),
     });
     const attached = await attachSettlementRetryPaymentIntent(supabase, {
       orderId,
