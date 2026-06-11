@@ -685,7 +685,7 @@ export function MyBookingsClient({
                           card.phase.kind === "support_review";
                         const compactNotice =
                           card.phase.kind === "vendor_review"
-                            ? "No charge yet. We only charge confirmed bookings after vendors respond."
+                            ? "No charge yet — you'll only be billed for confirmed bookings."
                             : card.phase.kind === "payment_processing"
                               ? "Charge in progress. This order updates automatically."
                               : card.phase.kind === "finalizing"

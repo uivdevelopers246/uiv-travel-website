@@ -72,12 +72,12 @@ function toTitleCase(value: string) {
     .join(" ");
 }
 
-function useRotatingIndex(total: number) {
+function useRotatingIndex(total: number, paused = false) {
   const [index, setIndex] = useState(0);
   const safeIndex = total === 0 ? 0 : index % total;
 
   const advance = useEffectEvent(() => {
-    if (total < 2) return;
+    if (total < 2 || paused) return;
     setIndex(current => (current + 1) % total);
   });
 
@@ -101,8 +101,8 @@ function ShowcasePanel({
   items,
   theme,
 }: ShowcasePanelProps) {
-  const [activeIndex, setActiveIndex] = useRotatingIndex(items.length);
   const [detailsItemId, setDetailsItemId] = useState<string | null>(null);
+  const [activeIndex, setActiveIndex] = useRotatingIndex(items.length, detailsItemId !== null);
   const activeItem = items[activeIndex];
   const detailsOpen = activeItem != null && detailsItemId === activeItem.id;
 
@@ -186,7 +186,7 @@ function ShowcasePanel({
 
         <div className="mt-auto">
           <h3
-            className="max-w-[24rem] text-[2.25rem] leading-[1.1] font-bold text-white drop-shadow-[0_10px_24px_rgba(0,0,0,0.28)] sm:text-[2.8rem]"
+            className="max-w-[24rem] line-clamp-2 text-[2.25rem] leading-[1.1] font-bold text-white drop-shadow-[0_10px_24px_rgba(0,0,0,0.28)] sm:text-[2.8rem]"
             style={{
               fontFamily: "var(--font-playfair)",
             }}
@@ -205,7 +205,7 @@ function ShowcasePanel({
 
         <div
           className={`mt-4 mb-2 overflow-hidden rounded-[1.4rem] border border-white/16 bg-[linear-gradient(180deg,rgba(18,35,58,0.62),rgba(18,35,58,0.42))] shadow-[0_18px_42px_rgba(7,15,30,0.2)] backdrop-blur-md transition-[max-height,padding] duration-300 ${
-            detailsOpen ? "max-h-[24rem] p-3.5 sm:max-h-[25rem] sm:p-4" : "max-h-[4.25rem] p-2.5"
+            detailsOpen ? "max-h-[28rem] overflow-y-auto p-3.5 sm:max-h-[25rem] sm:p-4" : "max-h-[4.25rem] p-2.5"
           }`}
           onMouseEnter={() => setDetailsItemId(activeItem.id)}
           onMouseLeave={() => setDetailsItemId(null)}
@@ -252,7 +252,7 @@ function ShowcasePanel({
               {activeItem.description}
             </p>
 
-            <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+            <div className="mt-3 grid grid-cols-3 gap-2.5">
               {activeItem.meta.slice(0, META_ITEM_COUNT).map(meta => (
                 <div
                   key={`${meta.label}-${meta.value}`}

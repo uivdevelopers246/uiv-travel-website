@@ -122,7 +122,7 @@ export function getCountdownState(
     return {
       kind: "expired",
       deadlineAt,
-      message: "Vendor response window closed. Waiting for final update.",
+      message: "Review window has closed — we're finalizing your booking now.",
     };
   }
 
@@ -205,7 +205,7 @@ function getOrderPhaseState(
     case "awaiting_vendor_approval":
       return {
         kind: "vendor_review",
-        label: "Waiting for vendor review",
+        label: "Booking submitted",
         tone: "amber",
       };
     case "payment_pending":

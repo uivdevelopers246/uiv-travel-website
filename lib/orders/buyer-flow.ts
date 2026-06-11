@@ -68,7 +68,7 @@ export function getBuyerFlowMessageFromSearchParams(
     return {
       tone: "success",
       message:
-        "Your payment method was saved and your booking request is now in vendor review.",
+        "You're all set! Your reservation has been submitted and your payment details are saved.",
     };
   }
   if (checkout === "pending") {
@@ -122,9 +122,9 @@ export function getOrderStatusNotice(
     case "awaiting_vendor_approval":
       return {
         tone: "warning",
-        title: "Pending vendor review",
+        title: "Booking request received!",
         message:
-          "Your payment method is saved and vendors are reviewing live availability for these requests now.",
+          "Your reservation details are in and your payment method is saved. The experience provider will confirm availability shortly.",
         failureMessage: null,
         receiptUrl: null,
         canRetry: false,
