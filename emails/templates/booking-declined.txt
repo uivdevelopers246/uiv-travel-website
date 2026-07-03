@@ -1,0 +1,7 @@
+Hi {{recipientName}},
+
+The provider could not confirm this booking.
+
+Experience: {{booking.activityTitle}}
+Requested time: {{formatDateTime booking.slotStartsAt}}
+Order: {{order.id}}

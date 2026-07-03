@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/pending-approval-expiry",
       "schedule": "0 21 * * *"
+    },
+    {
+      "path": "/api/cron/notifications",
+      "schedule": "0 12 * * *"
     }
   ]
 }

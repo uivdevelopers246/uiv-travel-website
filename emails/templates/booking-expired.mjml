@@ -1,0 +1,15 @@
+<mjml>
+  <mj-body background-color="#f6f3ee">
+    <mj-section background-color="#ffffff" padding="28px">
+      <mj-column>
+        <mj-text font-size="20px" font-weight="700" color="#16251f">Booking request expired</mj-text>
+        <mj-text font-size="15px" color="#24342e">Hi {{recipientName}}, this pending booking was not approved before the deadline.</mj-text>
+        <mj-table color="#24342e" font-size="14px">
+          <tr><td>Experience</td><td align="right">{{booking.activityTitle}}</td></tr>
+          <tr><td>Requested time</td><td align="right">{{formatDateTime booking.slotStartsAt}}</td></tr>
+          <tr><td>Order</td><td align="right">{{order.id}}</td></tr>
+        </mj-table>
+      </mj-column>
+    </mj-section>
+  </mj-body>
+</mjml>

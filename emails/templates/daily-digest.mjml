@@ -1,0 +1,17 @@
+<mjml>
+  <mj-body background-color="#f6f3ee">
+    <mj-section background-color="#ffffff" padding="28px">
+      <mj-column>
+        <mj-text font-size="20px" font-weight="700" color="#16251f">Provider daily digest</mj-text>
+        <mj-text font-size="15px" color="#24342e">Hi {{recipientName}}, here is your United IV provider summary.</mj-text>
+        <mj-table color="#24342e" font-size="14px">
+          <tr><td>Pending approvals</td><td align="right">{{summary.pendingApprovals}}</td></tr>
+          <tr><td>Expiring approvals</td><td align="right">{{summary.expiringApprovals}}</td></tr>
+          <tr><td>Confirmed bookings</td><td align="right">{{summary.confirmedBookings}}</td></tr>
+          <tr><td>Declined bookings</td><td align="right">{{summary.declinedBookings}}</td></tr>
+          <tr><td>Failed payments</td><td align="right">{{summary.failedPayments}}</td></tr>
+        </mj-table>
+      </mj-column>
+    </mj-section>
+  </mj-body>
+</mjml>

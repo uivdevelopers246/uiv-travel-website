@@ -1,15 +1,25 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getActivityBookingById } from "@/lib/activity-bookings/service";
+import {
+  createNotificationEvent,
+  updateNotificationEventStatus,
+} from "@/lib/notifications/events";
+import { processNotificationMessage } from "@/lib/notifications/email-worker";
+import { isResendEmailConfigured } from "@/lib/notifications/resend";
+import type { NotificationEventType, NotificationPayload } from "@/lib/notifications/types";
 import { getOrderById } from "@/lib/orders/service";
 import type { Database } from "@/supabase/types/database";
 
-type BookingNotificationEvent =
-  | "booking_confirmed"
-  | "booking_declined"
-  | "booking_expired";
+type BookingNotificationEvent = Extract<
+  NotificationEventType,
+  "booking_confirmed" | "booking_declined" | "booking_expired"
+>;
 
-type OrderNotificationEvent = "payment_completed" | "payment_failed";
+type OrderNotificationEvent = Extract<
+  NotificationEventType,
+  "payment_completed" | "payment_failed"
+>;
 
 type StatusEmailWebhookResult =
   | { delivered: true }
@@ -29,6 +39,14 @@ function getStatusEmailWebhookUrl(): string | null {
 function getStatusEmailWebhookSecret(): string | null {
   const value = process.env.STATUS_EMAIL_WEBHOOK_SECRET?.trim();
   return value ? value : null;
+}
+
+function hasNotificationTransportConfigured(): boolean {
+  return Boolean(
+    isResendEmailConfigured() ||
+      process.env.EMAIL_DELIVERY_WEBHOOK_URL?.trim() ||
+      getStatusEmailWebhookUrl(),
+  );
 }
 
 async function loadRecipientSummary(
@@ -79,11 +97,46 @@ async function postStatusEmailHook(payload: unknown): Promise<StatusEmailWebhook
   return { delivered: true };
 }
 
+async function publishStatusNotification(
+  supabase: SupabaseClient<Database>,
+  input: {
+    userId: string;
+    eventType: NotificationEventType;
+    payload: NotificationPayload;
+    dedupeKey: string;
+  },
+): Promise<StatusEmailWebhookResult> {
+  const notification = await createNotificationEvent(supabase, {
+    userId: input.userId,
+    eventType: input.eventType,
+    payload: input.payload,
+    dedupeKey: input.dedupeKey,
+  });
+
+  if (notification.status === "published" || notification.status === "sent") {
+    return { delivered: true };
+  }
+
+  if (getStatusEmailWebhookUrl()) {
+    const result = await postStatusEmailHook(input.payload);
+    await updateNotificationEventStatus(supabase, notification.id, "sent");
+    return result;
+  }
+
+  const status = await processNotificationMessage(supabase, {
+    notificationId: notification.id,
+  });
+  if (status === "skipped") {
+    return { delivered: false, reason: "missing_context" };
+  }
+  return { delivered: true };
+}
+
 export async function sendBookingStatusEmailHook(
   supabase: SupabaseClient<Database>,
   input: { bookingId: string; event: BookingNotificationEvent },
 ): Promise<StatusEmailWebhookResult> {
-  if (!getStatusEmailWebhookUrl()) {
+  if (!hasNotificationTransportConfigured()) {
     return { delivered: false, reason: "not_configured" };
   }
 
@@ -111,7 +164,7 @@ export async function sendBookingStatusEmailHook(
     return { delivered: false, reason: "missing_context" };
   }
 
-  return postStatusEmailHook({
+  const payload = {
     source: "uiv-travel-website",
     category: "booking",
     event: input.event,
@@ -132,6 +185,13 @@ export async function sendBookingStatusEmailHook(
       slotStartsAt: slotResult.data?.starts_at ?? null,
       slotEndsAt: slotResult.data?.ends_at ?? null,
     },
+  } satisfies NotificationPayload;
+
+  return publishStatusNotification(supabase, {
+    userId: booking.user_id,
+    eventType: input.event,
+    payload,
+    dedupeKey: `booking:${booking.id}:${input.event}`,
   });
 }
 
@@ -139,7 +199,7 @@ export async function sendOrderStatusEmailHook(
   supabase: SupabaseClient<Database>,
   input: { orderId: string; event: OrderNotificationEvent },
 ): Promise<StatusEmailWebhookResult> {
-  if (!getStatusEmailWebhookUrl()) {
+  if (!hasNotificationTransportConfigured()) {
     return { delivered: false, reason: "not_configured" };
   }
 
@@ -154,7 +214,7 @@ export async function sendOrderStatusEmailHook(
     .select("id, status")
     .eq("order_id", order.id);
 
-  return postStatusEmailHook({
+  const payload = {
     source: "uiv-travel-website",
     category: "order",
     event: input.event,
@@ -171,6 +231,13 @@ export async function sendOrderStatusEmailHook(
         status: booking.status,
       })),
     },
+  } satisfies NotificationPayload;
+
+  return publishStatusNotification(supabase, {
+    userId: order.user_id,
+    eventType: input.event,
+    payload,
+    dedupeKey: `order:${order.id}:${input.event}`,
   });
 }
 

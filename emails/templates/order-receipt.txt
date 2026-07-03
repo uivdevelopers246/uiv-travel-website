@@ -1,0 +1,7 @@
+Hi {{recipientName}},
+
+Your United IV order is confirmed.
+
+Order: {{order.id}}
+Status: {{order.status}}
+Total: {{formatCurrency order.totalCents order.currency}}

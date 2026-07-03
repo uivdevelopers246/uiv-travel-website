@@ -60,7 +60,7 @@ describe("getBuyerFlowMessageFromSearchParams", () => {
     ).toEqual({
       tone: "success",
       message:
-        "Your payment method was saved and your booking request is now in vendor review.",
+        "You're all set! Your reservation has been submitted and your payment details are saved.",
     });
   });
 

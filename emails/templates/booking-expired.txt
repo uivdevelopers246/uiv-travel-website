@@ -1,0 +1,7 @@
+Hi {{recipientName}},
+
+This pending booking was not approved before the deadline.
+
+Experience: {{booking.activityTitle}}
+Requested time: {{formatDateTime booking.slotStartsAt}}
+Order: {{order.id}}

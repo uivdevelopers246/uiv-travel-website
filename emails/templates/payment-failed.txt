@@ -1,0 +1,7 @@
+Hi {{recipientName}},
+
+We could not complete payment for your booking.
+
+Order: {{order.id}}
+Status: {{order.status}}
+Total: {{formatCurrency order.totalCents order.currency}}

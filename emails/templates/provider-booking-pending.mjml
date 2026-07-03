@@ -1,0 +1,15 @@
+<mjml>
+  <mj-body background-color="#f6f3ee">
+    <mj-section background-color="#ffffff" padding="28px">
+      <mj-column>
+        <mj-text font-size="20px" font-weight="700" color="#16251f">New booking pending approval</mj-text>
+        <mj-text font-size="15px" color="#24342e">Hi {{recipientName}}, a traveler is waiting for your approval.</mj-text>
+        <mj-table color="#24342e" font-size="14px">
+          <tr><td>Experience</td><td align="right">{{booking.activityTitle}}</td></tr>
+          <tr><td>When</td><td align="right">{{formatDateTime booking.slotStartsAt}}</td></tr>
+          <tr><td>Participants</td><td align="right">{{booking.participants}}</td></tr>
+        </mj-table>
+      </mj-column>
+    </mj-section>
+  </mj-body>
+</mjml>

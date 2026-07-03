@@ -1,0 +1,9 @@
+Hi {{recipientName}},
+
+Here is your United IV provider summary.
+
+Pending approvals: {{summary.pendingApprovals}}
+Expiring approvals: {{summary.expiringApprovals}}
+Confirmed bookings: {{summary.confirmedBookings}}
+Declined bookings: {{summary.declinedBookings}}
+Failed payments: {{summary.failedPayments}}

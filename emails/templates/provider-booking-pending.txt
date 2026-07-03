@@ -1,0 +1,7 @@
+Hi {{recipientName}},
+
+A traveler is waiting for your approval.
+
+Experience: {{booking.activityTitle}}
+When: {{formatDateTime booking.slotStartsAt}}
+Participants: {{booking.participants}}

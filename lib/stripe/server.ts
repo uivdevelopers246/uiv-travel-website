@@ -20,6 +20,7 @@ import {
   STRIPE_METADATA_FLOW_M4C_SETTLEMENT,
   STRIPE_METADATA_ORDER_ID_KEY,
 } from "@/lib/orders/constants";
+import { safeSendProviderBookingPendingNotice } from "@/lib/notifications/provider-notices";
 import {
   buildSettlementIdempotencyKey,
   computeConfirmedSettlementTotalCents,
@@ -511,6 +512,7 @@ async function fulfillM4cVendorApprovalRequestAfterSetupSaved(
         expires_at: expiresAt,
       });
       knownBookings = [...knownBookings, booking];
+      await safeSendProviderBookingPendingNotice(supabase, booking.id);
     }
   } catch {
     await cancelActivityBookingsForOrder(supabase, order.id);

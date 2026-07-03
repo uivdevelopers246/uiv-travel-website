@@ -494,6 +494,119 @@ export type Database = {
           },
         ]
       }
+      email_delivery_events: {
+        Row: {
+          created_at: string
+          event_type: string
+          id: string
+          notification_id: string
+          raw_provider_payload: Json
+          provider_message_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          event_type: string
+          id?: string
+          notification_id: string
+          raw_provider_payload?: Json
+          provider_message_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          event_type?: string
+          id?: string
+          notification_id?: string
+          raw_provider_payload?: Json
+          provider_message_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_delivery_events_notification_id_fkey"
+            columns: ["notification_id"]
+            isOneToOne: false
+            referencedRelation: "notification_events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notification_events: {
+        Row: {
+          channel: string
+          created_at: string
+          dedupe_key: string | null
+          event_type: string
+          id: string
+          payload: Json
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          channel?: string
+          created_at?: string
+          dedupe_key?: string | null
+          event_type: string
+          id?: string
+          payload?: Json
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          channel?: string
+          created_at?: string
+          dedupe_key?: string | null
+          event_type?: string
+          id?: string
+          payload?: Json
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      notification_preferences: {
+        Row: {
+          booking_updates_enabled: boolean
+          created_at: string
+          daily_digest_enabled: boolean
+          email_enabled: boolean
+          email_suppressed_address: string | null
+          email_suppressed_at: string | null
+          email_suppressed_reason: string | null
+          provider_updates_enabled: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          booking_updates_enabled?: boolean
+          created_at?: string
+          daily_digest_enabled?: boolean
+          email_enabled?: boolean
+          email_suppressed_address?: string | null
+          email_suppressed_at?: string | null
+          email_suppressed_reason?: string | null
+          provider_updates_enabled?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          booking_updates_enabled?: boolean
+          created_at?: string
+          daily_digest_enabled?: boolean
+          email_enabled?: boolean
+          email_suppressed_address?: string | null
+          email_suppressed_at?: string | null
+          email_suppressed_reason?: string | null
+          provider_updates_enabled?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       order_settlement_mismatches: {
         Row: {
           captured_amount_cents: number

@@ -1,0 +1,7 @@
+Hi {{recipientName}},
+
+Your booking is confirmed.
+
+Experience: {{booking.activityTitle}}
+When: {{formatDateTime booking.slotStartsAt}}
+Participants: {{booking.participants}}
