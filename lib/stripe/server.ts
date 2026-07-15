@@ -531,6 +531,7 @@ async function fulfillM4cSettlementRecoveryAfterSetupSaved(
 ): Promise<FulfillCheckoutSetupSessionCompletedResult> {
   const order = await getOrderById(supabase, ctx.orderId);
   if (!order) {
+    await insertStripeWebhookEvent(supabase, eventId);
     return { status: "order_not_found" };
   }
 

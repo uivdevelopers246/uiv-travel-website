@@ -47,6 +47,7 @@ import {
   getStripe,
 } from "./server";
 import {
+  STRIPE_METADATA_FLOW_M4C_PAYMENT_RECOVERY,
   STRIPE_METADATA_FLOW_M4C_SETUP,
   STRIPE_METADATA_FLOW_M4C_SETTLEMENT,
 } from "@/lib/orders/constants";
@@ -590,6 +591,41 @@ describe("fulfillSetupIntentSucceeded", () => {
 
     const result = await fulfillSetupIntentSucceeded(
       setupIntentSucceededEvent(),
+      supabase as never,
+    );
+
+    expect(result).toEqual({ status: "order_not_found" });
+    expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
+    expect(insertStripeWebhookEvent).toHaveBeenCalledWith({
+      stripe_event_id: "evt_seti_success",
+    });
+  });
+
+  it("records stripe_webhook_events when payment recovery references a missing order", async () => {
+    const insertStripeWebhookEvent = vi.fn().mockResolvedValue({ error: null });
+    const supabase = supabaseWithFromQueue([
+      () => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+      () => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+      () => ({
+        insert: insertStripeWebhookEvent,
+      }),
+    ]);
+
+    const result = await fulfillSetupIntentSucceeded(
+      setupIntentSucceededEvent({
+        metadata: {
+          order_id: "missing-order",
+          flow: STRIPE_METADATA_FLOW_M4C_PAYMENT_RECOVERY,
+        },
+      }),
       supabase as never,
     );
 
