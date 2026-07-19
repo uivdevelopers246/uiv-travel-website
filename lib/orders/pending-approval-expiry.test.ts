@@ -8,6 +8,7 @@ import * as vendorApproval from "./vendor-approval";
 import * as statusEmailHooks from "./status-email-hooks";
 import * as activityBookingsService from "@/lib/activity-bookings/service";
 
+// Same post-transition hook as vendor approve/decline (decline sync + settlement start).
 vi.mock("./vendor-approval", async () => {
   const actual =
     await vi.importActual<typeof import("./vendor-approval")>(
@@ -15,7 +16,7 @@ vi.mock("./vendor-approval", async () => {
     );
   return {
     ...actual,
-    syncOrderDeclinedWhenNoPendingHoldsRemain: vi.fn(),
+    syncOrderM4cAfterBookingChange: vi.fn(),
   };
 });
 
@@ -81,13 +82,13 @@ describe("runPendingApprovalExpirySweep", () => {
       orderIdsSynced: ["order-a", "order-b"],
     });
     expect(
-      vendorApproval.syncOrderDeclinedWhenNoPendingHoldsRemain,
+      vendorApproval.syncOrderM4cAfterBookingChange,
     ).toHaveBeenCalledTimes(2);
     expect(
-      vendorApproval.syncOrderDeclinedWhenNoPendingHoldsRemain,
+      vendorApproval.syncOrderM4cAfterBookingChange,
     ).toHaveBeenCalledWith(mockSupabase, "order-a");
     expect(
-      vendorApproval.syncOrderDeclinedWhenNoPendingHoldsRemain,
+      vendorApproval.syncOrderM4cAfterBookingChange,
     ).toHaveBeenCalledWith(mockSupabase, "order-b");
     expect(activityBookingsService.getActivityBookingById).toHaveBeenCalledTimes(3);
     expect(statusEmailHooks.safeSendBookingStatusEmailHook).toHaveBeenCalledTimes(2);
@@ -129,7 +130,7 @@ describe("runPendingApprovalExpirySweep", () => {
     const result = await runPendingApprovalExpirySweep(mockSupabase);
 
     expect(
-      vendorApproval.syncOrderDeclinedWhenNoPendingHoldsRemain,
+      vendorApproval.syncOrderM4cAfterBookingChange,
     ).not.toHaveBeenCalled();
     expect(statusEmailHooks.safeSendBookingStatusEmailHook).not.toHaveBeenCalled();
     expect(result).toEqual({ expiredCount: 0, orderIdsSynced: [] });
@@ -158,7 +159,7 @@ describe("runPendingApprovalExpirySweep", () => {
       "expire_pending_activity_bookings failed: rpc failed",
     );
     expect(
-      vendorApproval.syncOrderDeclinedWhenNoPendingHoldsRemain,
+      vendorApproval.syncOrderM4cAfterBookingChange,
     ).not.toHaveBeenCalled();
   });
 
@@ -185,7 +186,7 @@ describe("runPendingApprovalExpirySweep", () => {
       "expire_pending_activity_bookings returned invalid expired_count",
     );
     expect(
-      vendorApproval.syncOrderDeclinedWhenNoPendingHoldsRemain,
+      vendorApproval.syncOrderM4cAfterBookingChange,
     ).not.toHaveBeenCalled();
   });
 });

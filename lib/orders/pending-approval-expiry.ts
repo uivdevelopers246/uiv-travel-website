@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/supabase/types/database";
 import { getActivityBookingById } from "@/lib/activity-bookings/service";
 
-import { syncOrderDeclinedWhenNoPendingHoldsRemain } from "./vendor-approval";
+import { syncOrderM4cAfterBookingChange } from "./vendor-approval";
 import { safeSendBookingStatusEmailHook } from "@/lib/orders/status-email-hooks";
 
 function parseExpirePendingActivityBookingsPayload(
@@ -72,14 +72,17 @@ export async function listPendingApprovalBookingsPastSla(
 export type PendingApprovalExpirySweepResult = {
   /** Rows updated by **`expire_pending_activity_bookings`** (DB RPC). */
   expiredCount: number;
-  /** Distinct orders for which **`syncOrderDeclinedWhenNoPendingHoldsRemain`** was run (no Stripe). */
+  /**
+   * Distinct orders for which **`syncOrderM4cAfterBookingChange`** was run (same post-transition
+   * hook as vendor approve/decline: may decline the order or start settlement).
+   */
   orderIdsSynced: string[];
 };
 
 /**
  * M4-C SLA sweep: **`pending_approval`** past **`expires_at`** → **`expired`**, then for each
- * affected order sync **`declined`** when no **`pending_approval`** remains and every line is
- * terminal without **`confirmed`**. Does **not** create settlement Stripe charges.
+ * affected order runs **`syncOrderM4cAfterBookingChange`**: sync **`declined`** when every line is
+ * terminal without **`confirmed`**, or start settlement when confirmed lines remain.
  *
  * Uses a single RPC call so expiry metrics and **`order_id`** list share the database **`now()`**
  * time base (same **`UPDATE … RETURNING`**).
@@ -102,7 +105,7 @@ export async function runPendingApprovalExpirySweep(
     parseExpirePendingActivityBookingsPayload(rpcData);
 
   for (const orderId of orderIdsSynced) {
-    await syncOrderDeclinedWhenNoPendingHoldsRemain(supabase, orderId);
+    await syncOrderM4cAfterBookingChange(supabase, orderId);
   }
 
   for (const booking of expirableBookings) {
