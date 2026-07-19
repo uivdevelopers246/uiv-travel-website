@@ -81,7 +81,7 @@ describe("getOrderCardState", () => {
     );
 
     expect(state.phase).toMatchObject({
-      label: "Waiting for vendor review",
+      label: "Booking submitted",
       tone: "amber",
     });
     expect(state.pendingApprovalSummary).toBe("2 bookings are still under review");
@@ -101,11 +101,11 @@ describe("getOrderCardState", () => {
 
     expect(state.countdown).toMatchObject({
       kind: "expired",
-      message: "Vendor response window closed. Waiting for final update.",
+      message: "Review window has closed — we're finalizing your booking now.",
     });
     expect(state.bookingStates[0]).toMatchObject({
       statusLabel: "Pending approval",
-      detail: "Vendor response window closed. Waiting for final update.",
+      detail: "Review window has closed — we're finalizing your booking now.",
     });
   });
 
