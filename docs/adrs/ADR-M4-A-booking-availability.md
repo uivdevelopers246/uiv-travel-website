@@ -394,14 +394,14 @@ Rejected for MVP. Would surrender control of the payment and commission relation
 - Automated payout remittance to operators (manual banking process for MVP)
 - Recurring slot rule generation
 - Cancellation notification emails (covered in M6 — Notifications)
-- **Accommodation bookings** (M4 Phase 2 — designed in [ADR-M4-D](./ADR-M4-D-accommodation-bookings.md); implementation is follow-on)
+- **Accommodation bookings** (M4 Phase 2 — designed and backend-implemented in [ADR-M4-D](./ADR-M4-D-accommodation-bookings.md); listing UI remains frontend follow-on)
 
 ---
 
 ## M4 Phase 2 — Accommodation Bookings
 
-Accommodation bookings are a distinct booking model and are **out of scope for implementation in this ADR**. Design lives in **[ADR-M4-D: Accommodation Bookings](./ADR-M4-D-accommodation-bookings.md)**.
+Accommodation bookings are a distinct booking model and are **out of scope for implementation in this ADR**. Design and backend commerce live in **[ADR-M4-D: Accommodation Bookings](./ADR-M4-D-accommodation-bookings.md)** (ledger, cart/checkout, setup fulfillment, approval/expiry, mixed settlement). Buyer/vendor stay listing UIs remain a frontend handoff.
 
 **Why a separate table and ADR:** Accommodation bookings are date-range based — a guest selects a check-in date and a check-out date, and the resource being reserved is the property itself. This is fundamentally different from the slot-based, headcount model used for activities. Forcing accommodation bookings into `activity_bookings` would require nullable columns for incompatible fields and make the availability enforcement logic ambiguous. A separate `accommodation_bookings` table keeps both models clean and independently evolvable.
 
-**ADR-M4-D decisions (summary):** open calendar (no blocked-ranges table in MVP); half-open `daterange` overlap exclusion for `pending_approval` + `confirmed`; flat nightly price `nights × price_min_usd`; guests validated against `max_guest_capacity` when set (honor system when null); M4-C SetupIntent → approve → one settlement charge; settlement sums confirmed lines from **both** booking tables; listing `check_in_time` / `check_out_time` are informational for MVP.
+**ADR-M4-D decisions (summary):** open calendar (no blocked-ranges table in MVP); half-open overlap for `pending_approval` + `confirmed` (RPC lock + soft-hold check; no GiST exclusion in shipped migrations); flat nightly price `nights × price_min_usd`; guests validated against `max_guest_capacity` when set (honor system when null); M4-C SetupIntent → approve → one settlement charge; settlement sums confirmed lines from **both** booking tables; listing `check_in_time` / `check_out_time` are informational for MVP.

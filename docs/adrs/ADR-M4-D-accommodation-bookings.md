@@ -250,14 +250,16 @@ Rejected — keep **one** order-level settlement charge (ADR-M4-C decision 4).
 
 ## Implementation checklist (non-binding; for follow-on PRs)
 
-- [ ] Migration: `accommodation_bookings` + RLS + exclusion/overlap RPC(s) + cart CHECKs + types
-- [ ] Cart: constants, `addOrMergeAccommodationLine`, list preview, API body shapes, detail CTA + cart UI
-- [ ] Checkout validator for mixed carts; Stripe copy not activity-only
-- [ ] Setup fulfillment creates stay rows; compensate both kinds
+- [x] Migration: `accommodation_bookings` + RLS + overlap RPC(s) + cart CHECKs + types
+- [x] Cart (backend): constants, `addOrMergeAccommodationLine`, list preview, API body shapes
+- [ ] Cart / listing UI: detail CTA + cart stay cards (frontend handoff)
+- [x] Checkout validator for mixed carts; Stripe setup totals not activity-only
+- [x] Setup fulfillment creates stay rows; compensate both kinds
 - [x] Vendor/admin approve/decline + expiry sweep for stays
 - [x] Settlement helpers aggregate both tables
-- [ ] Vitest: cart, create RPC mocks, mixed settlement
-- [ ] Update `docs/architecture.md`, `docs/database.md`, money runbook; mark Phase 2 designed in ADR-M4-A
+- [x] Vitest: cart checkout validate, setup fulfillment create/compensate, mixed settlement
+- [x] Update `docs/architecture.md`, `docs/database.md`, money runbook; mark Phase 2 designed in ADR-M4-A
+- [ ] Buyer/vendor listing UIs for stay bookings (frontend handoff)
 
 ---
 

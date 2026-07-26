@@ -1,12 +1,12 @@
-# M4 Activity Money Manual Test Checklist
+# M4 Money Manual Test Checklist
 
-Use this checklist before adding accommodation bookings to the order and settlement flow.
+Use this checklist for the shared M4-C money path (activities, stays, and mixed carts).
 Run it only with test users, test listings, and Stripe **Test mode**. Never record secrets,
 card data, or customer PII in this document.
 
 ## Prerequisites
 
-- [ ] The database has all M4 migrations applied.
+- [ ] The database has all M4 migrations applied (including ADR-M4-D stay ledger / RPCs).
 - [ ] `.env.local` contains the required Supabase, Stripe Test mode, site URL, and
       `CRON_SECRET` values.
 - [ ] `STRIPE_SECRET_KEY` starts with a Stripe Test mode key, not a Live mode key.
@@ -14,8 +14,10 @@ card data, or customer PII in this document.
 - [ ] A buyer test account exists.
 - [ ] A vendor test account owns a published activity with a positive price.
 - [ ] The activity has enough future, non-cancelled slots to use a fresh slot per scenario.
-- [ ] For the mixed-line test, a second published activity and slot exist. A second vendor
-      is preferable because it also exercises independent vendor decisions.
+- [ ] A vendor owns a published accommodation with usable `price_min_usd` and future
+      check-in / check-out dates that do not overlap existing holds.
+- [ ] For the mixed-line tests, a second published activity/slot and/or a stay listing exist.
+      A second vendor is preferable because it also exercises independent vendor decisions.
 
 ## Start the local test environment
 
@@ -45,8 +47,8 @@ documented as attachable to a Customer but declined when charged (commonly
 
 - [ ] Scenario name and pass/fail result
 - [ ] `orders.id`
-- [ ] Related `activity_bookings.id` values and statuses
-- [ ] Expected amount in cents
+- [ ] Related `activity_bookings.id` and/or `accommodation_bookings.id` values and statuses
+- [ ] Expected amount in cents (sum of confirmed lines across both tables when mixed)
 - [ ] Stripe SetupIntent and PaymentIntent IDs, when created
 - [ ] Final Stripe PaymentIntent status, amount, and currency
 - [ ] Relevant Stripe event IDs
@@ -155,12 +157,37 @@ rows to accelerate this test.
 - [ ] Confirm this matches the MVP manual-refund policy in
       `docs/m4-activity-operations-runbook.md`.
 
+## 7. Stay-only happy path
+
+Where listing UI is not yet wired, drive cart via `POST /api/cart/lines` with
+`{ accommodation_id, check_in, check_out, guests }` and approve via vendor/admin stay
+approve APIs.
+
+- [ ] Add one published stay (guests within capacity when set) to the cart.
+- [ ] Confirm cart total equals nights × nightly cents from `price_min_usd`.
+- [ ] Complete payment-method setup with the success test card (no charge at setup).
+- [ ] Confirm one `accommodation_bookings` row is `pending_approval` with money snapshots.
+- [ ] Approve the stay as the owning vendor (or admin).
+- [ ] Confirm exactly one settlement PaymentIntent for the stay `total_cents`.
+- [ ] Confirm the PaymentIntent succeeds and the order becomes `paid`.
+
+## 8. Mixed activity + stay, one settlement
+
+- [ ] Add one activity line and one accommodation line to the same cart.
+- [ ] Complete payment-method setup; confirm both booking kinds are `pending_approval`.
+- [ ] Approve the activity; confirm no settlement while the stay is still pending.
+- [ ] Decline the stay (or expire it via the cron endpoint when testing SLA).
+- [ ] Confirm settlement amount equals **only** the confirmed activity `total_cents`.
+- [ ] Confirm the order becomes `paid` with a single successful charge.
+- [ ] Optionally repeat with both lines confirmed and assert settlement equals the **sum**
+      of both confirmed totals.
+
 ## Final acceptance
 
 - [ ] Every required scenario has recorded evidence and a clear pass/fail result.
 - [ ] No scenario produced more than one successful settlement charge per order.
-- [ ] Every successful charge equals the sum of confirmed booking totals in `usd`.
+- [ ] Every successful charge equals the sum of confirmed booking totals (activities ∪
+      stays) in `usd`.
 - [ ] Declined-only and expired-only orders produced no charge.
 - [ ] Webhook deliveries returned the expected response and did not remain in a retry loop.
-- [ ] Any failure is documented as a defect or explicit MVP limitation before accommodation
-      lines are added to this flow.
+- [ ] Stay-only and mixed-cart scenarios above passed or are tracked as known FE gaps.
