@@ -4,29 +4,47 @@ vi.mock("@/lib/activities/service", () => ({
   getActivityById: vi.fn(),
 }));
 
+vi.mock("@/lib/accommodations/service", () => ({
+  getAccommodationById: vi.fn(),
+}));
+
 vi.mock("@/lib/slots/service", () => ({
   slotPlatformParticipantsBookedBySlotIds: vi.fn(),
 }));
 
 import { getActivityById } from "@/lib/activities/service";
+import { getAccommodationById } from "@/lib/accommodations/service";
 import { slotPlatformParticipantsBookedBySlotIds } from "@/lib/slots/service";
 import {
   addOrMergeActivityLine,
+  addOrMergeAccommodationLine,
   deleteAllCartLinesForUser,
   listCartLines,
   listCartLinesWithPreview,
+  parseAndValidateStayDates,
+  priceMinUsdToCents,
   pricePerPersonUsdToCents,
   removeCartLine,
+  updateCartLineGuests,
   updateCartLineParticipants,
   validateActivityCartForCheckout,
 } from "./service";
-import { CART_LINE_TYPE_ACTIVITY } from "./constants";
+import {
+  CART_LINE_TYPE_ACTIVITY,
+  CART_LINE_TYPE_ACCOMMODATION,
+} from "./constants";
 
 const userId = "user-1";
 const slotId = "slot-1";
 const activityId = "act-1";
 const lineId = "line-1";
+const stayLineId = "stay-line-1";
+const accommodationId = "acc-1";
 const vendorId = "vendor-1";
+/** Fixed "today" for stay date validation (UTC). */
+const stayNow = new Date("2026-07-26T12:00:00.000Z");
+const checkIn = "2026-08-01";
+const checkOut = "2026-08-04"; // 3 nights
 
 const publicActivity = {
   id: activityId,
@@ -40,6 +58,35 @@ const publicActivity = {
   max_capacity: 20,
   rating: null,
   image_url: null,
+  is_featured: false,
+};
+
+const publicAccommodation = {
+  id: accommodationId,
+  vendor_id: vendorId,
+  name: "Beach Villa",
+  accommodation_type: "villa",
+  bedroom_count: 2,
+  bed_count: 3,
+  bathroom_count: 2,
+  max_guest_capacity: 4,
+  price_min_usd: 150,
+  price_max_usd: 200,
+  check_in_time: "15:00",
+  check_out_time: "11:00",
+  suitable_for_children: true,
+  wheelchair_accessible: false,
+  smoking_allowed: false,
+  pets_allowed: false,
+  beach_access_or_view: true,
+  transportation_provided: false,
+  amenities_complete: true,
+  amenities: ["wifi"],
+  address: "1 Beach Rd",
+  parish: "St. James",
+  transportation_notes: null,
+  pickup_notes: null,
+  image_url: "https://example.com/villa.jpg",
   is_featured: false,
 };
 
@@ -80,6 +127,31 @@ function baseCartLine(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+function baseStayCartLine(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: stayLineId,
+    user_id: userId,
+    line_type: CART_LINE_TYPE_ACCOMMODATION,
+    slot_id: null,
+    participants: null,
+    unit_price_cents: 15000,
+    line_subtotal_cents: 45000,
+    line_discount_cents: 0,
+    line_total_cents: 45000,
+    accommodation_id: accommodationId,
+    check_in: checkIn,
+    check_out: checkOut,
+    guests: 2,
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function stayAvailableRpc(held = false) {
+  return vi.fn().mockResolvedValue({ data: held, error: null });
+}
+
 function authUser() {
   return {
     auth: {
@@ -93,9 +165,11 @@ function authUser() {
 
 beforeEach(() => {
   vi.mocked(getActivityById).mockReset();
+  vi.mocked(getAccommodationById).mockReset();
   vi.mocked(slotPlatformParticipantsBookedBySlotIds).mockReset();
   vi.mocked(slotPlatformParticipantsBookedBySlotIds).mockResolvedValue(new Map());
   vi.mocked(getActivityById).mockResolvedValue(publicActivity);
+  vi.mocked(getAccommodationById).mockResolvedValue(publicAccommodation);
 });
 
 describe("pricePerPersonUsdToCents", () => {
@@ -114,6 +188,47 @@ describe("pricePerPersonUsdToCents", () => {
     expect(() => pricePerPersonUsdToCents(Number.NaN)).toThrow(
       "Activity price is not set",
     );
+  });
+});
+
+describe("priceMinUsdToCents", () => {
+  it("converts nightly USD to integer cents", () => {
+    expect(priceMinUsdToCents(150)).toBe(15000);
+    expect(priceMinUsdToCents(99.5)).toBe(9950);
+  });
+
+  it("throws when price is null or non-finite", () => {
+    expect(() => priceMinUsdToCents(null)).toThrow(
+      "Accommodation price is not set",
+    );
+    expect(() => priceMinUsdToCents(undefined)).toThrow(
+      "Accommodation price is not set",
+    );
+    expect(() => priceMinUsdToCents(Number.NaN)).toThrow(
+      "Accommodation price is not set",
+    );
+  });
+});
+
+describe("parseAndValidateStayDates", () => {
+  it("returns nights as check_out minus check_in", () => {
+    expect(parseAndValidateStayDates(checkIn, checkOut, stayNow)).toEqual({
+      check_in: checkIn,
+      check_out: checkOut,
+      nights: 3,
+    });
+  });
+
+  it("throws when check_out is not after check_in", () => {
+    expect(() =>
+      parseAndValidateStayDates(checkIn, checkIn, stayNow),
+    ).toThrow("check_out must be after check_in");
+  });
+
+  it("throws when check_in is in the past", () => {
+    expect(() =>
+      parseAndValidateStayDates("2026-07-01", "2026-07-05", stayNow),
+    ).toThrow("check_in must not be in the past");
   });
 });
 
@@ -251,11 +366,66 @@ describe("listCartLinesWithPreview", () => {
       max_capacity: 10,
       booked_participants: 3,
       remaining_capacity: 7,
+      accommodation_name: "",
+      nights: 0,
+      stay_dates_available: false,
     });
     expect(slotPlatformParticipantsBookedBySlotIds).toHaveBeenCalledWith(
       supabase,
       [slotId],
     );
+  });
+
+  it("includes stay preview fields for accommodation lines", async () => {
+    const line = baseStayCartLine({ guests: 2 });
+    const cartQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [line], error: null }),
+    };
+    const accommodationsQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockResolvedValue({
+        data: [
+          {
+            id: accommodationId,
+            name: "Beach Villa",
+            image_url: "https://example.com/villa.jpg",
+            max_guest_capacity: 4,
+          },
+        ],
+        error: null,
+      }),
+    };
+
+    const supabase: Record<string, unknown> = {
+      from: vi.fn((table: string) => {
+        if (table === "cart_lines") return cartQuery;
+        if (table === "accommodations") return accommodationsQuery;
+        throw new Error(`unexpected table ${table}`);
+      }),
+      rpc: stayAvailableRpc(false),
+      ...authUser(),
+    };
+
+    const rows = await listCartLinesWithPreview(supabase as never);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      ...line,
+      accommodation_name: "Beach Villa",
+      accommodation_image_url: "https://example.com/villa.jpg",
+      nights: 3,
+      max_guest_capacity: 4,
+      stay_dates_available: true,
+      activity_title: "",
+      max_capacity: 0,
+      remaining_capacity: 0,
+    });
+    expect(supabase.rpc).toHaveBeenCalledWith("accommodation_stay_is_held", {
+      p_accommodation_id: accommodationId,
+      p_check_in: checkIn,
+      p_check_out: checkOut,
+    });
   });
 });
 
@@ -500,6 +670,326 @@ describe("addOrMergeActivityLine", () => {
         participants: 0,
       }),
     ).rejects.toThrow("participants must be a positive integer");
+  });
+});
+
+describe("addOrMergeAccommodationLine", () => {
+  it("inserts a stay line with unit × nights snapshots (guests do not multiply)", async () => {
+    const inserted = baseStayCartLine({ guests: 2 });
+    const cartFindQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+    };
+    const cartInsertQuery: Record<string, unknown> = {
+      insert: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: inserted, error: null }),
+    };
+
+    const supabase: Record<string, unknown> = {
+      from: vi
+        .fn()
+        .mockImplementationOnce(() => cartFindQuery)
+        .mockImplementationOnce(() => cartInsertQuery),
+      rpc: stayAvailableRpc(false),
+      ...authUser(),
+    };
+
+    const row = await addOrMergeAccommodationLine(
+      supabase as never,
+      {
+        accommodation_id: accommodationId,
+        check_in: checkIn,
+        check_out: checkOut,
+        guests: 2,
+      },
+      { now: stayNow },
+    );
+
+    expect(row).toEqual(inserted);
+    expect(supabase.rpc).toHaveBeenCalledWith("accommodation_stay_is_held", {
+      p_accommodation_id: accommodationId,
+      p_check_in: checkIn,
+      p_check_out: checkOut,
+    });
+    expect(cartInsertQuery.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: userId,
+        line_type: CART_LINE_TYPE_ACCOMMODATION,
+        accommodation_id: accommodationId,
+        check_in: checkIn,
+        check_out: checkOut,
+        guests: 2,
+        slot_id: null,
+        participants: null,
+        unit_price_cents: 15000,
+        line_subtotal_cents: 45000,
+        line_discount_cents: 0,
+        line_total_cents: 45000,
+      }),
+    );
+  });
+
+  it("merges by absolute guests (not a delta) and recomputes from current rate", async () => {
+    const existing = baseStayCartLine({
+      guests: 2,
+      unit_price_cents: 10000,
+      line_subtotal_cents: 30000,
+      line_total_cents: 30000,
+    });
+    const updated = baseStayCartLine({
+      guests: 5,
+      unit_price_cents: 15000,
+      line_subtotal_cents: 45000,
+      line_total_cents: 45000,
+    });
+
+    const cartFindQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: existing, error: null }),
+    };
+    const cartUpdateQuery: Record<string, unknown> = {
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: updated, error: null }),
+    };
+
+    vi.mocked(getAccommodationById).mockResolvedValue({
+      ...publicAccommodation,
+      max_guest_capacity: null,
+    });
+
+    const supabase: Record<string, unknown> = {
+      from: vi
+        .fn()
+        .mockImplementationOnce(() => cartFindQuery)
+        .mockImplementationOnce(() => cartUpdateQuery),
+      rpc: stayAvailableRpc(false),
+      ...authUser(),
+    };
+
+    const row = await addOrMergeAccommodationLine(
+      supabase as never,
+      {
+        accommodation_id: accommodationId,
+        check_in: checkIn,
+        check_out: checkOut,
+        guests: 5,
+      },
+      { now: stayNow },
+    );
+
+    expect(row.guests).toBe(5);
+    expect(cartUpdateQuery.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        guests: 5,
+        slot_id: null,
+        participants: null,
+        unit_price_cents: 15000,
+        line_subtotal_cents: 45000,
+        line_total_cents: 45000,
+      }),
+    );
+  });
+
+  it("allows any guest count when max_guest_capacity is null", async () => {
+    const inserted = baseStayCartLine({ guests: 50 });
+    const cartFindQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+    };
+    const cartInsertQuery: Record<string, unknown> = {
+      insert: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: inserted, error: null }),
+    };
+
+    vi.mocked(getAccommodationById).mockResolvedValue({
+      ...publicAccommodation,
+      max_guest_capacity: null,
+    });
+
+    const supabase: Record<string, unknown> = {
+      from: vi
+        .fn()
+        .mockImplementationOnce(() => cartFindQuery)
+        .mockImplementationOnce(() => cartInsertQuery),
+      rpc: stayAvailableRpc(false),
+      ...authUser(),
+    };
+
+    await expect(
+      addOrMergeAccommodationLine(
+        supabase as never,
+        {
+          accommodation_id: accommodationId,
+          check_in: checkIn,
+          check_out: checkOut,
+          guests: 50,
+        },
+        { now: stayNow },
+      ),
+    ).resolves.toEqual(inserted);
+  });
+
+  it("throws when guests exceed max_guest_capacity", async () => {
+    const supabase: Record<string, unknown> = {
+      from: vi.fn(),
+      rpc: stayAvailableRpc(false),
+      ...authUser(),
+    };
+
+    await expect(
+      addOrMergeAccommodationLine(
+        supabase as never,
+        {
+          accommodation_id: accommodationId,
+          check_in: checkIn,
+          check_out: checkOut,
+          guests: 5,
+        },
+        { now: stayNow },
+      ),
+    ).rejects.toThrow("Guest count exceeds accommodation capacity");
+  });
+
+  it("throws when stay dates overlap a holding booking", async () => {
+    const supabase: Record<string, unknown> = {
+      from: vi.fn(),
+      rpc: stayAvailableRpc(true),
+      ...authUser(),
+    };
+
+    await expect(
+      addOrMergeAccommodationLine(
+        supabase as never,
+        {
+          accommodation_id: accommodationId,
+          check_in: checkIn,
+          check_out: checkOut,
+          guests: 2,
+        },
+        { now: stayNow },
+      ),
+    ).rejects.toThrow("These stay dates are not available");
+  });
+
+  it("throws when accommodation price is not set", async () => {
+    vi.mocked(getAccommodationById).mockResolvedValue({
+      ...publicAccommodation,
+      price_min_usd: null,
+    });
+
+    const supabase: Record<string, unknown> = {
+      from: vi.fn(),
+      rpc: stayAvailableRpc(false),
+      ...authUser(),
+    };
+
+    await expect(
+      addOrMergeAccommodationLine(
+        supabase as never,
+        {
+          accommodation_id: accommodationId,
+          check_in: checkIn,
+          check_out: checkOut,
+          guests: 2,
+        },
+        { now: stayNow },
+      ),
+    ).rejects.toThrow("Accommodation price is not set");
+  });
+
+  it("throws when guests is not a positive integer", async () => {
+    const supabase: Record<string, unknown> = {
+      from: vi.fn(),
+      ...authUser(),
+    };
+
+    await expect(
+      addOrMergeAccommodationLine(
+        supabase as never,
+        {
+          accommodation_id: accommodationId,
+          check_in: checkIn,
+          check_out: checkOut,
+          guests: 0,
+        },
+        { now: stayNow },
+      ),
+    ).rejects.toThrow("guests must be a positive integer");
+  });
+});
+
+describe("updateCartLineGuests", () => {
+  it("sets absolute guests and recomputes stay snapshots", async () => {
+    const line = baseStayCartLine({ guests: 2 });
+    const updated = baseStayCartLine({
+      guests: 3,
+      line_subtotal_cents: 45000,
+      line_total_cents: 45000,
+    });
+
+    const loadQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: line, error: null }),
+    };
+    const updateQuery: Record<string, unknown> = {
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: updated, error: null }),
+    };
+
+    const supabase: Record<string, unknown> = {
+      from: vi
+        .fn()
+        .mockImplementationOnce(() => loadQuery)
+        .mockImplementationOnce(() => updateQuery),
+      rpc: stayAvailableRpc(false),
+      ...authUser(),
+    };
+
+    const row = await updateCartLineGuests(
+      supabase as never,
+      { cart_line_id: stayLineId, guests: 3 },
+      { now: stayNow },
+    );
+
+    expect(row.guests).toBe(3);
+    expect(updateQuery.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        guests: 3,
+        unit_price_cents: 15000,
+        line_subtotal_cents: 45000,
+        line_total_cents: 45000,
+      }),
+    );
+  });
+
+  it("throws when line is not an accommodation line", async () => {
+    const line = baseCartLine();
+    const loadQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: line, error: null }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn(() => loadQuery),
+      ...authUser(),
+    };
+
+    await expect(
+      updateCartLineGuests(supabase as never, {
+        cart_line_id: lineId,
+        guests: 2,
+      }),
+    ).rejects.toThrow("Only accommodation cart lines can update guests");
   });
 });
 
