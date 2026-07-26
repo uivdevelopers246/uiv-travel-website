@@ -15,6 +15,17 @@ const BAD_REQUEST_EXACT = new Set([
   "Cart line is missing a slot",
   "Cart is empty",
   "Checkout is only available for activity items",
+  "Accommodation price is not set",
+  "Accommodation is not available for booking",
+  "These stay dates are not available",
+  "Guest count exceeds accommodation capacity",
+  "Invalid check_in date",
+  "Invalid check_out date",
+  "Invalid stay dates",
+  "check_out must be after check_in",
+  "check_in must not be in the past",
+  "Only accommodation cart lines can update guests",
+  "Cart line is missing stay details",
 ]);
 
 /**
