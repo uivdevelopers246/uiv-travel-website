@@ -21,6 +21,10 @@ function makeLine(
     line_subtotal_cents: 25000,
     line_discount_cents: 0,
     line_total_cents: 25000,
+    accommodation_id: null,
+    check_in: null,
+    check_out: null,
+    guests: null,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
     activity_title: "Island Sail",
@@ -31,6 +35,11 @@ function makeLine(
     off_platform_participants: 3,
     booked_participants: 4,
     remaining_capacity: 5,
+    accommodation_name: "",
+    accommodation_image_url: null,
+    nights: 0,
+    max_guest_capacity: null,
+    stay_dates_available: false,
     ...overrides,
   };
 }

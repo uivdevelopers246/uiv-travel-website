@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type Stripe from "stripe";
 
-import { CART_LINE_TYPE_ACTIVITY } from "@/lib/cart/constants";
+import { CART_LINE_TYPE_ACTIVITY, CART_LINE_TYPE_ACCOMMODATION } from "@/lib/cart/constants";
 import type { Order } from "@/lib/orders/types";
 
 vi.mock("stripe", () => ({
@@ -47,6 +47,7 @@ import {
   getStripe,
 } from "./server";
 import {
+  STRIPE_METADATA_FLOW_M4C_PAYMENT_RECOVERY,
   STRIPE_METADATA_FLOW_M4C_SETUP,
   STRIPE_METADATA_FLOW_M4C_SETTLEMENT,
 } from "@/lib/orders/constants";
@@ -108,7 +109,7 @@ beforeEach(() => {
 });
 
 describe("createCheckoutSetupSessionForOrder", () => {
-  it("throws when activity line totals do not match order.total_cents", async () => {
+  it("throws when cart line totals do not match order.total_cents", async () => {
     await expect(
       createCheckoutSetupSessionForOrder({
         order: baseOrder({ total_cents: 9999 }),
@@ -137,7 +138,7 @@ describe("createCheckoutSetupSessionForOrder", () => {
     ).rejects.toThrow("Cart line totals do not match order total");
   });
 
-  it("throws when there are no activity lines", async () => {
+  it("throws when there are no cart lines", async () => {
     await expect(
       createCheckoutSetupSessionForOrder({
         order: baseOrder(),
@@ -145,7 +146,43 @@ describe("createCheckoutSetupSessionForOrder", () => {
         siteUrl: "http://localhost:3000",
         stripeCustomerId: "cus_test",
       }),
-    ).rejects.toThrow("Checkout requires at least one activity line");
+    ).rejects.toThrow("Checkout requires at least one cart line");
+  });
+
+  it("accepts accommodation-only carts when line totals match the order", async () => {
+    const line = {
+      id: "line-stay",
+      user_id: "user-1",
+      line_type: CART_LINE_TYPE_ACCOMMODATION,
+      slot_id: null,
+      participants: null,
+      unit_price_cents: 15000,
+      line_subtotal_cents: 45000,
+      line_discount_cents: 0,
+      line_total_cents: 45000,
+      accommodation_id: "acc-1",
+      check_in: "2026-08-01",
+      check_out: "2026-08-04",
+      guests: 2,
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z",
+    };
+
+    await createCheckoutSetupSessionForOrder({
+      order: baseOrder({ id: "order-stay", total_cents: 45000 }),
+      lines: [line],
+      siteUrl: "http://localhost:3000",
+      stripeCustomerId: "cus_test",
+    });
+
+    const stripe = getStripe();
+    const createMock = stripe.checkout.sessions.create as ReturnType<typeof vi.fn>;
+    expect(createMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "setup",
+        client_reference_id: "order-stay",
+      }),
+    );
   });
 
   it("passes metadata.order_id on the session and on setup_intent_data for webhook correlation", async () => {
@@ -403,45 +440,53 @@ function paymentIntentFailedEvent(
   } as Stripe.Event;
 }
 
-function supabaseForSuccessfulSettlement() {
-  let step = 0;
+function bookingListFromQuery(data: Array<{ status: string; total_cents: number }>) {
   return {
-    from: vi.fn(() => {
-      step += 1;
-      if (step === 1) {
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    order: vi.fn().mockReturnThis(),
+    range: vi.fn().mockResolvedValue({
+      data,
+      error: null,
+    }),
+  };
+}
+
+function supabaseForSuccessfulSettlement() {
+  let webhookEvents = 0;
+  let ordersReads = 0;
+  return {
+    from: vi.fn((table: string) => {
+      if (table === "stripe_webhook_events") {
+        webhookEvents += 1;
+        if (webhookEvents === 1) {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+          };
+        }
         return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+          insert: vi.fn().mockResolvedValue({ error: null }),
         };
       }
-      if (step === 2) {
-        return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          maybeSingle: vi.fn().mockResolvedValue({
-            data: {
-              id: "order-1",
-              status: "payment_pending",
-              currency: "usd",
-              stripe_payment_intent_id: "pi_settlement_1",
-            },
-            error: null,
-          }),
-        };
-      }
-      if (step === 3) {
-        return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          order: vi.fn().mockReturnThis(),
-          range: vi.fn().mockResolvedValue({
-            data: [{ status: "confirmed", total_cents: 3000 }],
-            error: null,
-          }),
-        };
-      }
-      if (step === 4) {
+      if (table === "orders") {
+        ordersReads += 1;
+        if (ordersReads === 1) {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: {
+                id: "order-1",
+                status: "payment_pending",
+                currency: "usd",
+                stripe_payment_intent_id: "pi_settlement_1",
+              },
+              error: null,
+            }),
+          };
+        }
         return {
           update: vi.fn().mockReturnThis(),
           eq: vi.fn().mockReturnThis(),
@@ -453,55 +498,52 @@ function supabaseForSuccessfulSettlement() {
           }),
         };
       }
-      if (step === 5) {
-        return {
-          insert: vi.fn().mockResolvedValue({ error: null }),
-        };
+      if (table === "activity_bookings") {
+        return bookingListFromQuery([{ status: "confirmed", total_cents: 3000 }]);
       }
-      throw new Error(`Unexpected from() step ${step}`);
+      if (table === "accommodation_bookings") {
+        return bookingListFromQuery([]);
+      }
+      throw new Error(`Unexpected table ${table}`);
     }),
   };
 }
 
 function supabaseForSuccessfulSettlementBeforeAttach() {
-  let step = 0;
+  let webhookEvents = 0;
+  let ordersReads = 0;
   return {
-    from: vi.fn(() => {
-      step += 1;
-      if (step === 1) {
+    from: vi.fn((table: string) => {
+      if (table === "stripe_webhook_events") {
+        webhookEvents += 1;
+        if (webhookEvents === 1) {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+          };
+        }
         return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+          insert: vi.fn().mockResolvedValue({ error: null }),
         };
       }
-      if (step === 2) {
-        return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          maybeSingle: vi.fn().mockResolvedValue({
-            data: {
-              id: "order-1",
-              status: "awaiting_vendor_approval",
-              currency: "usd",
-              stripe_payment_intent_id: null,
-            },
-            error: null,
-          }),
-        };
-      }
-      if (step === 3) {
-        return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          order: vi.fn().mockReturnThis(),
-          range: vi.fn().mockResolvedValue({
-            data: [{ status: "confirmed", total_cents: 3000 }],
-            error: null,
-          }),
-        };
-      }
-      if (step === 4) {
+      if (table === "orders") {
+        ordersReads += 1;
+        if (ordersReads === 1) {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: {
+                id: "order-1",
+                status: "awaiting_vendor_approval",
+                currency: "usd",
+                stripe_payment_intent_id: null,
+              },
+              error: null,
+            }),
+          };
+        }
         return {
           update: vi.fn().mockReturnThis(),
           eq: vi.fn().mockReturnThis(),
@@ -513,12 +555,13 @@ function supabaseForSuccessfulSettlementBeforeAttach() {
           }),
         };
       }
-      if (step === 5) {
-        return {
-          insert: vi.fn().mockResolvedValue({ error: null }),
-        };
+      if (table === "activity_bookings") {
+        return bookingListFromQuery([{ status: "confirmed", total_cents: 3000 }]);
       }
-      throw new Error(`Unexpected from() step ${step}`);
+      if (table === "accommodation_bookings") {
+        return bookingListFromQuery([]);
+      }
+      throw new Error(`Unexpected table ${table}`);
     }),
   };
 }
@@ -590,6 +633,41 @@ describe("fulfillSetupIntentSucceeded", () => {
 
     const result = await fulfillSetupIntentSucceeded(
       setupIntentSucceededEvent(),
+      supabase as never,
+    );
+
+    expect(result).toEqual({ status: "order_not_found" });
+    expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
+    expect(insertStripeWebhookEvent).toHaveBeenCalledWith({
+      stripe_event_id: "evt_seti_success",
+    });
+  });
+
+  it("records stripe_webhook_events when payment recovery references a missing order", async () => {
+    const insertStripeWebhookEvent = vi.fn().mockResolvedValue({ error: null });
+    const supabase = supabaseWithFromQueue([
+      () => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+      () => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+      () => ({
+        insert: insertStripeWebhookEvent,
+      }),
+    ]);
+
+    const result = await fulfillSetupIntentSucceeded(
+      setupIntentSucceededEvent({
+        metadata: {
+          order_id: "missing-order",
+          flow: STRIPE_METADATA_FLOW_M4C_PAYMENT_RECOVERY,
+        },
+      }),
       supabase as never,
     );
 
@@ -829,43 +907,39 @@ describe("fulfillSettlementPaymentIntentSucceeded", () => {
   });
 
   it("returns reconciliation_required when the PaymentIntent amount does not match confirmed booking totals", async () => {
-    let step = 0;
+    let webhookEvents = 0;
+    let ordersReads = 0;
     const supabase = {
-      from: vi.fn(() => {
-        step += 1;
-        if (step === 1) {
+      from: vi.fn((table: string) => {
+        if (table === "stripe_webhook_events") {
+          webhookEvents += 1;
+          if (webhookEvents === 1) {
+            return {
+              select: vi.fn().mockReturnThis(),
+              eq: vi.fn().mockReturnThis(),
+              maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+            };
+          }
           return {
-            select: vi.fn().mockReturnThis(),
-            eq: vi.fn().mockReturnThis(),
-            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+            insert: vi.fn().mockResolvedValue({ error: null }),
           };
         }
-        if (step === 2) {
-          return {
-            select: vi.fn().mockReturnThis(),
-            eq: vi.fn().mockReturnThis(),
-            maybeSingle: vi.fn().mockResolvedValue({
-              data: {
-                id: "order-1",
-                status: "payment_pending",
-                currency: "usd",
-              },
-              error: null,
-            }),
-          };
-        }
-        if (step === 3) {
-          return {
-            select: vi.fn().mockReturnThis(),
-            eq: vi.fn().mockReturnThis(),
-            order: vi.fn().mockReturnThis(),
-            range: vi.fn().mockResolvedValue({
-              data: [{ status: "confirmed", total_cents: 1000 }],
-              error: null,
-            }),
-          };
-        }
-        if (step === 4) {
+        if (table === "orders") {
+          ordersReads += 1;
+          if (ordersReads === 1) {
+            return {
+              select: vi.fn().mockReturnThis(),
+              eq: vi.fn().mockReturnThis(),
+              maybeSingle: vi.fn().mockResolvedValue({
+                data: {
+                  id: "order-1",
+                  status: "payment_pending",
+                  currency: "usd",
+                },
+                error: null,
+              }),
+            };
+          }
           return {
             update: vi.fn().mockReturnThis(),
             eq: vi.fn().mockReturnThis(),
@@ -877,12 +951,13 @@ describe("fulfillSettlementPaymentIntentSucceeded", () => {
             }),
           };
         }
-        if (step === 5) {
-          return {
-            insert: vi.fn().mockResolvedValue({ error: null }),
-          };
+        if (table === "activity_bookings") {
+          return bookingListFromQuery([{ status: "confirmed", total_cents: 1000 }]);
         }
-        throw new Error(`Unexpected step ${step}`);
+        if (table === "accommodation_bookings") {
+          return bookingListFromQuery([]);
+        }
+        throw new Error(`Unexpected table ${table}`);
       }),
     };
 
@@ -895,58 +970,55 @@ describe("fulfillSettlementPaymentIntentSucceeded", () => {
     expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
     expect(supabase.from).toHaveBeenCalledWith("orders");
     expect(supabase.from).toHaveBeenCalledWith("activity_bookings");
+    expect(supabase.from).toHaveBeenCalledWith("accommodation_bookings");
   });
 
   it("returns reconciliation_required when mismatch transition is already applied by a prior delivery", async () => {
-    let step = 0;
+    let webhookEvents = 0;
+    let ordersReads = 0;
     const supabase = {
-      from: vi.fn(() => {
-        step += 1;
-        if (step === 1) {
+      from: vi.fn((table: string) => {
+        if (table === "stripe_webhook_events") {
+          webhookEvents += 1;
+          if (webhookEvents === 1) {
+            return {
+              select: vi.fn().mockReturnThis(),
+              eq: vi.fn().mockReturnThis(),
+              maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+            };
+          }
           return {
-            select: vi.fn().mockReturnThis(),
-            eq: vi.fn().mockReturnThis(),
-            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+            insert: vi.fn().mockResolvedValue({ error: null }),
           };
         }
-        if (step === 2) {
-          return {
-            select: vi.fn().mockReturnThis(),
-            eq: vi.fn().mockReturnThis(),
-            maybeSingle: vi.fn().mockResolvedValue({
-              data: {
-                id: "order-1",
-                status: "payment_pending",
-                currency: "usd",
-              },
-              error: null,
-            }),
-          };
-        }
-        if (step === 3) {
-          return {
-            select: vi.fn().mockReturnThis(),
-            eq: vi.fn().mockReturnThis(),
-            order: vi.fn().mockReturnThis(),
-            range: vi.fn().mockResolvedValue({
-              data: [{ status: "confirmed", total_cents: 1000 }],
-              error: null,
-            }),
-          };
-        }
-        if (step === 4) {
-          return {
-            update: vi.fn().mockReturnThis(),
-            eq: vi.fn().mockReturnThis(),
-            in: vi.fn().mockReturnThis(),
-            select: vi.fn().mockReturnThis(),
-            maybeSingle: vi.fn().mockResolvedValue({
-              data: null,
-              error: null,
-            }),
-          };
-        }
-        if (step === 5) {
+        if (table === "orders") {
+          ordersReads += 1;
+          if (ordersReads === 1) {
+            return {
+              select: vi.fn().mockReturnThis(),
+              eq: vi.fn().mockReturnThis(),
+              maybeSingle: vi.fn().mockResolvedValue({
+                data: {
+                  id: "order-1",
+                  status: "payment_pending",
+                  currency: "usd",
+                },
+                error: null,
+              }),
+            };
+          }
+          if (ordersReads === 2) {
+            return {
+              update: vi.fn().mockReturnThis(),
+              eq: vi.fn().mockReturnThis(),
+              in: vi.fn().mockReturnThis(),
+              select: vi.fn().mockReturnThis(),
+              maybeSingle: vi.fn().mockResolvedValue({
+                data: null,
+                error: null,
+              }),
+            };
+          }
           return {
             select: vi.fn().mockReturnThis(),
             eq: vi.fn().mockReturnThis(),
@@ -960,12 +1032,13 @@ describe("fulfillSettlementPaymentIntentSucceeded", () => {
             }),
           };
         }
-        if (step === 6) {
-          return {
-            insert: vi.fn().mockResolvedValue({ error: null }),
-          };
+        if (table === "activity_bookings") {
+          return bookingListFromQuery([{ status: "confirmed", total_cents: 1000 }]);
         }
-        throw new Error(`Unexpected step ${step}`);
+        if (table === "accommodation_bookings") {
+          return bookingListFromQuery([]);
+        }
+        throw new Error(`Unexpected table ${table}`);
       }),
     };
 
@@ -991,6 +1064,7 @@ describe("fulfillSettlementPaymentIntentSucceeded", () => {
     expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
     expect(supabase.from).toHaveBeenCalledWith("orders");
     expect(supabase.from).toHaveBeenCalledWith("activity_bookings");
+    expect(supabase.from).toHaveBeenCalledWith("accommodation_bookings");
   });
 
   it("marks settlement success when webhook arrives before attach updates the order", async () => {
@@ -1005,6 +1079,7 @@ describe("fulfillSettlementPaymentIntentSucceeded", () => {
     expect(supabase.from).toHaveBeenCalledWith("stripe_webhook_events");
     expect(supabase.from).toHaveBeenCalledWith("orders");
     expect(supabase.from).toHaveBeenCalledWith("activity_bookings");
+    expect(supabase.from).toHaveBeenCalledWith("accommodation_bookings");
   });
 });
 

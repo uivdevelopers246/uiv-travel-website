@@ -182,6 +182,85 @@ export type Database = {
           },
         ]
       }
+      accommodation_bookings: {
+        Row: {
+          accommodation_id: string
+          check_in: string
+          check_out: string
+          created_at: string
+          discount_cents: number
+          expires_at: string | null
+          guests: number
+          id: string
+          order_id: string | null
+          status: string
+          subtotal_cents: number
+          total_cents: number
+          unit_price_cents: number
+          updated_at: string
+          user_id: string
+          vendor_id: string
+        }
+        Insert: {
+          accommodation_id: string
+          check_in: string
+          check_out: string
+          created_at?: string
+          discount_cents?: number
+          expires_at?: string | null
+          guests: number
+          id?: string
+          order_id?: string | null
+          status?: string
+          subtotal_cents: number
+          total_cents: number
+          unit_price_cents: number
+          updated_at?: string
+          user_id: string
+          vendor_id: string
+        }
+        Update: {
+          accommodation_id?: string
+          check_in?: string
+          check_out?: string
+          created_at?: string
+          discount_cents?: number
+          expires_at?: string | null
+          guests?: number
+          id?: string
+          order_id?: string | null
+          status?: string
+          subtotal_cents?: number
+          total_cents?: number
+          unit_price_cents?: number
+          updated_at?: string
+          user_id?: string
+          vendor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "accommodation_bookings_accommodation_id_fkey"
+            columns: ["accommodation_id"]
+            isOneToOne: false
+            referencedRelation: "accommodations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "accommodation_bookings_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "accommodation_bookings_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       activities: {
         Row: {
           category: string
@@ -699,6 +778,22 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      accommodation_stay_is_held: {
+        Args: {
+          p_accommodation_id: string
+          p_check_in: string
+          p_check_out: string
+        }
+        Returns: boolean
+      }
+      cancel_accommodation_booking: {
+        Args: { p_booking_id: string }
+        Returns: undefined
+      }
+      cancel_accommodation_bookings_for_order: {
+        Args: { p_order_id: string }
+        Returns: undefined
+      }
       cancel_activity_booking: {
         Args: { p_booking_id: string }
         Returns: undefined
@@ -711,6 +806,14 @@ export type Database = {
         Args: { p_order_id: string }
         Returns: number
       }
+      confirm_pending_accommodation_booking_as_admin: {
+        Args: { p_booking_id: string }
+        Returns: number
+      }
+      confirm_pending_accommodation_booking_for_vendor: {
+        Args: { p_booking_id: string; p_vendor_id: string }
+        Returns: number
+      }
       confirm_pending_activity_booking_as_admin: {
         Args: { p_booking_id: string }
         Returns: number
@@ -718,6 +821,47 @@ export type Database = {
       confirm_pending_activity_booking_for_vendor: {
         Args: { p_booking_id: string; p_vendor_id: string }
         Returns: number
+      }
+      create_accommodation_booking_after_setup: {
+        Args: {
+          p_accommodation_id: string
+          p_check_in: string
+          p_check_out: string
+          p_discount_cents?: number
+          p_expires_at?: string
+          p_guests: number
+          p_order_id: string
+          p_status?: string
+          p_subtotal_cents: number
+          p_total_cents: number
+          p_unit_price_cents: number
+          p_user_id: string
+          p_vendor_id: string
+        }
+        Returns: {
+          accommodation_id: string
+          check_in: string
+          check_out: string
+          created_at: string
+          discount_cents: number
+          expires_at: string | null
+          guests: number
+          id: string
+          order_id: string | null
+          status: string
+          subtotal_cents: number
+          total_cents: number
+          unit_price_cents: number
+          updated_at: string
+          user_id: string
+          vendor_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "accommodation_bookings"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       create_activity_booking_after_payment: {
         Args: {
@@ -758,9 +902,25 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      decline_accommodation_bookings_for_order: {
+        Args: { p_order_id: string }
+        Returns: undefined
+      }
       decline_activity_bookings_for_order: {
         Args: { p_order_id: string }
         Returns: undefined
+      }
+      decline_pending_accommodation_booking_as_admin: {
+        Args: { p_booking_id: string }
+        Returns: number
+      }
+      decline_pending_accommodation_booking_for_vendor: {
+        Args: { p_booking_id: string; p_vendor_id: string }
+        Returns: number
+      }
+      decline_pending_accommodation_bookings_for_vendor_on_order: {
+        Args: { p_order_id: string; p_vendor_id: string }
+        Returns: number
       }
       decline_pending_activity_booking_as_admin: {
         Args: { p_booking_id: string }
@@ -774,6 +934,7 @@ export type Database = {
         Args: { p_order_id: string; p_vendor_id: string }
         Returns: number
       }
+      expire_pending_accommodation_bookings: { Args: never; Returns: Json }
       expire_pending_activity_bookings: { Args: never; Returns: Json }
       is_site_admin: { Args: never; Returns: boolean }
       is_vendor_owner: { Args: { v_id: string }; Returns: boolean }

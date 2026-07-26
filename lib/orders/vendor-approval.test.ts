@@ -7,6 +7,8 @@ import {
 } from "./vendor-approval";
 import * as orderService from "./service";
 import * as activityBookingsService from "@/lib/activity-bookings/service";
+import * as accommodationBookingsService from "@/lib/accommodation-bookings/service";
+import * as orderBookingLines from "@/lib/orders/order-booking-lines";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 import { tryBeginSettlementChargeForOrder } from "@/lib/orders/settlement";
 import { getVendorIdForCurrentUser } from "@/lib/vendors/ownership";
@@ -51,6 +53,23 @@ vi.mock("@/lib/activity-bookings/service", async () => {
   };
 });
 
+vi.mock("@/lib/accommodation-bookings/service", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/accommodation-bookings/service")>(
+      "@/lib/accommodation-bookings/service",
+    );
+  return {
+    ...actual,
+    listAccommodationBookings: vi.fn(),
+    getAccommodationBookingById: vi.fn(),
+    declineAllPendingAccommodationBookingsForOrder: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
+vi.mock("@/lib/orders/order-booking-lines", () => ({
+  listOrderBookingLinesForM4c: vi.fn(),
+}));
+
 const mockSupabase = {} as never;
 
 beforeEach(() => {
@@ -63,10 +82,10 @@ describe("syncOrderDeclinedWhenNoPendingHoldsRemain", () => {
       id: "order-1",
       status: "awaiting_vendor_approval",
     } as never);
-    vi.mocked(activityBookingsService.listActivityBookings).mockResolvedValue([
-      { status: "declined" },
-      { status: "declined" },
-    ] as never);
+    vi.mocked(orderBookingLines.listOrderBookingLinesForM4c).mockResolvedValue([
+      { status: "declined", total_cents: 100 },
+      { status: "declined", total_cents: 200 },
+    ]);
 
     await syncOrderDeclinedWhenNoPendingHoldsRemain(mockSupabase, "order-1");
 
@@ -82,13 +101,31 @@ describe("syncOrderDeclinedWhenNoPendingHoldsRemain", () => {
       id: "order-1",
       status: "awaiting_vendor_approval",
     } as never);
-    vi.mocked(activityBookingsService.listActivityBookings).mockResolvedValue([
-      { status: "pending_approval" },
-    ] as never);
+    vi.mocked(orderBookingLines.listOrderBookingLinesForM4c).mockResolvedValue([
+      { status: "pending_approval", total_cents: 100 },
+    ]);
 
     await syncOrderDeclinedWhenNoPendingHoldsRemain(mockSupabase, "order-1");
 
     expect(orderService.updateOrderStatus).not.toHaveBeenCalled();
+  });
+
+  it("treats accommodation-only terminal lines as fully declined", async () => {
+    vi.mocked(orderService.getOrderById).mockResolvedValue({
+      id: "order-1",
+      status: "awaiting_vendor_approval",
+    } as never);
+    vi.mocked(orderBookingLines.listOrderBookingLinesForM4c).mockResolvedValue([
+      { status: "expired", total_cents: 45000 },
+    ]);
+
+    await syncOrderDeclinedWhenNoPendingHoldsRemain(mockSupabase, "order-1");
+
+    expect(orderService.updateOrderStatus).toHaveBeenCalledWith(
+      mockSupabase,
+      "order-1",
+      "declined",
+    );
   });
 });
 
@@ -109,9 +146,7 @@ describe("approveActivityBookingAsVendor", () => {
     vi.mocked(activityBookingsService.confirmPendingActivityBookingForVendor).mockResolvedValue(
       1,
     );
-    vi.mocked(activityBookingsService.listActivityBookings).mockResolvedValue(
-      [] as never,
-    );
+    vi.mocked(orderBookingLines.listOrderBookingLinesForM4c).mockResolvedValue([]);
   });
 
   it("returns payment_failed and skips booking_confirmed notifications when settlement fails immediately", async () => {
@@ -149,13 +184,16 @@ describe("declineActivityOrderAsAdmin", () => {
 
   beforeEach(() => {
     vi.mocked(createServiceRoleClient).mockReturnValue(serviceStub);
+    vi.mocked(accommodationBookingsService.listAccommodationBookings).mockResolvedValue(
+      [] as never,
+    );
   });
 
   it("declines all pending rows then runs M4-C sync (settlement hook, no blanket order decline when a line stays confirmed)", async () => {
     vi.mocked(activityBookingsService.listActivityBookings).mockImplementation(
       async (_client, args) => {
         if (args?.status === "pending_approval") {
-          return [{ status: "pending_approval" }] as never;
+          return [{ id: "a1", status: "pending_approval" }] as never;
         }
         return [{ status: "confirmed" }, { status: "declined" }] as never;
       },
@@ -164,6 +202,10 @@ describe("declineActivityOrderAsAdmin", () => {
       id: orderId,
       status: "awaiting_vendor_approval",
     } as never);
+    vi.mocked(orderBookingLines.listOrderBookingLinesForM4c).mockResolvedValue([
+      { status: "confirmed", total_cents: 1000 },
+      { status: "declined", total_cents: 500 },
+    ]);
 
     await declineActivityOrderAsAdmin(orderId);
 
@@ -185,6 +227,9 @@ describe("declineActivityOrderAsAdmin", () => {
     vi.mocked(activityBookingsService.listActivityBookings).mockResolvedValue(
       [] as never,
     );
+    vi.mocked(accommodationBookingsService.listAccommodationBookings).mockResolvedValue(
+      [] as never,
+    );
 
     await expect(declineActivityOrderAsAdmin(orderId)).rejects.toThrow(
       "No pending approval bookings for this order.",
@@ -200,7 +245,7 @@ describe("declineActivityOrderAsAdmin", () => {
     vi.mocked(activityBookingsService.listActivityBookings).mockImplementation(
       async (_client, args) => {
         if (args?.status === "pending_approval") {
-          return [{ status: "pending_approval" }] as never;
+          return [{ id: "a1", status: "pending_approval" }] as never;
         }
         return [{ status: "declined" }, { status: "expired" }] as never;
       },
@@ -209,6 +254,10 @@ describe("declineActivityOrderAsAdmin", () => {
       id: orderId,
       status: "awaiting_vendor_approval",
     } as never);
+    vi.mocked(orderBookingLines.listOrderBookingLinesForM4c).mockResolvedValue([
+      { status: "declined", total_cents: 100 },
+      { status: "expired", total_cents: 200 },
+    ]);
 
     await declineActivityOrderAsAdmin(orderId);
 
@@ -221,5 +270,28 @@ describe("declineActivityOrderAsAdmin", () => {
       serviceStub,
       orderId,
     );
+  });
+
+  it("declines pending stays when the order has only accommodation lines", async () => {
+    vi.mocked(activityBookingsService.listActivityBookings).mockResolvedValue([] as never);
+    vi.mocked(accommodationBookingsService.listAccommodationBookings).mockResolvedValue([
+      { id: "stay-1", status: "pending_approval" },
+    ] as never);
+    vi.mocked(orderBookingLines.listOrderBookingLinesForM4c).mockResolvedValue([
+      { status: "declined", total_cents: 45000 },
+    ]);
+    vi.mocked(orderService.getOrderById).mockResolvedValue({
+      id: orderId,
+      status: "awaiting_vendor_approval",
+    } as never);
+
+    await declineActivityOrderAsAdmin(orderId);
+
+    expect(
+      accommodationBookingsService.declineAllPendingAccommodationBookingsForOrder,
+    ).toHaveBeenCalledWith(serviceStub, orderId);
+    expect(
+      activityBookingsService.declineAllPendingActivityBookingsForOrder,
+    ).not.toHaveBeenCalled();
   });
 });

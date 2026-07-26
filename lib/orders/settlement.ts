@@ -1,11 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type Stripe from "stripe";
 
-import { listActivityBookings } from "@/lib/activity-bookings/service";
 import { createSettlementPaymentIntentForOrder, getStripe } from "@/lib/stripe/server";
 import type { Database } from "@/supabase/types/database";
 import { safeSendOrderStatusEmailHook } from "@/lib/orders/status-email-hooks";
 
+import { listOrderBookingLinesForM4c } from "./order-booking-lines";
 import {
   attachFirstSettlementPaymentIntent,
   attachSettlementRetryPaymentIntent,
@@ -181,10 +181,7 @@ export async function tryBeginSettlementChargeForOrder(
     return;
   }
 
-  const bookings = await listActivityBookings(supabase, {
-    orderId,
-    limit: 500,
-  });
+  const bookings = await listOrderBookingLinesForM4c(supabase, orderId);
   if (!orderBookingsFullyResolvedForSettlement(bookings)) {
     return;
   }
