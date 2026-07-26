@@ -699,6 +699,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      accommodation_stay_is_held: {
+        Args: {
+          p_accommodation_id: string
+          p_check_in: string
+          p_check_out: string
+        }
+        Returns: boolean
+      }
       cancel_activity_booking: {
         Args: { p_booking_id: string }
         Returns: undefined
