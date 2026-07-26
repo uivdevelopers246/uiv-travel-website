@@ -170,13 +170,12 @@ export async function createCheckoutSetupSessionForOrder(
   const { order, lines, siteUrl, stripeCustomerId } = input;
   const base = siteUrl.replace(/\/$/, "");
 
-  const activityLines = lines.filter((l) => l.line_type === CART_LINE_TYPE_ACTIVITY);
-  if (activityLines.length === 0) {
-    throw new Error("Checkout requires at least one activity line");
+  if (lines.length === 0) {
+    throw new Error("Checkout requires at least one cart line");
   }
 
   let sumCents = 0;
-  for (const line of activityLines) {
+  for (const line of lines) {
     sumCents += line.line_total_cents;
   }
   if (sumCents !== order.total_cents) {

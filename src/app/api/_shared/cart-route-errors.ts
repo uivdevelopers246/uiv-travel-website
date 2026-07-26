@@ -14,7 +14,7 @@ const BAD_REQUEST_EXACT = new Set([
   "Only activity cart lines can be updated",
   "Cart line is missing a slot",
   "Cart is empty",
-  "Checkout is only available for activity items",
+  "Unsupported cart line type",
   "Accommodation price is not set",
   "Accommodation is not available for booking",
   "These stay dates are not available",

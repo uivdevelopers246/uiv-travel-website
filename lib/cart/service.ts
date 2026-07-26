@@ -898,29 +898,14 @@ export async function removeCartLine(
 }
 
 /**
- * Read-only checkout gate: non-empty cart; every line must be **activity** (MVP);
- * for each line, same checks as `addOrMergeActivityLine` / `updateCartLineParticipants`
- * (slot exists and not cancelled, published activity, price set, participants within
- * remaining capacity vs confirmed bookings).
- *
- * @throws Error messages aligned with cart API mapping (`cart-route-errors.ts`).
+ * Re-validates activity cart lines for checkout (same checks as
+ * `addOrMergeActivityLine` / `updateCartLineParticipants`): slot exists and not
+ * cancelled, published activity, price set, participants within remaining capacity.
  */
-export async function validateActivityCartForCheckout(
+async function validateActivityLinesForCheckout(
   supabase: SupabaseClient<Database>,
+  lines: CartLine[],
 ): Promise<void> {
-  await requireAuthUserId(supabase);
-
-  const lines = await listCartLines(supabase);
-  if (lines.length === 0) {
-    throw new Error("Cart is empty");
-  }
-
-  for (const line of lines) {
-    if (line.line_type !== CART_LINE_TYPE_ACTIVITY) {
-      throw new Error("Checkout is only available for activity items");
-    }
-  }
-
   const uniqueSlotIds = [
     ...new Set(
       lines
@@ -973,6 +958,89 @@ export async function validateActivityCartForCheckout(
       offPlatform,
       platformBooked,
       participants,
+    );
+  }
+}
+
+/**
+ * Re-validates accommodation cart lines for checkout (same checks as
+ * `addOrMergeAccommodationLine` / `updateCartLineGuests`): published listing,
+ * stay dates, soft overlap, guests vs capacity, nightly price set.
+ */
+async function validateAccommodationLinesForCheckout(
+  supabase: SupabaseClient<Database>,
+  lines: CartLine[],
+  now?: Date,
+): Promise<void> {
+  for (const line of lines) {
+    if (!line.accommodation_id || !line.check_in || !line.check_out) {
+      throw new Error("Cart line is missing stay details");
+    }
+    if (line.guests == null) {
+      throw new Error("guests must be a positive integer");
+    }
+    assertPositiveInteger(line.guests, "guests");
+
+    parseAndValidateStayDates(line.check_in, line.check_out, now);
+
+    const accommodation = await getAccommodationById(
+      supabase,
+      line.accommodation_id,
+    );
+    if (!accommodation) {
+      throw new Error("Accommodation is not available for booking");
+    }
+
+    priceMinUsdToCents(accommodation.price_min_usd);
+    await assertStayDatesAvailable(
+      supabase,
+      line.accommodation_id,
+      line.check_in,
+      line.check_out,
+    );
+    assertGuestsWithinCapacity(line.guests, accommodation.max_guest_capacity);
+  }
+}
+
+/**
+ * Read-only checkout gate: non-empty cart; every line must be **activity** or
+ * **accommodation** (mixed carts allowed). Re-validates / re-prices each kind
+ * against current listing or slot state. Order totals still come from cart line
+ * snapshots via `computeOrderTotalsFromCartLines`.
+ *
+ * @throws Error messages aligned with cart API mapping (`cart-route-errors.ts`).
+ */
+export async function validateCartForCheckout(
+  supabase: SupabaseClient<Database>,
+  options?: { now?: Date },
+): Promise<void> {
+  await requireAuthUserId(supabase);
+
+  const lines = await listCartLines(supabase);
+  if (lines.length === 0) {
+    throw new Error("Cart is empty");
+  }
+
+  const activityLines: CartLine[] = [];
+  const accommodationLines: CartLine[] = [];
+  for (const line of lines) {
+    if (line.line_type === CART_LINE_TYPE_ACTIVITY) {
+      activityLines.push(line);
+    } else if (line.line_type === CART_LINE_TYPE_ACCOMMODATION) {
+      accommodationLines.push(line);
+    } else {
+      throw new Error("Unsupported cart line type");
+    }
+  }
+
+  if (activityLines.length > 0) {
+    await validateActivityLinesForCheckout(supabase, activityLines);
+  }
+  if (accommodationLines.length > 0) {
+    await validateAccommodationLinesForCheckout(
+      supabase,
+      accommodationLines,
+      options?.now,
     );
   }
 }

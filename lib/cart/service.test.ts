@@ -27,7 +27,7 @@ import {
   removeCartLine,
   updateCartLineGuests,
   updateCartLineParticipants,
-  validateActivityCartForCheckout,
+  validateCartForCheckout,
 } from "./service";
 import {
   CART_LINE_TYPE_ACTIVITY,
@@ -1140,7 +1140,7 @@ describe("removeCartLine", () => {
   });
 });
 
-describe("validateActivityCartForCheckout", () => {
+describe("validateCartForCheckout", () => {
   it("throws Unauthorized without a user", async () => {
     const supabase: Record<string, unknown> = {
       auth: {
@@ -1152,7 +1152,7 @@ describe("validateActivityCartForCheckout", () => {
     };
 
     await expect(
-      validateActivityCartForCheckout(supabase as never),
+      validateCartForCheckout(supabase as never),
     ).rejects.toThrow("Unauthorized");
   });
 
@@ -1167,24 +1167,8 @@ describe("validateActivityCartForCheckout", () => {
     };
 
     await expect(
-      validateActivityCartForCheckout(supabase as never),
+      validateCartForCheckout(supabase as never),
     ).rejects.toThrow("Cart is empty");
-  });
-
-  it("throws when cart has a non-activity line", async () => {
-    const line = baseCartLine({ line_type: "accommodation" });
-    const cartQuery: Record<string, unknown> = {
-      select: vi.fn().mockReturnThis(),
-      order: vi.fn().mockResolvedValue({ data: [line], error: null }),
-    };
-    const supabase: Record<string, unknown> = {
-      from: vi.fn(() => cartQuery),
-      ...authUser(),
-    };
-
-    await expect(
-      validateActivityCartForCheckout(supabase as never),
-    ).rejects.toThrow("Checkout is only available for activity items");
   });
 
   it("passes when activity lines are valid", async () => {
@@ -1216,10 +1200,78 @@ describe("validateActivityCartForCheckout", () => {
     );
 
     await expect(
-      validateActivityCartForCheckout(supabase as never),
+      validateCartForCheckout(supabase as never),
     ).resolves.toBeUndefined();
 
     expect(getActivityById).toHaveBeenCalledWith(supabase, activityId);
+  });
+
+  it("passes when accommodation lines are valid", async () => {
+    const line = baseStayCartLine();
+    const cartQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [line], error: null }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn((table: string) => {
+        if (table === "cart_lines") return cartQuery;
+        throw new Error(`unexpected table ${table}`);
+      }),
+      rpc: stayAvailableRpc(false),
+      ...authUser(),
+    };
+
+    await expect(
+      validateCartForCheckout(supabase as never, { now: stayNow }),
+    ).resolves.toBeUndefined();
+
+    expect(getAccommodationById).toHaveBeenCalledWith(
+      supabase,
+      accommodationId,
+    );
+  });
+
+  it("passes for a mixed activity + accommodation cart", async () => {
+    const activityLine = baseCartLine({ participants: 2 });
+    const stayLine = baseStayCartLine();
+    const cartQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({
+        data: [activityLine, stayLine],
+        error: null,
+      }),
+    };
+    const slotQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({
+        data: baseSlotRow(),
+        error: null,
+      }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn((table: string) => {
+        if (table === "cart_lines") return cartQuery;
+        if (table === "availability_slots") return slotQuery;
+        throw new Error(`unexpected table ${table}`);
+      }),
+      rpc: stayAvailableRpc(false),
+      ...authUser(),
+    };
+
+    vi.mocked(slotPlatformParticipantsBookedBySlotIds).mockResolvedValue(
+      new Map([[slotId, 0]]),
+    );
+
+    await expect(
+      validateCartForCheckout(supabase as never, { now: stayNow }),
+    ).resolves.toBeUndefined();
+
+    expect(getActivityById).toHaveBeenCalledWith(supabase, activityId);
+    expect(getAccommodationById).toHaveBeenCalledWith(
+      supabase,
+      accommodationId,
+    );
   });
 
   it("throws when a cart line is missing slot_id", async () => {
@@ -1234,8 +1286,64 @@ describe("validateActivityCartForCheckout", () => {
     };
 
     await expect(
-      validateActivityCartForCheckout(supabase as never),
+      validateCartForCheckout(supabase as never),
     ).rejects.toThrow("Cart line is missing a slot");
+  });
+
+  it("throws when an accommodation line is missing stay details", async () => {
+    const line = baseStayCartLine({ check_in: null });
+    const cartQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [line], error: null }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn(() => cartQuery),
+      ...authUser(),
+    };
+
+    await expect(
+      validateCartForCheckout(supabase as never, { now: stayNow }),
+    ).rejects.toThrow("Cart line is missing stay details");
+  });
+
+  it("throws when stay dates overlap a holding booking", async () => {
+    const line = baseStayCartLine();
+    const cartQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [line], error: null }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn((table: string) => {
+        if (table === "cart_lines") return cartQuery;
+        throw new Error(`unexpected table ${table}`);
+      }),
+      rpc: stayAvailableRpc(true),
+      ...authUser(),
+    };
+
+    await expect(
+      validateCartForCheckout(supabase as never, { now: stayNow }),
+    ).rejects.toThrow("These stay dates are not available");
+  });
+
+  it("throws when guests exceed accommodation capacity", async () => {
+    const line = baseStayCartLine({ guests: 8 });
+    const cartQuery: Record<string, unknown> = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [line], error: null }),
+    };
+    const supabase: Record<string, unknown> = {
+      from: vi.fn((table: string) => {
+        if (table === "cart_lines") return cartQuery;
+        throw new Error(`unexpected table ${table}`);
+      }),
+      rpc: stayAvailableRpc(false),
+      ...authUser(),
+    };
+
+    await expect(
+      validateCartForCheckout(supabase as never, { now: stayNow }),
+    ).rejects.toThrow("Guest count exceeds accommodation capacity");
   });
 
   it("throws when the slot is cancelled", async () => {
@@ -1262,7 +1370,7 @@ describe("validateActivityCartForCheckout", () => {
     };
 
     await expect(
-      validateActivityCartForCheckout(supabase as never),
+      validateCartForCheckout(supabase as never),
     ).rejects.toThrow("This slot is no longer available");
   });
 
@@ -1292,7 +1400,7 @@ describe("validateActivityCartForCheckout", () => {
     vi.mocked(getActivityById).mockResolvedValueOnce(null);
 
     await expect(
-      validateActivityCartForCheckout(supabase as never),
+      validateCartForCheckout(supabase as never),
     ).rejects.toThrow("Activity is not available for booking");
   });
 
@@ -1324,7 +1432,7 @@ describe("validateActivityCartForCheckout", () => {
     );
 
     await expect(
-      validateActivityCartForCheckout(supabase as never),
+      validateCartForCheckout(supabase as never),
     ).rejects.toThrow("Not enough spots left for this time slot");
   });
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type Stripe from "stripe";
 
-import { CART_LINE_TYPE_ACTIVITY } from "@/lib/cart/constants";
+import { CART_LINE_TYPE_ACTIVITY, CART_LINE_TYPE_ACCOMMODATION } from "@/lib/cart/constants";
 import type { Order } from "@/lib/orders/types";
 
 vi.mock("stripe", () => ({
@@ -109,7 +109,7 @@ beforeEach(() => {
 });
 
 describe("createCheckoutSetupSessionForOrder", () => {
-  it("throws when activity line totals do not match order.total_cents", async () => {
+  it("throws when cart line totals do not match order.total_cents", async () => {
     await expect(
       createCheckoutSetupSessionForOrder({
         order: baseOrder({ total_cents: 9999 }),
@@ -138,7 +138,7 @@ describe("createCheckoutSetupSessionForOrder", () => {
     ).rejects.toThrow("Cart line totals do not match order total");
   });
 
-  it("throws when there are no activity lines", async () => {
+  it("throws when there are no cart lines", async () => {
     await expect(
       createCheckoutSetupSessionForOrder({
         order: baseOrder(),
@@ -146,7 +146,43 @@ describe("createCheckoutSetupSessionForOrder", () => {
         siteUrl: "http://localhost:3000",
         stripeCustomerId: "cus_test",
       }),
-    ).rejects.toThrow("Checkout requires at least one activity line");
+    ).rejects.toThrow("Checkout requires at least one cart line");
+  });
+
+  it("accepts accommodation-only carts when line totals match the order", async () => {
+    const line = {
+      id: "line-stay",
+      user_id: "user-1",
+      line_type: CART_LINE_TYPE_ACCOMMODATION,
+      slot_id: null,
+      participants: null,
+      unit_price_cents: 15000,
+      line_subtotal_cents: 45000,
+      line_discount_cents: 0,
+      line_total_cents: 45000,
+      accommodation_id: "acc-1",
+      check_in: "2026-08-01",
+      check_out: "2026-08-04",
+      guests: 2,
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z",
+    };
+
+    await createCheckoutSetupSessionForOrder({
+      order: baseOrder({ id: "order-stay", total_cents: 45000 }),
+      lines: [line],
+      siteUrl: "http://localhost:3000",
+      stripeCustomerId: "cus_test",
+    });
+
+    const stripe = getStripe();
+    const createMock = stripe.checkout.sessions.create as ReturnType<typeof vi.fn>;
+    expect(createMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "setup",
+        client_reference_id: "order-stay",
+      }),
+    );
   });
 
   it("passes metadata.order_id on the session and on setup_intent_data for webhook correlation", async () => {
