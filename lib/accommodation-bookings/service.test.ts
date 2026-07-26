@@ -4,7 +4,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/supabase/types/database";
 import {
   cancelAccommodationBookingsForOrder,
+  confirmPendingAccommodationBookingAsAdmin,
+  confirmPendingAccommodationBookingForVendor,
   createAccommodationBookingAfterSetup,
+  declineAllPendingAccommodationBookingsForOrder,
+  declinePendingAccommodationBookingAsAdmin,
+  declinePendingAccommodationBookingForVendor,
+  declinePendingAccommodationBookingsForVendorOnOrder,
+  getAccommodationBookingById,
   listAccommodationBookings,
 } from "./service";
 
@@ -23,6 +30,7 @@ type ListBookingsQueryMock = {
   eq: Mock;
   order: Mock;
   range: Mock;
+  maybeSingle?: Mock;
 };
 
 function asSupabase<T extends object>(value: T): MockSupabase<T> {
@@ -213,6 +221,69 @@ describe("accommodation-bookings service", () => {
       cancelAccommodationBookingsForOrder(supabase, "bad-order"),
     ).rejects.toThrow(
       "Could not cancel accommodation bookings for order: permission denied",
+    );
+  });
+
+  it("getAccommodationBookingById: returns row or null", async () => {
+    const query: ListBookingsQueryMock = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      order: vi.fn(),
+      range: vi.fn(),
+      maybeSingle: vi.fn().mockResolvedValueOnce({
+        data: { id: "stay-1" },
+        error: null,
+      }),
+    };
+    const supabase = asSupabase({
+      from: vi.fn(() => query),
+    });
+
+    const row = await getAccommodationBookingById(supabase, "stay-1");
+    expect(supabase.from).toHaveBeenCalledWith("accommodation_bookings");
+    expect(row).toEqual({ id: "stay-1" });
+  });
+
+  it("confirm/decline pending RPCs return row counts", async () => {
+    const supabase = makeMockSupabaseForRpc();
+    supabase.rpc
+      .mockResolvedValueOnce({ data: 1, error: null })
+      .mockResolvedValueOnce({ data: 1, error: null })
+      .mockResolvedValueOnce({ data: 1, error: null })
+      .mockResolvedValueOnce({ data: 1, error: null })
+      .mockResolvedValueOnce({ data: 2, error: null })
+      .mockResolvedValueOnce({ data: null, error: null });
+
+    await expect(
+      confirmPendingAccommodationBookingForVendor(supabase, "stay-1", "vendor-1"),
+    ).resolves.toBe(1);
+    await expect(
+      declinePendingAccommodationBookingForVendor(supabase, "stay-1", "vendor-1"),
+    ).resolves.toBe(1);
+    await expect(
+      confirmPendingAccommodationBookingAsAdmin(supabase, "stay-1"),
+    ).resolves.toBe(1);
+    await expect(
+      declinePendingAccommodationBookingAsAdmin(supabase, "stay-1"),
+    ).resolves.toBe(1);
+    await expect(
+      declinePendingAccommodationBookingsForVendorOnOrder(
+        supabase,
+        "order-1",
+        "vendor-1",
+      ),
+    ).resolves.toBe(2);
+    await expect(
+      declineAllPendingAccommodationBookingsForOrder(supabase, "order-1"),
+    ).resolves.toBeUndefined();
+
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      "confirm_pending_accommodation_booking_for_vendor",
+      { p_booking_id: "stay-1", p_vendor_id: "vendor-1" },
+    );
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      "decline_accommodation_bookings_for_order",
+      { p_order_id: "order-1" },
     );
   });
 });

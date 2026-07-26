@@ -13,9 +13,11 @@
 
 ---
 
+
+
 ## Context
 
-Listings CRUD and browse for **accommodations** are live. Public detail is still contact-only. The cart schema already allows `line_type = 'accommodation'` with `accommodation_id`, `check_in`, `check_out`, and `guests` ([`cart_lines`](../../supabase/migrations/20260403120700_create_cart_lines.sql)), but app commerce only implements **activity** lines: cart validation, SetupIntent fulfillment, vendor approval, and settlement all assume `activity_bookings`.
+Listings CRUD and browse for **accommodations** are live. Public detail is still contact-only. The cart schema already allows `line_type = 'accommodation'` with `accommodation_id`, `check_in`, `check_out`, and `guests` (`[cart_lines](../../supabase/migrations/20260403120700_create_cart_lines.sql)`), but app commerce only implements **activity** lines: cart validation, SetupIntent fulfillment, vendor approval, and settlement all assume `activity_bookings`.
 
 ADR-M4-A deferred accommodation design because stays are **date-range** reservations of a whole property, not **slot + headcount** capacity. Extending `activity_bookings` or `availability_slots` would force nullable incompatible fields and ambiguous inventory rules.
 
@@ -23,22 +25,28 @@ Stakeholders want stays to participate in the **same M4-C money path** already p
 
 ---
 
+
+
 ## Decision
 
 1. **Separate ledger table:** `accommodation_bookings` — never reuse `activity_bookings` or `availability_slots` for stays.
 2. **Availability model (MVP):** **Open calendar** for published listings. Any future stay with `check_out > check_in` is eligible at cart/checkout time **unless** it overlaps an inventory-holding booking (below). **No** rate calendar and **no** blocked-range table in Phase 2 MVP; vendors decline off-platform conflicts. Optional `accommodation_blocked_ranges` (or similar) is **post-MVP**.
-3. **Overlap exclusion:** Non-cancelled inventory holds use a half-open date range `[check_in, check_out)` stored as `daterange` (or equivalent). Postgres **exclusion constraint** (GiST) prevents two overlapping holds for the same `accommodation_id` when status is inventory-holding. Holding statuses: **`pending_approval`** (within SLA) and **`confirmed`**. **`declined`**, **`expired`**, **`cancelled`**, and **`completed`** do **not** hold the calendar.
-4. **Flat nightly pricing:** `nights = check_out::date - check_in::date` (must be ≥ 1). Nightly rate = listing **`price_min_usd`** converted to integer cents at snapshot time. Line / booking totals: **`nights × unit_price_cents`** (MVP: `discount_cents = 0`). No seasonal rates in Phase 2. Listings without a usable `price_min_usd` are not addable to cart.
+3. **Overlap exclusion:** Non-cancelled inventory holds use a half-open date range `[check_in, check_out)` stored as `daterange` (or equivalent). Postgres **exclusion constraint** (GiST) prevents two overlapping holds for the same `accommodation_id` when status is inventory-holding. Holding statuses: `pending_approval` (within SLA) and `confirmed`. `declined`, `expired`, `cancelled`, and `completed` do **not** hold the calendar.
+4. **Flat nightly pricing:** `nights = check_out::date - check_in::date` (must be ≥ 1). Nightly rate = listing `price_min_usd` converted to integer cents at snapshot time. Line / booking totals: `nights × unit_price_cents` (MVP: `discount_cents = 0`). No seasonal rates in Phase 2. Listings without a usable `price_min_usd` are not addable to cart.
 5. **Guests:** Require `guests >= 1`. When `accommodations.max_guest_capacity` is **set**, reject `guests > max_guest_capacity`. When it is **null**, treat capacity as **honor system** (allow any `guests >= 1`; vendor may still decline). Do not invent a second capacity column.
-6. **M4-C parity:** Same commerce flow as activities — cart does **not** reserve; hold starts only when a **`pending_approval`** booking row is created after SetupIntent success; 24-hour SLA (`expires_at`); vendor/admin approve or decline per line; shared order settlement.
+6. **M4-C parity:** Same commerce flow as activities — cart does **not** reserve; hold starts only when a `pending_approval` booking row is created after SetupIntent success; 24-hour SLA (`expires_at`); vendor/admin approve or decline per line; shared order settlement.
 7. **Statuses:** Align with activity bookings: `pending_approval` → `confirmed` | `declined` | `expired`; `confirmed` → `cancelled` | `completed`. Same SLA constant and expiry-job pattern as activities.
-8. **Settlement aggregation:** When deciding “all lines terminal” and “confirmed total,” include **both** `activity_bookings` and `accommodation_bookings` for the order. Settlement amount = sum of **`total_cents`** where **`status = 'confirmed'`** across **both** tables. Empty confirmed set → no charge (order declined/expired path as today).
+8. **Settlement aggregation:** When deciding “all lines terminal” and “confirmed total,” include **both** `activity_bookings` and `accommodation_bookings` for the order. Settlement amount = sum of `total_cents` where `status = 'confirmed'` across **both** tables. Empty confirmed set → no charge (order declined/expired path as today).
 9. **Cart CHECKs:** When `line_type = 'accommodation'`, require `accommodation_id`, `check_in`, `check_out`, `guests`; activity-only columns null (and vice versa). Partial unique merge key for stays: `(user_id, accommodation_id, check_in, check_out)` (or replace-same-listing rule documented in implementation).
 10. **RLS / inserts:** Mirror activities — **no** `authenticated` `INSERT` on `accommodation_bookings`; create via **service-role** / `SECURITY DEFINER` RPC after setup fulfillment; vendor/admin update for approve/decline; buyer cancel via narrow RPC for own `confirmed` rows.
 
 ---
 
+
+
 ## System design
+
+
 
 ### Availability (MVP)
 
@@ -78,33 +86,37 @@ exclude using gist (
 
 ### Pricing snapshot
 
-| Field | Source at add-to-cart / booking create |
-|--------|----------------------------------------|
-| `unit_price_cents` | `round(price_min_usd * 100)` from published listing |
-| `nights` | `check_out - check_in` (integer days) |
-| `subtotal_cents` / `line_subtotal_cents` | `nights * unit_price_cents` |
-| `discount_cents` | `0` (MVP) |
-| `total_cents` / `line_total_cents` | subtotal − discount |
 
-Re-price / re-validate at checkout from **current** listing price (same pattern as activity cart). Immutable money fields on **`accommodation_bookings`** are taken from **cart line snapshots** at SetupIntent fulfillment (not re-read from listing at approve time).
+| Field                                    | Source at add-to-cart / booking create              |
+| ---------------------------------------- | --------------------------------------------------- |
+| `unit_price_cents`                       | `round(price_min_usd * 100)` from published listing |
+| `nights`                                 | `check_out - check_in` (integer days)               |
+| `subtotal_cents` / `line_subtotal_cents` | `nights * unit_price_cents`                         |
+| `discount_cents`                         | `0` (MVP)                                           |
+| `total_cents` / `line_total_cents`       | subtotal − discount                                 |
+
+
+Re-price / re-validate at checkout from **current** listing price (same pattern as activity cart). Immutable money fields on `accommodation_bookings` are taken from **cart line snapshots** at SetupIntent fulfillment (not re-read from listing at approve time).
 
 ### `accommodation_bookings` (target shape)
 
-| Column | Purpose |
-|--------|---------|
-| `id` | UUID PK |
-| `order_id` | FK → `orders` (required for M4-C path) |
-| `accommodation_id` | FK → `accommodations` |
-| `user_id` | Buyer |
-| `vendor_id` | Denormalized from listing (RLS / vendor lists) |
-| `check_in`, `check_out` | `date`; `check_out > check_in` |
-| `guests` | Integer ≥ 1 |
-| `status` | `pending_approval` \| `confirmed` \| `declined` \| `expired` \| `cancelled` \| `completed` |
-| `expires_at` | SLA deadline when `pending_approval` |
-| `unit_price_cents`, `subtotal_cents`, `discount_cents`, `total_cents` | Ledger snapshots |
-| `created_at`, `updated_at` | Audit |
 
-**Stripe IDs** remain on **`orders`** only (ADR-M4-C). No per-stay PaymentIntent in MVP.
+| Column                                                                | Purpose                                                                               |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `id`                                                                  | UUID PK                                                                               |
+| `order_id`                                                            | FK → `orders` (required for M4-C path)                                                |
+| `accommodation_id`                                                    | FK → `accommodations`                                                                 |
+| `user_id`                                                             | Buyer                                                                                 |
+| `vendor_id`                                                           | Denormalized from listing (RLS / vendor lists)                                        |
+| `check_in`, `check_out`                                               | `date`; `check_out > check_in`                                                        |
+| `guests`                                                              | Integer ≥ 1                                                                           |
+| `status`                                                              | `pending_approval` | `confirmed` | `declined` | `expired` | `cancelled` | `completed` |
+| `expires_at`                                                          | SLA deadline when `pending_approval`                                                  |
+| `unit_price_cents`, `subtotal_cents`, `discount_cents`, `total_cents` | Ledger snapshots                                                                      |
+| `created_at`, `updated_at`                                            | Audit                                                                                 |
+
+
+**Stripe IDs** remain on `orders` only (ADR-M4-C). No per-stay PaymentIntent in MVP.
 
 ### Status machine (parity with M4-C activities)
 
@@ -139,15 +151,19 @@ Extend `fulfillM4cVendorApprovalRequestAfterSetupSaved` (and related Stripe path
 3. Clear cart **only** when **all** line kinds succeeded.
 4. On partial failure → compensate **both** tables for the order (extend or twin `cancel_*_bookings_for_order`), keep cart, fail order path consistently with today’s activity-only compensation.
 
+
+
 ### Approval, expiry, settlement
 
-| Concern | Behavior |
-|---------|----------|
-| Approve / decline | Mirror `lib/orders/vendor-approval.ts` for stay rows (vendor owner of listing / site admin). |
-| Expiry sweep | Twin of `expire_pending_activity_bookings` for stays; then `syncOrderM4cAfterBookingChange` over **combined** lines. |
-| Terminal gate | No `pending_approval` remains on **either** table for the order. |
-| Confirmed total | `sum(confirmed.total_cents)` on **activities ∪ accommodations**. |
-| Settlement PI | Unchanged Stripe shape: **one** off-session `PaymentIntent` per order when gate passes and confirmed total > 0. |
+
+| Concern           | Behavior                                                                                                             |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Approve / decline | Mirror `lib/orders/vendor-approval.ts` for stay rows (vendor owner of listing / site admin).                         |
+| Expiry sweep      | Twin of `expire_pending_activity_bookings` for stays; then `syncOrderM4cAfterBookingChange` over **combined** lines. |
+| Terminal gate     | No `pending_approval` remains on **either** table for the order.                                                     |
+| Confirmed total   | `sum(confirmed.total_cents)` on **activities ∪ accommodations**.                                                     |
+| Settlement PI     | Unchanged Stripe shape: **one** off-session `PaymentIntent` per order when gate passes and confirmed total > 0.      |
+
 
 Update `computeConfirmedSettlementTotalCents` / `orderBookingsFullyResolvedForSettlement` call sites to pass **combined** line lists (or a small helper that merges both queries).
 
@@ -158,19 +174,27 @@ Update `computeConfirmedSettlementTotalCents` / `orderBookingsFullyResolvedForSe
 - Admin: `FOR ALL` where `is_site_admin()`.
 - **No** authenticated `INSERT` for ordinary users.
 
+
+
 ### RPCs (illustrative names)
 
-| RPC | Role |
-|-----|------|
-| `create_accommodation_booking_after_setup` | Service role; overlap + insert `pending_approval` |
-| `cancel_accommodation_bookings_for_order` | Service role; compensate fulfillment |
-| `expire_pending_accommodation_bookings` | Service role; SLA sweep → `expired` |
-| `cancel_accommodation_booking` | Authenticated; own `confirmed` → `cancelled` |
-| Confirm / decline | Prefer shared patterns with activity confirm/decline RPCs or typed service updates under existing RLS |
+
+| RPC                                        | Role                                                                                                  |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `create_accommodation_booking_after_setup` | Service role; overlap + insert `pending_approval`                                                     |
+| `cancel_accommodation_bookings_for_order`  | Service role; compensate fulfillment                                                                  |
+| `expire_pending_accommodation_bookings`    | Service role; SLA sweep → `expired`                                                                   |
+| `cancel_accommodation_booking`             | Authenticated; own `confirmed` → `cancelled`                                                          |
+| Confirm / decline                          | Prefer shared patterns with activity confirm/decline RPCs or typed service updates under existing RLS |
+
 
 ---
 
+
+
 ## Alternatives considered
+
+
 
 ### Stuff stays into `activity_bookings` / fake slots
 
@@ -193,6 +217,8 @@ Rejected — would diverge from ADR-M4-C and reintroduce refund-heavy failure mo
 Rejected — keep **one** order-level settlement charge (ADR-M4-C decision 4).
 
 ---
+
+
 
 ## Consequences
 
@@ -220,22 +246,27 @@ Rejected — keep **one** order-level settlement charge (ADR-M4-C decision 4).
 
 ---
 
+
+
 ## Implementation checklist (non-binding; for follow-on PRs)
 
 - [ ] Migration: `accommodation_bookings` + RLS + exclusion/overlap RPC(s) + cart CHECKs + types
 - [ ] Cart: constants, `addOrMergeAccommodationLine`, list preview, API body shapes, detail CTA + cart UI
 - [ ] Checkout validator for mixed carts; Stripe copy not activity-only
 - [ ] Setup fulfillment creates stay rows; compensate both kinds
-- [ ] Vendor/admin approve/decline + expiry sweep for stays
-- [ ] Settlement helpers aggregate both tables
+- [x] Vendor/admin approve/decline + expiry sweep for stays
+- [x] Settlement helpers aggregate both tables
 - [ ] Vitest: cart, create RPC mocks, mixed settlement
 - [ ] Update `docs/architecture.md`, `docs/database.md`, money runbook; mark Phase 2 designed in ADR-M4-A
 
 ---
 
+
+
 ## References
 
 - Plan defaults: separate table; flat `price_min_usd`; M4-C flow; mixed carts allowed.
 - Listing fields: `accommodations.price_min_usd`, `max_guest_capacity`, `check_in_time`, `check_out_time` ([migration](../../supabase/migrations/20260324120000_accommodations_and_vendor_profile.sql)).
-- Cart placeholders: [`20260403120700_create_cart_lines.sql`](../../supabase/migrations/20260403120700_create_cart_lines.sql).
+- Cart placeholders: `[20260403120700_create_cart_lines.sql](../../supabase/migrations/20260403120700_create_cart_lines.sql)`.
 - Stripe: Setup Intents, off-session PaymentIntents (see ADR-M4-C).
+

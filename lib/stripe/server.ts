@@ -33,6 +33,7 @@ import {
   buildSettlementIdempotencyKey,
   computeConfirmedSettlementTotalCents,
 } from "@/lib/orders/settlement-utils";
+import { listOrderBookingLinesForM4c } from "@/lib/orders/order-booking-lines";
 import {
   attachSettlementRetryPaymentIntent,
   getOrderById,
@@ -1037,7 +1038,7 @@ export async function fulfillSettlementPaymentIntentSucceeded(
     return { status: "already_paid" };
   }
 
-  const bookings = await listActivityBookings(supabase, { orderId, limit: 500 });
+  const bookings = await listOrderBookingLinesForM4c(supabase, orderId);
   const expectedSettlementAmountCents = computeConfirmedSettlementTotalCents(bookings);
   const capturedPaymentIntentAmountCents = pi.amount;
   const isAmountMismatch = capturedPaymentIntentAmountCents !== expectedSettlementAmountCents;
@@ -1148,7 +1149,7 @@ export async function fulfillSettlementPaymentIntentPaymentFailed(
 
   const attempt = order.settlement_charge_attempt_count;
   if (attempt === 1) {
-    const bookings = await listActivityBookings(supabase, { orderId, limit: 500 });
+    const bookings = await listOrderBookingLinesForM4c(supabase, orderId);
     const amountCents = computeConfirmedSettlementTotalCents(bookings);
     const retryPi = await createSettlementPaymentIntentForOrder({
       order,

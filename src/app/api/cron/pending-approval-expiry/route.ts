@@ -17,8 +17,8 @@ function isAuthorizedCronRequest(req: Request): boolean {
 
 /**
  * Vercel Cron (or any caller with **`Authorization: Bearer $CRON_SECRET`**): expires
- * **`pending_approval`** bookings past SLA and sets orders to **`declined`** when every line is
- * terminal with no **`confirmed`** rows. No Stripe.
+ * **`pending_approval`** activity and accommodation bookings past SLA and sets orders to
+ * **`declined`** when every line is terminal with no **`confirmed`** rows. No Stripe.
  */
 export async function GET(req: Request) {
   if (!process.env.CRON_SECRET || process.env.CRON_SECRET.trim() === "") {

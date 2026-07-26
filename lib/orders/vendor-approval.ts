@@ -10,9 +10,21 @@ import {
   getActivityBookingById,
   listActivityBookings,
 } from "@/lib/activity-bookings/service";
+import {
+  confirmAllPendingAccommodationBookingsForOrder,
+  confirmPendingAccommodationBookingAsAdmin,
+  confirmPendingAccommodationBookingForVendor,
+  declineAllPendingAccommodationBookingsForOrder,
+  declinePendingAccommodationBookingAsAdmin,
+  declinePendingAccommodationBookingForVendor,
+  declinePendingAccommodationBookingsForVendorOnOrder,
+  getAccommodationBookingById,
+  listAccommodationBookings,
+} from "@/lib/accommodation-bookings/service";
 import { getVendorIdForCurrentUser } from "@/lib/vendors/ownership";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 import type { Database } from "@/supabase/types/database";
+import { listOrderBookingLinesForM4c } from "@/lib/orders/order-booking-lines";
 import { getOrderById, updateOrderStatus } from "@/lib/orders/service";
 import type { Order } from "@/lib/orders/types";
 import { tryBeginSettlementChargeForOrder } from "@/lib/orders/settlement";
@@ -69,10 +81,7 @@ export async function syncOrderDeclinedWhenNoPendingHoldsRemain(
     return;
   }
 
-  const bookings = await listActivityBookings(supabaseService, {
-    orderId,
-    limit: 500,
-  });
+  const bookings = await listOrderBookingLinesForM4c(supabaseService, orderId);
   if (bookings.length === 0) {
     return;
   }
@@ -117,7 +126,7 @@ async function getBookingApprovalResult(
 }
 
 /**
- * Vendor: approve a **single** pending booking (no Stripe). Use once per line item the vendor accepts.
+ * Vendor: approve a **single** pending activity booking (no Stripe). Use once per line item the vendor accepts.
  */
 export async function approveActivityBookingAsVendor(
   userSupabase: SupabaseClient<Database>,
@@ -160,13 +169,14 @@ export async function approveActivityBookingAsVendor(
     await safeSendBookingStatusEmailHook(service, {
       bookingId,
       event: "booking_confirmed",
+      lineType: "activity",
     });
   }
   return result;
 }
 
 /**
- * Vendor: decline a **single** pending booking.
+ * Vendor: decline a **single** pending activity booking.
  */
 export async function declineActivityBookingAsVendor(
   userSupabase: SupabaseClient<Database>,
@@ -200,11 +210,101 @@ export async function declineActivityBookingAsVendor(
   await safeSendBookingStatusEmailHook(service, {
     bookingId,
     event: "booking_declined",
+    lineType: "activity",
   });
 }
 
 /**
- * Admin: approve one pending booking.
+ * Vendor: approve a **single** pending accommodation booking (no Stripe).
+ */
+export async function approveAccommodationBookingAsVendor(
+  userSupabase: SupabaseClient<Database>,
+  bookingId: string,
+): Promise<BookingApprovalResult> {
+  const vendorId = await getVendorIdForCurrentUser(userSupabase);
+  const booking = await getAccommodationBookingById(userSupabase, bookingId);
+  if (!booking) {
+    throw new Error("Booking not found");
+  }
+  if (booking.status !== "pending_approval") {
+    throw new Error("Booking is not pending approval");
+  }
+  if (booking.vendor_id !== vendorId) {
+    throw new Error("Forbidden: You do not manage this booking.");
+  }
+  if (!booking.order_id) {
+    throw new Error("Booking has no order");
+  }
+
+  const service = createServiceRoleClient();
+  const order = await loadOrderForApprovalOrThrow(service, booking.order_id);
+  if (!orderAllowsVendorApproval(order)) {
+    throw new Error(
+      `Order is not awaiting vendor action (status: ${order.status})`,
+    );
+  }
+
+  const n = await confirmPendingAccommodationBookingForVendor(
+    service,
+    bookingId,
+    vendorId,
+  );
+  if (n === 0) {
+    throw new Error("Could not confirm booking");
+  }
+  await syncOrderM4cAfterBookingChange(service, booking.order_id);
+  const result = await getBookingApprovalResult(service, booking.order_id);
+  if (result.outcome === "approved") {
+    await safeSendBookingStatusEmailHook(service, {
+      bookingId,
+      event: "booking_confirmed",
+      lineType: "accommodation",
+    });
+  }
+  return result;
+}
+
+/**
+ * Vendor: decline a **single** pending accommodation booking.
+ */
+export async function declineAccommodationBookingAsVendor(
+  userSupabase: SupabaseClient<Database>,
+  bookingId: string,
+): Promise<void> {
+  const vendorId = await getVendorIdForCurrentUser(userSupabase);
+  const booking = await getAccommodationBookingById(userSupabase, bookingId);
+  if (!booking) {
+    throw new Error("Booking not found");
+  }
+  if (booking.status !== "pending_approval") {
+    throw new Error("Booking is not pending approval");
+  }
+  if (booking.vendor_id !== vendorId) {
+    throw new Error("Forbidden: You do not manage this booking.");
+  }
+  if (!booking.order_id) {
+    throw new Error("Booking has no order");
+  }
+
+  const service = createServiceRoleClient();
+  const n = await declinePendingAccommodationBookingForVendor(
+    service,
+    bookingId,
+    vendorId,
+  );
+  if (n === 0) {
+    throw new Error("Could not decline booking");
+  }
+  await syncOrderM4cAfterBookingChange(service, booking.order_id);
+  await safeSendBookingStatusEmailHook(service, {
+    bookingId,
+    event: "booking_declined",
+    lineType: "accommodation",
+  });
+}
+
+/**
+ * Admin: approve one pending activity booking.
  */
 export async function approveActivityBookingAsAdmin(
   bookingId: string,
@@ -238,13 +338,14 @@ export async function approveActivityBookingAsAdmin(
     await safeSendBookingStatusEmailHook(service, {
       bookingId,
       event: "booking_confirmed",
+      lineType: "activity",
     });
   }
   return result;
 }
 
 /**
- * Admin: decline one pending booking.
+ * Admin: decline one pending activity booking.
  */
 export async function declineActivityBookingAsAdmin(
   bookingId: string,
@@ -269,11 +370,83 @@ export async function declineActivityBookingAsAdmin(
   await safeSendBookingStatusEmailHook(service, {
     bookingId,
     event: "booking_declined",
+    lineType: "activity",
   });
 }
 
 /**
- * Admin: confirm **all** **`pending_approval`** lines on the order (no Stripe).
+ * Admin: approve one pending accommodation booking.
+ */
+export async function approveAccommodationBookingAsAdmin(
+  bookingId: string,
+): Promise<BookingApprovalResult> {
+  const service = createServiceRoleClient();
+  const booking = await getAccommodationBookingById(service, bookingId);
+  if (!booking) {
+    throw new Error("Booking not found");
+  }
+  if (booking.status !== "pending_approval") {
+    throw new Error("Booking is not pending approval");
+  }
+  if (!booking.order_id) {
+    throw new Error("Booking has no order");
+  }
+
+  const order = await loadOrderForApprovalOrThrow(service, booking.order_id);
+  if (!orderAllowsVendorApproval(order)) {
+    throw new Error(
+      `Order is not awaiting vendor action (status: ${order.status})`,
+    );
+  }
+
+  const n = await confirmPendingAccommodationBookingAsAdmin(service, bookingId);
+  if (n === 0) {
+    throw new Error("Could not confirm booking");
+  }
+  await syncOrderM4cAfterBookingChange(service, booking.order_id);
+  const result = await getBookingApprovalResult(service, booking.order_id);
+  if (result.outcome === "approved") {
+    await safeSendBookingStatusEmailHook(service, {
+      bookingId,
+      event: "booking_confirmed",
+      lineType: "accommodation",
+    });
+  }
+  return result;
+}
+
+/**
+ * Admin: decline one pending accommodation booking.
+ */
+export async function declineAccommodationBookingAsAdmin(
+  bookingId: string,
+): Promise<void> {
+  const service = createServiceRoleClient();
+  const booking = await getAccommodationBookingById(service, bookingId);
+  if (!booking) {
+    throw new Error("Booking not found");
+  }
+  if (booking.status !== "pending_approval") {
+    throw new Error("Booking is not pending approval");
+  }
+  if (!booking.order_id) {
+    throw new Error("Booking has no order");
+  }
+
+  const n = await declinePendingAccommodationBookingAsAdmin(service, bookingId);
+  if (n === 0) {
+    throw new Error("Could not decline booking");
+  }
+  await syncOrderM4cAfterBookingChange(service, booking.order_id);
+  await safeSendBookingStatusEmailHook(service, {
+    bookingId,
+    event: "booking_declined",
+    lineType: "accommodation",
+  });
+}
+
+/**
+ * Admin: confirm **all** **`pending_approval`** lines on the order (activity + stay; no Stripe).
  */
 export async function approveActivityOrderAsAdmin(
   orderId: string,
@@ -286,26 +459,50 @@ export async function approveActivityOrderAsAdmin(
     );
   }
 
-  const pending = await listActivityBookings(service, {
-    orderId,
-    status: "pending_approval",
-    limit: 500,
-  });
-  if (pending.length === 0) {
+  const [pendingActivities, pendingStays] = await Promise.all([
+    listActivityBookings(service, {
+      orderId,
+      status: "pending_approval",
+      limit: 500,
+    }),
+    listAccommodationBookings(service, {
+      orderId,
+      status: "pending_approval",
+      limit: 500,
+    }),
+  ]);
+  if (pendingActivities.length === 0 && pendingStays.length === 0) {
     throw new Error("No pending approval bookings for this order.");
   }
 
-  const confirmedCount = await confirmAllPendingActivityBookingsForOrder(
-    service,
-    orderId,
-  );
+  let confirmedCount = 0;
+  if (pendingActivities.length > 0) {
+    confirmedCount += await confirmAllPendingActivityBookingsForOrder(
+      service,
+      orderId,
+    );
+  }
+  if (pendingStays.length > 0) {
+    confirmedCount += await confirmAllPendingAccommodationBookingsForOrder(
+      service,
+      orderId,
+    );
+  }
   await syncOrderM4cAfterBookingChange(service, orderId);
   const result = await getBookingApprovalResult(service, orderId);
   if (result.outcome === "approved") {
-    for (const booking of pending) {
+    for (const booking of pendingActivities) {
       await safeSendBookingStatusEmailHook(service, {
         bookingId: booking.id,
         event: "booking_confirmed",
+        lineType: "activity",
+      });
+    }
+    for (const booking of pendingStays) {
+      await safeSendBookingStatusEmailHook(service, {
+        bookingId: booking.id,
+        event: "booking_confirmed",
+        lineType: "accommodation",
       });
     }
   }
@@ -313,7 +510,7 @@ export async function approveActivityOrderAsAdmin(
 }
 
 /**
- * Vendor: declines **`pending_approval`** rows for the caller’s vendor only (bulk).
+ * Vendor: declines **`pending_approval`** rows for the caller’s vendor only (activity + stay bulk).
  */
 export async function declineActivityOrderAsVendor(
   userSupabase: SupabaseClient<Database>,
@@ -321,36 +518,62 @@ export async function declineActivityOrderAsVendor(
 ): Promise<{ declinedCount: number }> {
   const vendorId = await getVendorIdForCurrentUser(userSupabase);
 
-  const mine = await listActivityBookings(userSupabase, {
-    orderId,
-    vendorId,
-    status: "pending_approval",
-    limit: 500,
-  });
-  if (mine.length === 0) {
+  const [mineActivities, mineStays] = await Promise.all([
+    listActivityBookings(userSupabase, {
+      orderId,
+      vendorId,
+      status: "pending_approval",
+      limit: 500,
+    }),
+    listAccommodationBookings(userSupabase, {
+      orderId,
+      vendorId,
+      status: "pending_approval",
+      limit: 500,
+    }),
+  ]);
+  if (mineActivities.length === 0 && mineStays.length === 0) {
     throw new Error(
       "No pending approval bookings for your vendor on this order.",
     );
   }
 
   const service = createServiceRoleClient();
-  const declinedCount = await declinePendingActivityBookingsForVendorOnOrder(
-    service,
-    orderId,
-    vendorId,
-  );
+  let declinedCount = 0;
+  if (mineActivities.length > 0) {
+    declinedCount += await declinePendingActivityBookingsForVendorOnOrder(
+      service,
+      orderId,
+      vendorId,
+    );
+  }
+  if (mineStays.length > 0) {
+    declinedCount += await declinePendingAccommodationBookingsForVendorOnOrder(
+      service,
+      orderId,
+      vendorId,
+    );
+  }
   await syncOrderM4cAfterBookingChange(service, orderId);
-  for (const booking of mine) {
+  for (const booking of mineActivities) {
     await safeSendBookingStatusEmailHook(service, {
       bookingId: booking.id,
       event: "booking_declined",
+      lineType: "activity",
+    });
+  }
+  for (const booking of mineStays) {
+    await safeSendBookingStatusEmailHook(service, {
+      bookingId: booking.id,
+      event: "booking_declined",
+      lineType: "accommodation",
     });
   }
   return { declinedCount };
 }
 
 /**
- * Admin: declines all **`pending_approval`** rows on the order, then delegates to
+ * Admin: declines all **`pending_approval`** rows on the order (activity + stay), then delegates to
  * **`syncOrderM4cAfterBookingChange`**: sets the order to **`declined`** only when it
  * is still in a vendor-approval state, no row is **`pending_approval`**, and every
  * booking is **`declined`**, **`expired`**, or **`cancelled`**; if any line is
@@ -359,21 +582,41 @@ export async function declineActivityOrderAsVendor(
 export async function declineActivityOrderAsAdmin(orderId: string): Promise<void> {
   const service = createServiceRoleClient();
 
-  const pending = await listActivityBookings(service, {
-    orderId,
-    status: "pending_approval",
-    limit: 500,
-  });
-  if (pending.length === 0) {
+  const [pendingActivities, pendingStays] = await Promise.all([
+    listActivityBookings(service, {
+      orderId,
+      status: "pending_approval",
+      limit: 500,
+    }),
+    listAccommodationBookings(service, {
+      orderId,
+      status: "pending_approval",
+      limit: 500,
+    }),
+  ]);
+  if (pendingActivities.length === 0 && pendingStays.length === 0) {
     throw new Error("No pending approval bookings for this order.");
   }
 
-  await declineAllPendingActivityBookingsForOrder(service, orderId);
+  if (pendingActivities.length > 0) {
+    await declineAllPendingActivityBookingsForOrder(service, orderId);
+  }
+  if (pendingStays.length > 0) {
+    await declineAllPendingAccommodationBookingsForOrder(service, orderId);
+  }
   await syncOrderM4cAfterBookingChange(service, orderId);
-  for (const booking of pending) {
+  for (const booking of pendingActivities) {
     await safeSendBookingStatusEmailHook(service, {
       bookingId: booking.id,
       event: "booking_declined",
+      lineType: "activity",
+    });
+  }
+  for (const booking of pendingStays) {
+    await safeSendBookingStatusEmailHook(service, {
+      bookingId: booking.id,
+      event: "booking_declined",
+      lineType: "accommodation",
     });
   }
 }

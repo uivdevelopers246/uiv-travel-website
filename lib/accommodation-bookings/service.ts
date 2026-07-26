@@ -86,6 +86,22 @@ export async function listAccommodationBookings(
   return (data ?? []) as AccommodationBooking[];
 }
 
+export async function getAccommodationBookingById(
+  supabase: SupabaseClient<Database>,
+  id: string,
+): Promise<AccommodationBooking | null> {
+  const { data, error } = await supabase
+    .from("accommodation_bookings")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) {
+    throw bookingServiceError("Could not load accommodation booking by id", error);
+  }
+  return data ?? null;
+}
+
 /**
  * Creates a stay booking after SetupIntent: listing lock, overlap check, then insert.
  * **Requires a service role** client (`create_accommodation_booking_after_setup` is not
@@ -150,4 +166,162 @@ export async function cancelAccommodationBookingsForOrder(
       error,
     );
   }
+}
+
+/**
+ * M4-D vendor decline before charge: **`pending_approval` → `declined`** for one vendor on the order.
+ * **`service_role` only** — use {@link createServiceRoleClient}.
+ */
+export async function declinePendingAccommodationBookingsForVendorOnOrder(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+  vendorId: string,
+): Promise<number> {
+  const { data, error } = await supabase.rpc(
+    "decline_pending_accommodation_bookings_for_vendor_on_order",
+    {
+      p_order_id: orderId,
+      p_vendor_id: vendorId,
+    },
+  );
+
+  if (error) {
+    throw bookingServiceError(
+      "Could not decline pending accommodation bookings for vendor on order",
+      error,
+    );
+  }
+  return data ?? 0;
+}
+
+/**
+ * M4-D: **`pending_approval` → `confirmed`** for one stay if **`vendor_id`** matches.
+ * **`service_role` only.**
+ */
+export async function confirmPendingAccommodationBookingForVendor(
+  supabase: SupabaseClient<Database>,
+  bookingId: string,
+  vendorId: string,
+): Promise<number> {
+  const { data, error } = await supabase.rpc(
+    "confirm_pending_accommodation_booking_for_vendor",
+    {
+      p_booking_id: bookingId,
+      p_vendor_id: vendorId,
+    },
+  );
+
+  if (error) {
+    throw bookingServiceError(
+      "Could not confirm pending accommodation booking for vendor",
+      error,
+    );
+  }
+  return data ?? 0;
+}
+
+/**
+ * M4-D: **`pending_approval` → `declined`** for one stay if **`vendor_id`** matches.
+ * **`service_role` only.**
+ */
+export async function declinePendingAccommodationBookingForVendor(
+  supabase: SupabaseClient<Database>,
+  bookingId: string,
+  vendorId: string,
+): Promise<number> {
+  const { data, error } = await supabase.rpc(
+    "decline_pending_accommodation_booking_for_vendor",
+    {
+      p_booking_id: bookingId,
+      p_vendor_id: vendorId,
+    },
+  );
+
+  if (error) {
+    throw bookingServiceError(
+      "Could not decline pending accommodation booking for vendor",
+      error,
+    );
+  }
+  return data ?? 0;
+}
+
+/** M4-D: admin single-stay confirm. **`service_role` only. */
+export async function confirmPendingAccommodationBookingAsAdmin(
+  supabase: SupabaseClient<Database>,
+  bookingId: string,
+): Promise<number> {
+  const { data, error } = await supabase.rpc(
+    "confirm_pending_accommodation_booking_as_admin",
+    { p_booking_id: bookingId },
+  );
+
+  if (error) {
+    throw bookingServiceError(
+      "Could not confirm pending accommodation booking as admin",
+      error,
+    );
+  }
+  return data ?? 0;
+}
+
+/** M4-D: admin single-stay decline. **`service_role` only. */
+export async function declinePendingAccommodationBookingAsAdmin(
+  supabase: SupabaseClient<Database>,
+  bookingId: string,
+): Promise<number> {
+  const { data, error } = await supabase.rpc(
+    "decline_pending_accommodation_booking_as_admin",
+    { p_booking_id: bookingId },
+  );
+
+  if (error) {
+    throw bookingServiceError(
+      "Could not decline pending accommodation booking as admin",
+      error,
+    );
+  }
+  return data ?? 0;
+}
+
+/**
+ * M4-D admin / full-order decline: all **`pending_approval`** stays → **`declined`**.
+ * **`service_role` only** — use {@link createServiceRoleClient}.
+ */
+export async function declineAllPendingAccommodationBookingsForOrder(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+): Promise<void> {
+  const { error } = await supabase.rpc("decline_accommodation_bookings_for_order", {
+    p_order_id: orderId,
+  });
+
+  if (error) {
+    throw bookingServiceError(
+      "Could not decline pending accommodation bookings for order",
+      error,
+    );
+  }
+}
+
+/**
+ * Confirms each **`pending_approval`** stay on an order (admin). No bulk confirm RPC exists;
+ * calls **`confirm_pending_accommodation_booking_as_admin`** per row.
+ */
+export async function confirmAllPendingAccommodationBookingsForOrder(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+): Promise<number> {
+  const pending = await listAccommodationBookings(supabase, {
+    orderId,
+    status: "pending_approval",
+    limit: 500,
+  });
+
+  let confirmedCount = 0;
+  for (const booking of pending) {
+    const n = await confirmPendingAccommodationBookingAsAdmin(supabase, booking.id);
+    confirmedCount += n;
+  }
+  return confirmedCount;
 }
