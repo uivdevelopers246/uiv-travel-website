@@ -40,6 +40,7 @@ Paid activity bookings use cart → Checkout **setup** (save payment method) →
   - [`docs/adrs/ADR-M4-A-booking-availability.md`](adrs/ADR-M4-A-booking-availability.md) — slots, `activity_bookings`, capacity RPC
   - [`docs/adrs/ADR-M4-B-shopping-cart-and-checkout.md`](adrs/ADR-M4-B-shopping-cart-and-checkout.md) — cart, `orders`, Checkout setup, Stripe webhook fulfillment
   - [`docs/adrs/ADR-M4-C-pending-approval-checkout-and-payment.md`](adrs/ADR-M4-C-pending-approval-checkout-and-payment.md) — save payment method first; charge once at settlement (M4-C)
+  - [`docs/adrs/ADR-M4-D-accommodation-bookings.md`](adrs/ADR-M4-D-accommodation-bookings.md) — Phase 2 stays: date-range availability, `accommodation_bookings`, mixed-cart settlement
 - **Operations:**
   - [`docs/m4-activity-operations-runbook.md`](m4-activity-operations-runbook.md) — MVP incident and manual follow-up steps
   - [`docs/m4-activity-money-manual-test.md`](m4-activity-money-manual-test.md) — pre-accommodation money-flow test checklist

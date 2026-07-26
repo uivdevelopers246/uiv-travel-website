@@ -7,8 +7,9 @@
 
 **Related**
 
-- **[ADR-M4-A: Booking & Availability](./ADR-M4-booking-availability.md)** — slots, `activity_bookings`, capacity math; **this ADR amends** when rows count toward capacity and how bookings are created.
-- **[ADR-M4-B: Shopping Cart & Checkout](./ADR-M4-shopping-cart-and-checkout.md)** — cart, `orders`, Stripe; **this ADR supersedes** the “pay on Checkout Session completion, then create bookings” flow for the product direction below. Historical behavior remains documented in M4-B until fully migrated in code.
+- **[ADR-M4-A: Booking & Availability](./ADR-M4-A-booking-availability.md)** — slots, `activity_bookings`, capacity math; **this ADR amends** when rows count toward capacity and how bookings are created.
+- **[ADR-M4-B: Shopping Cart & Checkout](./ADR-M4-B-shopping-cart-and-checkout.md)** — cart, `orders`, Stripe; **this ADR supersedes** the “pay on Checkout Session completion, then create bookings” flow for the product direction below. Historical behavior remains documented in M4-B until fully migrated in code.
+- **[ADR-M4-D: Accommodation Bookings](./ADR-M4-D-accommodation-bookings.md)** — extends this flow to stays and mixed carts; settlement aggregates both booking tables.
 
 ---
 
@@ -22,7 +23,7 @@ Stakeholders require **vendor (or site admin) approval before any charge**, so o
 
 **Vendor payouts** (platform → vendor) are **out of scope** for this ADR; they are handled in a separate process. This ADR only covers **collecting payment from the customer** in Stripe for **approved** activity lines.
 
-Accommodation checkout may follow the same pattern later; this ADR states **activity-first** requirements and keeps **accommodation** as a forward-compatible extension.
+Accommodation checkout follows the same pattern; detailed stay inventory, pricing, and settlement aggregation are in **[ADR-M4-D](./ADR-M4-D-accommodation-bookings.md)**. This ADR states **activity-first** requirements and remains the money-flow source of truth for SetupIntent → approve → settle.
 
 ---
 
