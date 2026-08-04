@@ -13,6 +13,10 @@ vi.mock("@/lib/activity-bookings/service", () => ({
   getActivityBookingById: vi.fn(),
 }));
 
+vi.mock("@/lib/accommodation-bookings/service", () => ({
+  getAccommodationBookingById: vi.fn(),
+}));
+
 vi.mock("@/lib/orders/service", () => ({
   getOrderById: vi.fn(),
 }));
@@ -163,6 +167,15 @@ function makeSupabase() {
               { id: "booking-1", status: "confirmed" },
               { id: "booking-2", status: "declined" },
             ],
+            error: null,
+          }),
+        };
+      }
+      if (table === "accommodation_bookings") {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockResolvedValue({
+            data: [{ id: "stay-1", status: "confirmed" }],
             error: null,
           }),
         };

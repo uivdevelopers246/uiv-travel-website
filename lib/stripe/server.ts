@@ -4,6 +4,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
 
 import {
+  type AccommodationBooking,
+  cancelAccommodationBookingsForOrder,
+  createAccommodationBookingAfterSetup,
+  listAccommodationBookings,
+} from "@/lib/accommodation-bookings/service";
+import {
   type ActivityBooking,
   cancelActivityBookingsForOrder,
   createActivityBookingAfterPayment,
@@ -11,7 +17,10 @@ import {
   reopenConfirmedActivityBookingsForOrder,
 } from "@/lib/activity-bookings/service";
 import { bookingPendingApprovalExpiresAtIso } from "@/lib/activity-bookings/sla";
-import { CART_LINE_TYPE_ACTIVITY } from "@/lib/cart/constants";
+import {
+  CART_LINE_TYPE_ACTIVITY,
+  CART_LINE_TYPE_ACCOMMODATION,
+} from "@/lib/cart/constants";
 import { deleteAllCartLinesForUser } from "@/lib/cart/service";
 import type { CartLine } from "@/lib/cart/types";
 import {
@@ -25,6 +34,7 @@ import {
   buildSettlementIdempotencyKey,
   computeConfirmedSettlementTotalCents,
 } from "@/lib/orders/settlement-utils";
+import { listOrderBookingLinesForM4c } from "@/lib/orders/order-booking-lines";
 import {
   attachSettlementRetryPaymentIntent,
   getOrderById,
@@ -171,13 +181,12 @@ export async function createCheckoutSetupSessionForOrder(
   const { order, lines, siteUrl, stripeCustomerId } = input;
   const base = siteUrl.replace(/\/$/, "");
 
-  const activityLines = lines.filter((l) => l.line_type === CART_LINE_TYPE_ACTIVITY);
-  if (activityLines.length === 0) {
-    throw new Error("Checkout requires at least one activity line");
+  if (lines.length === 0) {
+    throw new Error("Checkout requires at least one cart line");
   }
 
   let sumCents = 0;
-  for (const line of activityLines) {
+  for (const line of lines) {
     sumCents += line.line_total_cents;
   }
   if (sumCents !== order.total_cents) {
@@ -286,6 +295,24 @@ async function fetchSlotsByIds(
   return new Map((data ?? []).map((row) => [row.id, row]));
 }
 
+async function fetchAccommodationVendorIdsByIds(
+  supabase: SupabaseClient<Database>,
+  accommodationIds: string[],
+): Promise<Map<string, string>> {
+  if (accommodationIds.length === 0) {
+    return new Map();
+  }
+  const { data, error } = await supabase
+    .from("accommodations")
+    .select("id, vendor_id")
+    .in("id", accommodationIds);
+
+  if (error) {
+    throw new Error(`Could not load accommodations: ${error.message}`);
+  }
+  return new Map((data ?? []).map((row) => [row.id, row.vendor_id]));
+}
+
 async function insertStripeWebhookEvent(
   supabase: SupabaseClient<Database>,
   stripeEventId: string,
@@ -341,6 +368,69 @@ function activityBookingsCoverCartLinesForSetupHold(
     if (!ok) {
       return false;
     }
+  }
+  return true;
+}
+
+function accommodationBookingsCoverCartLinesForSetupHold(
+  accommodationLines: CartLine[],
+  bookings: {
+    accommodation_id: string;
+    check_in: string;
+    check_out: string;
+    order_id: string | null;
+    status: string;
+  }[],
+  orderId: string,
+): boolean {
+  if (accommodationLines.length === 0) {
+    return false;
+  }
+  for (const line of accommodationLines) {
+    const accommodationId = line.accommodation_id;
+    if (!accommodationId || !line.check_in || !line.check_out) {
+      return false;
+    }
+    const ok = bookings.some(
+      (b) =>
+        b.order_id === orderId &&
+        b.accommodation_id === accommodationId &&
+        b.check_in === line.check_in &&
+        b.check_out === line.check_out &&
+        (b.status === "pending_approval" || b.status === "confirmed"),
+    );
+    if (!ok) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function cartLinesCoveredBySetupHolds(
+  activityLines: CartLine[],
+  accommodationLines: CartLine[],
+  activityBookings: ActivityBooking[],
+  accommodationBookings: AccommodationBooking[],
+  orderId: string,
+): boolean {
+  if (activityLines.length === 0 && accommodationLines.length === 0) {
+    return false;
+  }
+  if (
+    activityLines.length > 0 &&
+    !activityBookingsCoverCartLinesForSetupHold(activityLines, activityBookings, orderId)
+  ) {
+    return false;
+  }
+  if (
+    accommodationLines.length > 0 &&
+    !accommodationBookingsCoverCartLinesForSetupHold(
+      accommodationLines,
+      accommodationBookings,
+      orderId,
+    )
+  ) {
+    return false;
   }
   return true;
 }
@@ -410,14 +500,21 @@ async function fulfillM4cVendorApprovalRequestAfterSetupSaved(
     return { status: "session_mismatch_marked_failed" };
   }
 
-  const activityLines = (await fetchCartLinesForUser(supabase, order.user_id)).filter(
-    (l) => l.line_type === CART_LINE_TYPE_ACTIVITY,
+  const cartLines = await fetchCartLinesForUser(supabase, order.user_id);
+  const activityLines = cartLines.filter((l) => l.line_type === CART_LINE_TYPE_ACTIVITY);
+  const accommodationLines = cartLines.filter(
+    (l) => l.line_type === CART_LINE_TYPE_ACCOMMODATION,
   );
 
-  let knownBookings: ActivityBooking[] = await listActivityBookings(supabase, {
+  let knownActivityBookings: ActivityBooking[] = await listActivityBookings(supabase, {
     orderId: order.id,
     limit: 500,
   });
+  let knownAccommodationBookings: AccommodationBooking[] =
+    await listAccommodationBookings(supabase, {
+      orderId: order.id,
+      limit: 500,
+    });
 
   if (order.status === "paid") {
     await insertStripeWebhookEvent(supabase, eventId);
@@ -430,7 +527,15 @@ async function fulfillM4cVendorApprovalRequestAfterSetupSaved(
   }
 
   if (order.status === "awaiting_vendor_approval") {
-    if (activityBookingsCoverCartLinesForSetupHold(activityLines, knownBookings, order.id)) {
+    if (
+      cartLinesCoveredBySetupHolds(
+        activityLines,
+        accommodationLines,
+        knownActivityBookings,
+        knownAccommodationBookings,
+        order.id,
+      )
+    ) {
       await deleteAllCartLinesForUser(supabase, order.user_id);
       await insertStripeWebhookEvent(supabase, eventId);
       return { status: "already_fulfilled" };
@@ -449,12 +554,24 @@ async function fulfillM4cVendorApprovalRequestAfterSetupSaved(
         return { status: "order_not_found" };
       }
       order = fresh;
-      knownBookings = await listActivityBookings(supabase, {
+      knownActivityBookings = await listActivityBookings(supabase, {
+        orderId: order.id,
+        limit: 500,
+      });
+      knownAccommodationBookings = await listAccommodationBookings(supabase, {
         orderId: order.id,
         limit: 500,
       });
       if (order.status === "awaiting_vendor_approval") {
-        if (activityBookingsCoverCartLinesForSetupHold(activityLines, knownBookings, order.id)) {
+        if (
+          cartLinesCoveredBySetupHolds(
+            activityLines,
+            accommodationLines,
+            knownActivityBookings,
+            knownAccommodationBookings,
+            order.id,
+          )
+        ) {
           await deleteAllCartLinesForUser(supabase, order.user_id);
           await insertStripeWebhookEvent(supabase, eventId);
           return { status: "already_fulfilled" };
@@ -474,6 +591,18 @@ async function fulfillM4cVendorApprovalRequestAfterSetupSaved(
     ),
   ];
   const slotById = await fetchSlotsByIds(supabase, slotIds);
+
+  const accommodationIds = [
+    ...new Set(
+      accommodationLines
+        .map((l) => l.accommodation_id)
+        .filter((id): id is string => id != null && id !== ""),
+    ),
+  ];
+  const vendorIdByAccommodationId = await fetchAccommodationVendorIdsByIds(
+    supabase,
+    accommodationIds,
+  );
   const expiresAt = bookingPendingApprovalExpiresAtIso();
 
   try {
@@ -482,7 +611,7 @@ async function fulfillM4cVendorApprovalRequestAfterSetupSaved(
         throw new Error("Invalid activity cart line");
       }
 
-      const already = knownBookings.some(
+      const already = knownActivityBookings.some(
         (b) =>
           b.order_id === order.id &&
           b.slot_id === line.slot_id &&
@@ -511,11 +640,57 @@ async function fulfillM4cVendorApprovalRequestAfterSetupSaved(
         status: "pending_approval",
         expires_at: expiresAt,
       });
-      knownBookings = [...knownBookings, booking];
+      knownActivityBookings = [...knownActivityBookings, booking];
       await safeSendProviderBookingPendingNotice(supabase, booking.id);
+    }
+
+    for (const line of accommodationLines) {
+      if (
+        !line.accommodation_id ||
+        !line.check_in ||
+        !line.check_out ||
+        line.guests == null
+      ) {
+        throw new Error("Invalid accommodation cart line");
+      }
+
+      const already = knownAccommodationBookings.some(
+        (b) =>
+          b.order_id === order.id &&
+          b.accommodation_id === line.accommodation_id &&
+          b.check_in === line.check_in &&
+          b.check_out === line.check_out &&
+          (b.status === "pending_approval" || b.status === "confirmed"),
+      );
+      if (already) {
+        continue;
+      }
+
+      const vendorId = vendorIdByAccommodationId.get(line.accommodation_id);
+      if (!vendorId) {
+        throw new Error("Accommodation not found");
+      }
+
+      const booking = await createAccommodationBookingAfterSetup(supabase, {
+        accommodation_id: line.accommodation_id,
+        user_id: order.user_id,
+        vendor_id: vendorId,
+        order_id: order.id,
+        check_in: line.check_in,
+        check_out: line.check_out,
+        guests: line.guests,
+        unit_price_cents: line.unit_price_cents,
+        subtotal_cents: line.line_subtotal_cents,
+        discount_cents: line.line_discount_cents,
+        total_cents: line.line_total_cents,
+        status: "pending_approval",
+        expires_at: expiresAt,
+      });
+      knownAccommodationBookings = [...knownAccommodationBookings, booking];
     }
   } catch {
     await cancelActivityBookingsForOrder(supabase, order.id);
+    await cancelAccommodationBookingsForOrder(supabase, order.id);
     await revertOrderToAwaitingPaymentAfterSetupFailure(supabase, order.id);
     await insertStripeWebhookEvent(supabase, eventId);
     return { status: "partial_failure_rolled_back" };
@@ -533,6 +708,7 @@ async function fulfillM4cSettlementRecoveryAfterSetupSaved(
 ): Promise<FulfillCheckoutSetupSessionCompletedResult> {
   const order = await getOrderById(supabase, ctx.orderId);
   if (!order) {
+    await insertStripeWebhookEvent(supabase, eventId);
     return { status: "order_not_found" };
   }
 
@@ -599,8 +775,9 @@ async function fulfillM4cSettlementRecoveryAfterSetupSaved(
 }
 
 /**
- * M4-C: **`checkout.session.completed`** with **`mode: setup`** — pending_approval bookings,
- * **`awaiting_vendor_approval`**, cart clear. Idempotent via **`stripe_webhook_events`**.
+ * M4-C / M4-D: **`checkout.session.completed`** with **`mode: setup`** — pending_approval
+ * activity and accommodation bookings, **`awaiting_vendor_approval`**, cart clear.
+ * Idempotent via **`stripe_webhook_events`**.
  */
 export async function fulfillCheckoutSetupSessionCompleted(
   event: Stripe.Event,
@@ -863,7 +1040,7 @@ export async function fulfillSettlementPaymentIntentSucceeded(
     return { status: "already_paid" };
   }
 
-  const bookings = await listActivityBookings(supabase, { orderId, limit: 500 });
+  const bookings = await listOrderBookingLinesForM4c(supabase, orderId);
   const expectedSettlementAmountCents = computeConfirmedSettlementTotalCents(bookings);
   const capturedPaymentIntentAmountCents = pi.amount;
   const isAmountMismatch = capturedPaymentIntentAmountCents !== expectedSettlementAmountCents;
@@ -974,7 +1151,7 @@ export async function fulfillSettlementPaymentIntentPaymentFailed(
 
   const attempt = order.settlement_charge_attempt_count;
   if (attempt === 1) {
-    const bookings = await listActivityBookings(supabase, { orderId, limit: 500 });
+    const bookings = await listOrderBookingLinesForM4c(supabase, orderId);
     const amountCents = computeConfirmedSettlementTotalCents(bookings);
     const retryPi = await createSettlementPaymentIntentForOrder({
       order,

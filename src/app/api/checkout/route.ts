@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   listCartLines,
-  validateActivityCartForCheckout,
+  validateCartForCheckout,
 } from "@/lib/cart/service";
 import {
   updateOrderStripeCheckoutSession,
@@ -32,7 +32,7 @@ function handleCheckoutPostError(error: unknown): NextResponse {
 
   if (
     message === "Cart line totals do not match order total" ||
-    message === "Checkout requires at least one activity line" ||
+    message === "Checkout requires at least one cart line" ||
     message === "Invalid participants on cart line"
   ) {
     return badRequest(message);
@@ -61,7 +61,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    await validateActivityCartForCheckout(supabase);
+    await validateCartForCheckout(supabase);
     const order = await upsertCheckoutSetupOrderFromCart(supabase);
     const lines = await listCartLines(supabase);
     const siteUrl = getPublicSiteUrl();

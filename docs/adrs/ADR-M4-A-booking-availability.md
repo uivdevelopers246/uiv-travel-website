@@ -7,8 +7,9 @@
 
 **Related ADRs**
 
-- **[ADR-M4-B: Shopping Cart & Checkout](./ADR-M4-shopping-cart-and-checkout.md)** — authenticated cart, `orders`, Stripe Checkout Session, **creation of `activity_bookings` after payment** (webhook), **`cancel_activity_bookings_for_order`** (service-role rollback when fulfillment fails after charge), order-level Stripe IDs, merge rules, refund-on-full-failure.
+- **[ADR-M4-B: Shopping Cart & Checkout](./ADR-M4-B-shopping-cart-and-checkout.md)** — authenticated cart, `orders`, Stripe Checkout Session, **creation of `activity_bookings` after payment** (webhook), **`cancel_activity_bookings_for_order`** (service-role rollback when fulfillment fails after charge), order-level Stripe IDs, merge rules, refund-on-full-failure.
 - **[ADR-M4-C: Pending-approval checkout & payment on confirmation](./ADR-M4-C-pending-approval-checkout-and-payment.md)** — **pending approval before charge**, SetupIntent, SLA, **strict capacity** (`pending_approval` + `confirmed`); **amends** booking-creation and capacity rules here when implemented.
+- **[ADR-M4-D: Accommodation Bookings](./ADR-M4-D-accommodation-bookings.md)** — Phase 2 date-range stays, `accommodation_bookings`, flat nightly pricing, M4-C parity, settlement across both booking tables.
 
 ---
 
@@ -393,18 +394,14 @@ Rejected for MVP. Would surrender control of the payment and commission relation
 - Automated payout remittance to operators (manual banking process for MVP)
 - Recurring slot rule generation
 - Cancellation notification emails (covered in M6 — Notifications)
-- **Accommodation bookings** (M4 Phase 2 — see note below)
+- **Accommodation bookings** (M4 Phase 2 — designed and backend-implemented in [ADR-M4-D](./ADR-M4-D-accommodation-bookings.md); listing UI remains frontend follow-on)
 
 ---
 
-## M4 Phase 2 — Accommodation Bookings (Planned, Not Designed Here)
+## M4 Phase 2 — Accommodation Bookings
 
-Accommodation bookings are a distinct booking model and are explicitly out of scope for this ADR. They will be designed and implemented as a follow-on phase once activity bookings are stable.
+Accommodation bookings are a distinct booking model and are **out of scope for implementation in this ADR**. Design and backend commerce live in **[ADR-M4-D: Accommodation Bookings](./ADR-M4-D-accommodation-bookings.md)** (ledger, cart/checkout, setup fulfillment, approval/expiry, mixed settlement). Buyer/vendor stay listing UIs remain a frontend handoff.
 
 **Why a separate table and ADR:** Accommodation bookings are date-range based — a guest selects a check-in date and a check-out date, and the resource being reserved is the property itself. This is fundamentally different from the slot-based, headcount model used for activities. Forcing accommodation bookings into `activity_bookings` would require nullable columns for incompatible fields and make the availability enforcement logic ambiguous. A separate `accommodation_bookings` table keeps both models clean and independently evolvable.
 
-**What the M4 Phase 2 ADR will need to address:**
-- Availability represented as open date ranges on a property, not discrete slots
-- Overbooking prevention via overlapping date-range detection (`tsrange` or explicit `check_in` / `check_out` exclusion constraints in Postgres) rather than headcount against a slot
-- Whether nightly pricing is flat (`price_min_usd` from the accommodation row) or varies by date (requires a separate rate table — likely post-MVP)
-- Check-in / check-out time enforcement from the `accommodations` schema (`check_in_time`, `check_out_time` columns already exist)
+**ADR-M4-D decisions (summary):** open calendar (no blocked-ranges table in MVP); half-open overlap for `pending_approval` + `confirmed` (RPC lock + soft-hold check; no GiST exclusion in shipped migrations); flat nightly price `nights × price_min_usd`; guests validated against `max_guest_capacity` when set (honor system when null); M4-C SetupIntent → approve → one settlement charge; settlement sums confirmed lines from **both** booking tables; listing `check_in_time` / `check_out_time` are informational for MVP.

@@ -4,7 +4,7 @@
 **Milestone:** M4 — Booking & Availability  
 **Date:** 2026-04-01 (updated 2026-04-09)  
 **Deciders:** UIV Travel development team  
-**Related:** [ADR-M4-A: Booking & Availability](./ADR-M4-booking-availability.md) — slots, `activity_bookings`, `create_activity_booking_after_payment`, **`cancel_activity_bookings_for_order`** (fulfillment rollback). **[ADR-M4-C: Pending-approval checkout & payment on confirmation](./ADR-M4-C-pending-approval-checkout-and-payment.md)** — product direction to approve before charge (SetupIntent, SLA); **supersedes this ADR’s upfront-payment flow** when implemented.
+**Related:** [ADR-M4-A: Booking & Availability](./ADR-M4-A-booking-availability.md) — slots, `activity_bookings`, `create_activity_booking_after_payment`, **`cancel_activity_bookings_for_order`** (fulfillment rollback). **[ADR-M4-C: Pending-approval checkout & payment on confirmation](./ADR-M4-C-pending-approval-checkout-and-payment.md)** — product direction to approve before charge (SetupIntent, SLA); **supersedes this ADR’s upfront-payment flow** when implemented. **[ADR-M4-D: Accommodation Bookings](./ADR-M4-D-accommodation-bookings.md)** — Phase 2 stay lines on `cart_lines`, `accommodation_bookings`, mixed-cart settlement.
 
 ---
 
@@ -18,7 +18,7 @@ This ADR defines **cart storage**, **checkout**, **Stripe Checkout Session**, **
 
 ## Decision
 
-- **Single cart per product strategy:** One logical cart can hold **multiple line types** over time. The schema includes **accommodation-oriented nullable columns** on cart lines even though **only `activity` lines are implemented in M4** UI/API — avoiding a painful migration when accommodation checkout ships (see [ADR-M4-A — Phase 2](./ADR-M4-booking-availability.md)).
+- **Single cart per product strategy:** One logical cart can hold **multiple line types** over time. The schema includes **accommodation-oriented nullable columns** on cart lines even though **only `activity` lines are implemented in M4** UI/API — avoiding a painful migration when accommodation checkout ships (see [ADR-M4-D](./ADR-M4-D-accommodation-bookings.md)).
 - **Authenticated-only server cart:** Only **logged-in** users persist a cart in the database (RLS scoped to `auth.uid()`). There is **no** anonymous guest cart in MVP.
 - **Persistence:** Cart lines live in the **DB** (not only `localStorage`).
 - **No cart expiry:** Lines are not auto-deleted by TTL; **validation and price rules** apply at checkout and when building Stripe line items.

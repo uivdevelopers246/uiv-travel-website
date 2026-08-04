@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const cartServiceMocks = vi.hoisted(() => ({
   listCartLines: vi.fn(),
-  validateActivityCartForCheckout: vi.fn(),
+  validateCartForCheckout: vi.fn(),
 }));
 
 const orderServiceMocks = vi.hoisted(() => ({
@@ -49,7 +49,7 @@ describe("POST /api/checkout", () => {
   });
 
   it("returns a specific configuration error when Stripe is not configured", async () => {
-    cartServiceMocks.validateActivityCartForCheckout.mockResolvedValue(undefined);
+    cartServiceMocks.validateCartForCheckout.mockResolvedValue(undefined);
     orderServiceMocks.upsertCheckoutSetupOrderFromCart.mockResolvedValue({
       id: "order-1",
     });
