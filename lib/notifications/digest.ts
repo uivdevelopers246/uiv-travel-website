@@ -27,6 +27,7 @@ function barbadosDateKey(now = new Date()): string {
 
 async function countBookings(
   supabase: SupabaseClient<Database>,
+  table: "activity_bookings" | "accommodation_bookings",
   vendorId: string,
   filters: {
     status?: string;
@@ -35,7 +36,7 @@ async function countBookings(
   },
 ): Promise<number> {
   let query = supabase
-    .from("activity_bookings")
+    .from(table)
     .select("id", { count: "exact", head: true })
     .eq("vendor_id", vendorId);
 
@@ -56,24 +57,48 @@ async function countBookings(
   return count ?? 0;
 }
 
+async function countAllBookings(
+  supabase: SupabaseClient<Database>,
+  vendorId: string,
+  filters: {
+    status?: string;
+    updatedSince?: string;
+    expiresBefore?: string;
+  },
+): Promise<number> {
+  const [activityCount, accommodationCount] = await Promise.all([
+    countBookings(supabase, "activity_bookings", vendorId, filters),
+    countBookings(supabase, "accommodation_bookings", vendorId, filters),
+  ]);
+  return activityCount + accommodationCount;
+}
+
 async function countFailedPaymentOrders(
   supabase: SupabaseClient<Database>,
   vendorId: string,
   updatedSince: string,
 ): Promise<number> {
-  const { data: bookingRows, error: bookingError } = await supabase
-    .from("activity_bookings")
-    .select("order_id")
-    .eq("vendor_id", vendorId)
-    .not("order_id", "is", null);
+  const [activityResult, accommodationResult] = await Promise.all([
+    supabase
+      .from("activity_bookings")
+      .select("order_id")
+      .eq("vendor_id", vendorId)
+      .not("order_id", "is", null),
+    supabase
+      .from("accommodation_bookings")
+      .select("order_id")
+      .eq("vendor_id", vendorId)
+      .not("order_id", "is", null),
+  ]);
 
+  const bookingError = activityResult.error ?? accommodationResult.error;
   if (bookingError) {
     throw new Error(`Could not load digest order ids: ${bookingError.message}`);
   }
 
   const orderIds = [
     ...new Set(
-      (bookingRows ?? [])
+      [...(activityResult.data ?? []), ...(accommodationResult.data ?? [])]
         .map((row) => row.order_id)
         .filter((id): id is string => typeof id === "string" && id.length > 0),
     ),
@@ -170,16 +195,16 @@ export async function createProviderDailyDigestNotifications(
       declinedBookings,
       failedPayments,
     ] = await Promise.all([
-      countBookings(supabase, vendor.id, { status: "pending_approval" }),
-      countBookings(supabase, vendor.id, {
+      countAllBookings(supabase, vendor.id, { status: "pending_approval" }),
+      countAllBookings(supabase, vendor.id, {
         status: "pending_approval",
         expiresBefore: expiringBefore,
       }),
-      countBookings(supabase, vendor.id, {
+      countAllBookings(supabase, vendor.id, {
         status: "confirmed",
         updatedSince: since,
       }),
-      countBookings(supabase, vendor.id, {
+      countAllBookings(supabase, vendor.id, {
         status: "declined",
         updatedSince: since,
       }),

@@ -15,6 +15,7 @@ export type NotificationEventType =
 export type NotificationStatus =
   | "pending"
   | "published"
+  | "processing"
   | "sent"
   | "skipped"
   | "failed";

@@ -2,6 +2,13 @@ Hi {{recipientName}},
 
 A traveler is waiting for your approval.
 
+{{#if booking.accommodationTitle}}
+Stay: {{booking.accommodationTitle}}
+Check-in: {{booking.checkIn}}
+Check-out: {{booking.checkOut}}
+Guests: {{booking.guests}}
+{{else}}
 Experience: {{booking.activityTitle}}
 When: {{formatDateTime booking.slotStartsAt}}
 Participants: {{booking.participants}}
+{{/if}}

@@ -2,8 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { ActivityBooking } from "@/lib/activity-bookings/service";
+import type { AccommodationBooking } from "@/lib/accommodation-bookings/service";
 import type { Order } from "@/lib/orders/types";
 import type { Database } from "@/supabase/types/database";
+
+const workerMocks = vi.hoisted(() => ({
+  processNotificationMessage: vi.fn(),
+}));
+
+vi.mock("@/lib/notifications/email-worker", () => workerMocks);
 import {
   sendBookingStatusEmailHook,
   sendOrderStatusEmailHook,
@@ -22,6 +29,7 @@ vi.mock("@/lib/orders/service", () => ({
 }));
 
 import { getActivityBookingById } from "@/lib/activity-bookings/service";
+import { getAccommodationBookingById } from "@/lib/accommodation-bookings/service";
 import { getOrderById } from "@/lib/orders/service";
 
 const baseOrder: Order = {
@@ -59,6 +67,25 @@ const baseBooking: ActivityBooking = {
   vendor_id: "vendor-1",
 };
 
+const baseAccommodationBooking: AccommodationBooking = {
+  id: "stay-1",
+  accommodation_id: "accommodation-1",
+  check_in: "2026-02-01",
+  check_out: "2026-02-05",
+  created_at: "2026-01-01T00:00:00.000Z",
+  discount_cents: 0,
+  expires_at: "2026-01-02T00:00:00.000Z",
+  guests: 2,
+  order_id: "order-1",
+  status: "confirmed",
+  subtotal_cents: 10000,
+  total_cents: 10000,
+  unit_price_cents: 2500,
+  updated_at: "2026-01-01T00:00:00.000Z",
+  user_id: "user-1",
+  vendor_id: "vendor-1",
+};
+
 function makeSupabase() {
   let insertedNotification: Record<string, unknown> | null = null;
   const notificationInsertResult = {
@@ -83,7 +110,7 @@ function makeSupabase() {
   const notificationUpdateResult = {
     eq: vi.fn().mockResolvedValue({ error: null }),
   };
-  return {
+  const supabase = {
     from: vi.fn((table: string) => {
       if (table === "notification_events") {
         return {
@@ -159,6 +186,16 @@ function makeSupabase() {
           }),
         };
       }
+      if (table === "accommodations") {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: { name: "Ocean View Suite" },
+            error: null,
+          }),
+        };
+      }
       if (table === "activity_bookings") {
         return {
           select: vi.fn().mockReturnThis(),
@@ -190,14 +227,17 @@ function makeSupabase() {
         }),
       },
     },
-  } as unknown as SupabaseClient<Database>;
+    __getInsertedNotification: () => insertedNotification,
+  };
+  return supabase as unknown as SupabaseClient<Database> & {
+    __getInsertedNotification: () => Record<string, unknown> | null;
+  };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
-  vi.stubEnv("STATUS_EMAIL_WEBHOOK_URL", "https://example.com/hooks/status-email");
-  vi.stubEnv("STATUS_EMAIL_WEBHOOK_SECRET", "status-secret");
+  workerMocks.processNotificationMessage.mockResolvedValue("sent");
   vi.stubGlobal(
     "fetch",
     vi.fn().mockResolvedValue({
@@ -209,40 +249,29 @@ beforeEach(() => {
 });
 
 describe("status-email-hooks", () => {
-  it("skips delivery when no webhook is configured", async () => {
-    vi.stubEnv("STATUS_EMAIL_WEBHOOK_URL", "");
-    vi.stubEnv("STATUS_EMAIL_WEBHOOK_SECRET", "");
-    vi.stubEnv("EMAIL_DELIVERY_WEBHOOK_URL", "");
-    vi.stubEnv("RESEND_API_KEY", "");
-    vi.stubEnv("EMAIL_FROM", "");
+  it("keeps the event queued when delivery is disabled", async () => {
+    workerMocks.processNotificationMessage.mockResolvedValue("pending");
     vi.mocked(getOrderById).mockResolvedValue(baseOrder);
+    const supabase = makeSupabase();
 
-    const result = await sendOrderStatusEmailHook(makeSupabase(), {
+    const result = await sendOrderStatusEmailHook(supabase, {
       orderId: "order-1",
       event: "payment_completed",
     });
 
-    expect(result).toEqual({
-      delivered: false,
-      reason: "not_configured",
-    });
+    expect(result).toEqual({ delivered: false, reason: "queued" });
+    expect(supabase.__getInsertedNotification()).toEqual(
+      expect.objectContaining({ event_type: "payment_completed" }),
+    );
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("sends booking status payloads through Resend when configured", async () => {
+  it("creates a booking event with recipient and booking context", async () => {
     vi.mocked(getActivityBookingById).mockResolvedValue(baseBooking);
     vi.mocked(getOrderById).mockResolvedValue(baseOrder);
-    vi.stubEnv("STATUS_EMAIL_WEBHOOK_URL", "");
-    vi.stubEnv("STATUS_EMAIL_WEBHOOK_SECRET", "");
-    vi.stubEnv("RESEND_API_KEY", "re_test");
-    vi.stubEnv("EMAIL_FROM", "UIV Travel <bookings@example.com>");
-    vi.mocked(fetch).mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      text: vi.fn().mockResolvedValue('{"id":"resend-email-1"}'),
-    } as unknown as Response);
+    const supabase = makeSupabase();
 
-    const result = await sendBookingStatusEmailHook(makeSupabase(), {
+    const result = await sendBookingStatusEmailHook(supabase, {
       bookingId: "booking-1",
       event: "booking_confirmed",
     });
@@ -250,22 +279,21 @@ describe("status-email-hooks", () => {
     expect(result).toEqual({ delivered: true });
     expect(getActivityBookingById).toHaveBeenCalled();
     expect(getOrderById).toHaveBeenCalledWith(expect.anything(), "order-1");
-    expect(fetch).toHaveBeenCalledWith(
-      "https://api.resend.com/emails",
+    expect(supabase.__getInsertedNotification()).toEqual(
       expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({
-          authorization: "Bearer re_test",
-          "idempotency-key": "booking:booking-1:booking_confirmed",
+        dedupe_key: "booking:booking-1:booking_confirmed",
+        payload: expect.objectContaining({
+          recipient: expect.objectContaining({ email: "traveler@example.com" }),
+          booking: expect.objectContaining({ activityTitle: "Sunset Cruise" }),
         }),
-        body: expect.stringContaining('"to":"traveler@example.com"'),
       }),
     );
   });
 
-  it("uses the configured legacy webhook when present", async () => {
+  it("does not use the removed legacy status webhook", async () => {
     vi.mocked(getActivityBookingById).mockResolvedValue(baseBooking);
     vi.mocked(getOrderById).mockResolvedValue(baseOrder);
+    vi.stubEnv("STATUS_EMAIL_WEBHOOK_URL", "https://example.com/legacy");
 
     const result = await sendBookingStatusEmailHook(makeSupabase(), {
       bookingId: "booking-1",
@@ -273,32 +301,59 @@ describe("status-email-hooks", () => {
     });
 
     expect(result).toEqual({ delivered: true });
-    expect(fetch).toHaveBeenCalledWith(
-      "https://example.com/hooks/status-email",
+    expect(fetch).not.toHaveBeenCalled();
+    expect(workerMocks.processNotificationMessage).toHaveBeenCalledOnce();
+  });
+
+  it("creates an accommodation booking event with stay context", async () => {
+    vi.mocked(getAccommodationBookingById).mockResolvedValue(
+      baseAccommodationBooking,
+    );
+    vi.mocked(getOrderById).mockResolvedValue(baseOrder);
+    const supabase = makeSupabase();
+
+    const result = await sendBookingStatusEmailHook(supabase, {
+      bookingId: "stay-1",
+      event: "booking_confirmed",
+      lineType: "accommodation",
+    });
+
+    expect(result).toEqual({ delivered: true });
+    expect(supabase.__getInsertedNotification()).toEqual(
       expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({
-          authorization: "Bearer status-secret",
-          "content-type": "application/json",
+        payload: expect.objectContaining({
+          booking: expect.objectContaining({
+            lineType: "accommodation",
+            accommodationTitle: "Ocean View Suite",
+            guests: 2,
+          }),
         }),
       }),
     );
   });
 
-  it("posts order status payloads with booking summaries", async () => {
+  it("creates order events with activity and accommodation summaries", async () => {
     vi.mocked(getOrderById).mockResolvedValue(baseOrder);
+    const supabase = makeSupabase();
 
-    const result = await sendOrderStatusEmailHook(makeSupabase(), {
+    const result = await sendOrderStatusEmailHook(supabase, {
       orderId: "order-1",
       event: "payment_failed",
     });
 
     expect(result).toEqual({ delivered: true });
-    expect(fetch).toHaveBeenCalledWith(
-      "https://example.com/hooks/status-email",
+    expect(supabase.__getInsertedNotification()).toEqual(
       expect.objectContaining({
-        method: "POST",
-        body: expect.stringContaining('"event":"payment_failed"'),
+        payload: expect.objectContaining({
+          event: "payment_failed",
+          order: expect.objectContaining({
+            bookingCount: 3,
+            bookingStatuses: expect.arrayContaining([
+              expect.objectContaining({ lineType: "activity" }),
+              expect.objectContaining({ lineType: "accommodation" }),
+            ]),
+          }),
+        }),
       }),
     );
   });

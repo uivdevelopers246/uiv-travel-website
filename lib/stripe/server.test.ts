@@ -37,6 +37,14 @@ vi.mock("stripe", () => ({
   },
 }));
 
+vi.mock("@/lib/orders/status-email-hooks", () => ({
+  safeSendOrderStatusEmailHook: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@/lib/notifications/provider-notices", () => ({
+  safeSendProviderBookingPendingNotice: vi.fn().mockResolvedValue(undefined),
+}));
+
 import {
   createCheckoutSetupSessionForOrder,
   createSettlementPaymentIntentForOrder,

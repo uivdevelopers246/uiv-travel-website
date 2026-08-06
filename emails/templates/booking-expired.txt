@@ -2,6 +2,11 @@ Hi {{recipientName}},
 
 This pending booking was not approved before the deadline.
 
+{{#if booking.accommodationTitle}}
+Stay: {{booking.accommodationTitle}}
+Requested dates: {{booking.checkIn}} to {{booking.checkOut}}
+{{else}}
 Experience: {{booking.activityTitle}}
 Requested time: {{formatDateTime booking.slotStartsAt}}
+{{/if}}
 Order: {{order.id}}

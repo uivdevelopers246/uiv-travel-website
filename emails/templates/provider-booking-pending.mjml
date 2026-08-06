@@ -5,9 +5,16 @@
         <mj-text font-size="20px" font-weight="700" color="#16251f">New booking pending approval</mj-text>
         <mj-text font-size="15px" color="#24342e">Hi {{recipientName}}, a traveler is waiting for your approval.</mj-text>
         <mj-table color="#24342e" font-size="14px">
+          {{#if booking.accommodationTitle}}
+          <tr><td>Stay</td><td align="right">{{booking.accommodationTitle}}</td></tr>
+          <tr><td>Check-in</td><td align="right">{{booking.checkIn}}</td></tr>
+          <tr><td>Check-out</td><td align="right">{{booking.checkOut}}</td></tr>
+          <tr><td>Guests</td><td align="right">{{booking.guests}}</td></tr>
+          {{else}}
           <tr><td>Experience</td><td align="right">{{booking.activityTitle}}</td></tr>
           <tr><td>When</td><td align="right">{{formatDateTime booking.slotStartsAt}}</td></tr>
           <tr><td>Participants</td><td align="right">{{booking.participants}}</td></tr>
+          {{/if}}
         </mj-table>
       </mj-column>
     </mj-section>

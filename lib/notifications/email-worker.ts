@@ -6,8 +6,18 @@ import Handlebars from "handlebars";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database, Json } from "@/supabase/types/database";
+import {
+  getNotificationConfig,
+  isNotificationRecipientAllowed,
+  type NotificationConfig,
+} from "./config";
+import {
+  isRetryableNotificationError,
+  NotificationDeliveryError,
+} from "./delivery-error";
+import { logNotificationOutcome } from "./logging";
 import type { NotificationEventType, NotificationPayload } from "./types";
-import { isResendEmailConfigured, sendEmailWithResend } from "./resend";
+import { sendEmailWithResend } from "./resend";
 
 type NotificationEventRow =
   Database["public"]["Tables"]["notification_events"]["Row"];
@@ -43,6 +53,8 @@ export type EmailSendResult = {
 type ProcessNotificationOptions = {
   templateDir?: string;
   sendEmail?: (input: EmailSendInput) => Promise<EmailSendResult>;
+  config?: NotificationConfig;
+  now?: Date;
 };
 
 type ProcessBatchOptions = ProcessNotificationOptions & {
@@ -53,8 +65,22 @@ type ProcessBatchResult = {
   processed: number;
   sent: number;
   skipped: number;
+  retried: number;
   failed: number;
+  exhausted: number;
 };
+
+type ProcessNotificationResult =
+  | "sent"
+  | "skipped"
+  | "pending"
+  | "retried"
+  | "failed"
+  | "exhausted";
+
+const MAX_DELIVERY_ATTEMPTS = 5;
+const RETRY_BACKOFF_MINUTES = [1, 5, 15, 60] as const;
+const CLAIM_LEASE_SECONDS = 5 * 60;
 
 const templateNames: Record<NotificationEventType, string> = {
   booking_confirmed: "booking-confirmed",
@@ -190,24 +216,26 @@ function getSubject(
 ): string {
   const record = asRecord(payload);
   const activityTitle = nestedString(record, ["booking", "activityTitle"]);
+  const accommodationTitle = nestedString(record, ["booking", "accommodationTitle"]);
+  const bookingTitle = activityTitle ?? accommodationTitle;
   switch (eventType) {
     case "booking_confirmed":
-      return activityTitle
-        ? `Booking confirmed: ${activityTitle}`
+      return bookingTitle
+        ? `Booking confirmed: ${bookingTitle}`
         : "Your booking is confirmed";
     case "booking_declined":
-      return activityTitle
-        ? `Booking declined: ${activityTitle}`
+      return bookingTitle
+        ? `Booking declined: ${bookingTitle}`
         : "Your booking was declined";
     case "booking_expired":
-      return activityTitle
-        ? `Booking expired: ${activityTitle}`
+      return bookingTitle
+        ? `Booking expired: ${bookingTitle}`
         : "Your booking request expired";
     case "payment_failed":
       return "Payment failed for your booking";
     case "provider_booking_pending":
-      return activityTitle
-        ? `New booking pending: ${activityTitle}`
+      return bookingTitle
+        ? `New booking pending: ${bookingTitle}`
         : "New booking pending approval";
     case "daily_digest":
       return "Your United IV daily digest";
@@ -279,18 +307,30 @@ async function loadPreferences(
   return data ? { ...defaultPreferences, ...data } : defaultPreferences;
 }
 
-async function updateNotificationStatus(
+async function updateClaimedNotification(
   supabase: SupabaseClient<Database>,
-  notificationId: string,
-  status: "sent" | "skipped" | "failed",
+  notification: NotificationEventRow,
+  update: Database["public"]["Tables"]["notification_events"]["Update"],
 ): Promise<void> {
-  const { error } = await supabase
+  let query = supabase
     .from("notification_events")
-    .update({ status })
-    .eq("id", notificationId);
+    .update(update)
+    .eq("id", notification.id)
+    .eq("status", "processing");
+
+  if (notification.claim_token) {
+    query = query.eq("claim_token", notification.claim_token);
+  }
+
+  const { data, error } = await query.select("id");
 
   if (error) {
     throw new Error(`Could not update notification status: ${error.message}`);
+  }
+  if (data?.length !== 1) {
+    throw new Error(
+      "Could not update notification status because the delivery claim was lost",
+    );
   }
 }
 
@@ -388,15 +428,29 @@ export async function sendEmailWithDeliveryWebhook(
     headers.authorization = `Bearer ${secret}`;
   }
 
-  const response = await fetch(getEmailDeliveryWebhookUrl(), {
-    method: "POST",
-    headers,
-    body: JSON.stringify(input),
-  });
+  let response: Response;
+  try {
+    response = await fetch(getEmailDeliveryWebhookUrl(), {
+      method: "POST",
+      headers,
+      body: JSON.stringify(input),
+    });
+  } catch (error) {
+    throw new NotificationDeliveryError("Email delivery webhook request failed", {
+      retryable: true,
+      cause: error,
+    });
+  }
   const text = await response.text();
 
   if (!response.ok) {
-    throw new Error(`Email delivery webhook failed with ${response.status}: ${text}`);
+    throw new NotificationDeliveryError(
+      `Email delivery webhook failed with ${response.status}: ${text}`,
+      {
+        retryable: response.status === 429 || response.status >= 500,
+        statusCode: response.status,
+      },
+    );
   }
 
   if (!text.trim()) {
@@ -423,36 +477,84 @@ export async function sendEmailWithDeliveryWebhook(
 
 async function sendEmailWithConfiguredTransport(
   input: EmailSendInput,
+  config: NotificationConfig,
 ): Promise<EmailSendResult> {
-  if (isResendEmailConfigured()) {
+  if (config.transport === "resend") {
     return sendEmailWithResend(input);
   }
-  if (hasEmailDeliveryWebhookConfigured()) {
+  if (config.transport === "webhook" && hasEmailDeliveryWebhookConfigured()) {
     return sendEmailWithDeliveryWebhook(input);
   }
-  throw new Error("Resend email delivery is not configured");
+  throw new Error(`Notification transport ${config.transport} is not configured`);
 }
 
-export async function processNotificationMessage(
+async function claimNotificationEvents(
   supabase: SupabaseClient<Database>,
-  message: { notificationId: string },
-  options: ProcessNotificationOptions = {},
-): Promise<"sent" | "skipped"> {
-  const notification = await loadNotificationEvent(
-    supabase,
-    message.notificationId,
-  );
+  input: { limit: number; notificationId?: string },
+): Promise<NotificationEventRow[]> {
+  const claimToken = randomUUID();
+  const { data, error } = await supabase.rpc("claim_notification_events", {
+    p_limit: input.limit,
+    p_claim_token: claimToken,
+    p_notification_id: input.notificationId ?? null,
+    p_lease_seconds: CLAIM_LEASE_SECONDS,
+  });
 
-  if (notification.status === "sent" || notification.status === "skipped") {
-    return notification.status;
+  if (error) {
+    throw new NotificationDeliveryError(
+      `Could not claim notification events: ${error.message}`,
+      { retryable: true },
+    );
   }
+  return data ?? [];
+}
+
+function retryDelayMinutes(attemptCount: number): number {
+  return (
+    RETRY_BACKOFF_MINUTES[
+      Math.min(Math.max(attemptCount - 1, 0), RETRY_BACKOFF_MINUTES.length - 1)
+    ] ?? RETRY_BACKOFF_MINUTES[RETRY_BACKOFF_MINUTES.length - 1]
+  );
+}
+
+function isRetryableProcessingError(error: unknown): boolean {
+  if (isRetryableNotificationError(error)) {
+    return true;
+  }
+  return (
+    error instanceof Error &&
+    /^(Could not (load|store|update)|Notification delivery database)/.test(
+      error.message,
+    )
+  );
+}
+
+async function processClaimedNotification(
+  supabase: SupabaseClient<Database>,
+  notification: NotificationEventRow,
+  options: ProcessNotificationOptions,
+): Promise<ProcessNotificationResult> {
+  const config = options.config ?? getNotificationConfig();
+  const eventType = notification.event_type as NotificationEventType;
+  const attempt = notification.attempt_count;
 
   try {
-    const eventType = notification.event_type as NotificationEventType;
     const preferences = await loadPreferences(supabase, notification.user_id);
     const decision = getPreferenceDecision(eventType, preferences);
     if (!decision.allowed) {
-      await updateNotificationStatus(supabase, notification.id, "skipped");
+      await updateClaimedNotification(supabase, notification, {
+        status: "skipped",
+        status_reason: decision.reason,
+        claim_token: null,
+        claimed_at: null,
+      });
+      logNotificationOutcome({
+        appEnv: config.appEnv,
+        notificationId: notification.id,
+        eventType,
+        attempt,
+        outcome: "skipped",
+      });
       return "skipped";
     }
 
@@ -460,13 +562,30 @@ export async function processNotificationMessage(
     if (!to) {
       throw new Error("Notification payload does not include a recipient email");
     }
+    if (!isNotificationRecipientAllowed(config, to)) {
+      await updateClaimedNotification(supabase, notification, {
+        status: "skipped",
+        status_reason: "recipient_not_allowlisted",
+        claim_token: null,
+        claimed_at: null,
+      });
+      logNotificationOutcome({
+        appEnv: config.appEnv,
+        notificationId: notification.id,
+        eventType,
+        attempt,
+        outcome: "recipient_not_allowlisted",
+      });
+      return "skipped";
+    }
 
-    const rendered = await renderNotificationEmail(
-      eventType,
-      notification.payload,
-      { templateDir: options.templateDir },
-    );
-    const result = await (options.sendEmail ?? sendEmailWithConfiguredTransport)({
+    const rendered = await renderNotificationEmail(eventType, notification.payload, {
+      templateDir: options.templateDir,
+    });
+    const result = await (
+      options.sendEmail ??
+      ((email) => sendEmailWithConfiguredTransport(email, config))
+    )({
       to,
       idempotencyKey: notification.dedupe_key ?? notification.id,
       ...rendered,
@@ -477,54 +596,129 @@ export async function processNotificationMessage(
       messageId: result.messageId,
       rawProviderPayload: result.rawResponse ?? { messageId: result.messageId },
     });
-    await updateNotificationStatus(supabase, notification.id, "sent");
+    await updateClaimedNotification(supabase, notification, {
+      status: "sent",
+      status_reason: null,
+      claim_token: null,
+      claimed_at: null,
+    });
+    logNotificationOutcome({
+      appEnv: config.appEnv,
+      notificationId: notification.id,
+      eventType,
+      attempt,
+      outcome: "sent",
+      providerMessageId: result.messageId,
+    });
     return "sent";
   } catch (error) {
-    await updateNotificationStatus(supabase, notification.id, "failed");
-    throw error;
+    const retryable = isRetryableProcessingError(error);
+    const exhausted = retryable && attempt >= MAX_DELIVERY_ATTEMPTS;
+    const statusReason =
+      error instanceof Error ? error.message.slice(0, 1000) : "Unknown delivery error";
+
+    if (retryable && !exhausted) {
+      const now = options.now ?? new Date();
+      const nextAttemptAt = new Date(
+        now.getTime() + retryDelayMinutes(attempt) * 60 * 1000,
+      ).toISOString();
+      await updateClaimedNotification(supabase, notification, {
+        status: "pending",
+        status_reason: statusReason,
+        next_attempt_at: nextAttemptAt,
+        claim_token: null,
+        claimed_at: null,
+      });
+      logNotificationOutcome({
+        appEnv: config.appEnv,
+        notificationId: notification.id,
+        eventType,
+        attempt,
+        outcome: "retry_scheduled",
+      });
+      return "retried";
+    }
+
+    await updateClaimedNotification(supabase, notification, {
+      status: "failed",
+      status_reason: statusReason,
+      claim_token: null,
+      claimed_at: null,
+    });
+    logNotificationOutcome({
+      appEnv: config.appEnv,
+      notificationId: notification.id,
+      eventType,
+      attempt,
+      outcome: exhausted ? "retry_exhausted" : "failed",
+    });
+    return exhausted ? "exhausted" : "failed";
   }
 }
 
-async function loadProcessableNotificationIds(
+export async function processNotificationMessage(
   supabase: SupabaseClient<Database>,
-  limit: number,
-): Promise<string[]> {
-  const { data, error } = await supabase
-    .from("notification_events")
-    .select("id")
-    .eq("channel", "email")
-    .in("status", ["pending", "published"])
-    .order("created_at", { ascending: true })
-    .limit(limit);
-
-  if (error) {
-    throw new Error(`Could not load queued notifications: ${error.message}`);
+  message: { notificationId: string },
+  options: ProcessNotificationOptions = {},
+): Promise<ProcessNotificationResult> {
+  const config = options.config ?? getNotificationConfig();
+  if (!config.deliveryEnabled) {
+    return "pending";
   }
 
-  return (data ?? []).map((row) => row.id);
+  const existing = await loadNotificationEvent(supabase, message.notificationId);
+  if (existing.status === "sent" || existing.status === "skipped") {
+    return existing.status;
+  }
+  if (existing.status === "failed") {
+    return "failed";
+  }
+  const [claimed] = await claimNotificationEvents(supabase, {
+    limit: 1,
+    notificationId: message.notificationId,
+  });
+  if (!claimed) {
+    return "pending";
+  }
+  return processClaimedNotification(supabase, claimed, { ...options, config });
 }
 
 export async function processQueuedNotificationEmails(
   supabase: SupabaseClient<Database>,
   options: ProcessBatchOptions = {},
 ): Promise<ProcessBatchResult> {
+  const config = options.config ?? getNotificationConfig();
   const limit = options.limit ?? 25;
-  const notificationIds = await loadProcessableNotificationIds(supabase, limit);
+  if (!config.deliveryEnabled) {
+    return {
+      processed: 0,
+      sent: 0,
+      skipped: 0,
+      retried: 0,
+      failed: 0,
+      exhausted: 0,
+    };
+  }
+  const notifications = await claimNotificationEvents(supabase, { limit });
   const result: ProcessBatchResult = {
-    processed: notificationIds.length,
+    processed: notifications.length,
     sent: 0,
     skipped: 0,
+    retried: 0,
     failed: 0,
+    exhausted: 0,
   };
 
-  for (const notificationId of notificationIds) {
+  for (const notification of notifications) {
     try {
-      const status = await processNotificationMessage(
+      const status = await processClaimedNotification(
         supabase,
-        { notificationId },
-        options,
+        notification,
+        { ...options, config },
       );
-      result[status] += 1;
+      if (status !== "pending") {
+        result[status] += 1;
+      }
     } catch {
       result.failed += 1;
     }

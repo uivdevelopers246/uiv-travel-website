@@ -30,6 +30,10 @@ const cartServiceMocks = vi.hoisted(() => ({
   deleteAllCartLinesForUser: vi.fn(),
 }));
 
+const providerNoticeMocks = vi.hoisted(() => ({
+  safeSendProviderBookingPendingNotice: vi.fn(),
+}));
+
 vi.mock("stripe", () => ({
   default: class MockStripe {
     webhooks = { constructEvent: vi.fn() };
@@ -73,6 +77,8 @@ vi.mock("@/lib/cart/service", async (importOriginal) => {
     deleteAllCartLinesForUser: cartServiceMocks.deleteAllCartLinesForUser,
   };
 });
+
+vi.mock("@/lib/notifications/provider-notices", () => providerNoticeMocks);
 
 import { fulfillCheckoutSetupSessionCompleted } from "./server";
 
@@ -246,6 +252,7 @@ describe("fulfillCheckoutSetupSessionCompleted (mixed cart stays)", () => {
     orderServiceMocks.updateOrderAwaitingVendorApprovalFromSetup.mockReset();
     orderServiceMocks.revertOrderToAwaitingPaymentAfterSetupFailure.mockReset();
     cartServiceMocks.deleteAllCartLinesForUser.mockReset();
+    providerNoticeMocks.safeSendProviderBookingPendingNotice.mockReset();
 
     activityBookingMocks.listActivityBookings.mockResolvedValue([]);
     accommodationBookingMocks.listAccommodationBookings.mockResolvedValue([]);
@@ -254,6 +261,9 @@ describe("fulfillCheckoutSetupSessionCompleted (mixed cart stays)", () => {
       undefined,
     );
     cartServiceMocks.deleteAllCartLinesForUser.mockResolvedValue(undefined);
+    providerNoticeMocks.safeSendProviderBookingPendingNotice.mockResolvedValue(
+      undefined,
+    );
     orderServiceMocks.updateOrderAwaitingVendorApprovalFromSetup.mockResolvedValue(
       true,
     );
@@ -323,6 +333,15 @@ describe("fulfillCheckoutSetupSessionCompleted (mixed cart stays)", () => {
       expect.anything(),
       "user-1",
     );
+    expect(providerNoticeMocks.safeSendProviderBookingPendingNotice).toHaveBeenCalledWith(
+      expect.anything(),
+      "ab-1",
+    );
+    expect(providerNoticeMocks.safeSendProviderBookingPendingNotice).toHaveBeenCalledWith(
+      expect.anything(),
+      "stay-1",
+      "accommodation",
+    );
     expect(tablesCalled).toContain("stripe_webhook_events");
   });
 
@@ -354,6 +373,11 @@ describe("fulfillCheckoutSetupSessionCompleted (mixed cart stays)", () => {
     expect(
       accommodationBookingMocks.createAccommodationBookingAfterSetup,
     ).toHaveBeenCalledTimes(1);
+    expect(providerNoticeMocks.safeSendProviderBookingPendingNotice).toHaveBeenCalledWith(
+      expect.anything(),
+      "stay-1",
+      "accommodation",
+    );
     expect(cartServiceMocks.deleteAllCartLinesForUser).toHaveBeenCalled();
   });
 

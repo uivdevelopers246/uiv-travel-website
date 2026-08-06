@@ -41,6 +41,7 @@ describe("POST /api/webhooks/resend/events", () => {
     notificationMocks.parseResendWebhookPayload.mockReturnValue({
       type: "email.delivered",
       data: { email_id: "resend-email-1" },
+      providerEventId: "msg_123",
     });
     notificationMocks.processResendWebhookFeedback.mockResolvedValue({
       status: "processed",
@@ -71,11 +72,16 @@ describe("POST /api/webhooks/resend/events", () => {
       rawBody,
       expect.any(Headers),
     );
+    expect(notificationMocks.parseResendWebhookPayload).toHaveBeenCalledWith(
+      JSON.parse(rawBody),
+      "msg_123",
+    );
     expect(notificationMocks.processResendWebhookFeedback).toHaveBeenCalledWith(
       { service: true },
       {
         type: "email.delivered",
         data: { email_id: "resend-email-1" },
+        providerEventId: "msg_123",
       },
     );
   });

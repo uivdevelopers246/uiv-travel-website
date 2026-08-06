@@ -15,7 +15,10 @@ export async function POST(request: Request) {
   try {
     const rawBody = await request.text();
     verifyResendWebhookSignature(rawBody, request.headers);
-    payload = parseResendWebhookPayload(JSON.parse(rawBody));
+    payload = parseResendWebhookPayload(
+      JSON.parse(rawBody),
+      request.headers.get("svix-id"),
+    );
   } catch {
     return NextResponse.json({ error: "Invalid Resend webhook" }, { status: 400 });
   }

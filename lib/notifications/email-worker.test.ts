@@ -7,6 +7,16 @@ import {
   processQueuedNotificationEmails,
   renderNotificationEmail,
 } from "./email-worker";
+import type { NotificationConfig } from "./config";
+import { NotificationDeliveryError } from "./delivery-error";
+
+const testConfig: NotificationConfig = {
+  appEnv: "local",
+  deliveryEnabled: true,
+  transport: "resend",
+  recipientPolicy: "unrestricted",
+  recipientAllowlist: new Set(),
+};
 
 const basePayload = {
   recipient: {
@@ -25,12 +35,36 @@ const basePayload = {
     slotStartsAt: "2026-01-05T15:00:00.000Z",
     participants: 2,
   },
+  provider: {
+    name: "Island Adventures",
+    email: "provider@example.com",
+  },
+  summary: {
+    newBookings: 1,
+    pendingApprovals: 1,
+    expiringApprovals: 0,
+    confirmedBookings: 1,
+    declinedBookings: 0,
+    failedPayments: 0,
+  },
 };
+
+const allEventTypes = [
+  "booking_confirmed",
+  "booking_declined",
+  "booking_expired",
+  "payment_completed",
+  "payment_failed",
+  "order_receipt",
+  "provider_booking_pending",
+  "daily_digest",
+] as const;
 
 function makeSupabase(overrides: {
   notificationStatus?: string;
   eventType?: string;
   preferences?: Record<string, boolean | string | null> | null;
+  attemptCount?: number;
 } = {}) {
   const updates: unknown[] = [];
   const inserts: unknown[] = [];
@@ -44,6 +78,20 @@ function makeSupabase(overrides: {
     dedupe_key: "booking:booking-1:booking_confirmed",
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
+    attempt_count: overrides.attemptCount ?? 0,
+    next_attempt_at: "2026-01-01T00:00:00.000Z",
+    claimed_at: null,
+    claim_token: null,
+    last_attempt_at: null,
+    status_reason: null,
+  };
+
+  const updateResult = {
+    eq: vi.fn().mockReturnThis(),
+    select: vi.fn().mockResolvedValue({
+      data: [{ id: "notification-1" }],
+      error: null,
+    }),
   };
 
   const supabase = {
@@ -68,9 +116,7 @@ function makeSupabase(overrides: {
           single: vi.fn().mockResolvedValue({ data: notification, error: null }),
           update: vi.fn((value) => {
             updates.push(value);
-            return {
-              eq: vi.fn().mockResolvedValue({ error: null }),
-            };
+            return updateResult;
           }),
         };
       }
@@ -99,6 +145,21 @@ function makeSupabase(overrides: {
       }
       throw new Error(`Unexpected table ${table}`);
     }),
+    rpc: vi.fn().mockImplementation(() =>
+      Promise.resolve({
+        data: [
+          {
+            ...notification,
+            status: "processing",
+            attempt_count: overrides.attemptCount ?? 1,
+            claimed_at: "2026-01-01T00:00:00.000Z",
+            claim_token: "00000000-0000-4000-8000-000000000001",
+            last_attempt_at: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+        error: null,
+      }),
+    ),
     __updates: updates,
     __inserts: inserts,
   };
@@ -117,6 +178,36 @@ describe("email-worker", () => {
     expect(rendered.text).toContain("Experience: Sunset Cruise");
   });
 
+  it.each(allEventTypes)("renders the %s template", async (eventType) => {
+    const rendered = await renderNotificationEmail(eventType, basePayload);
+
+    expect(rendered.subject.length).toBeGreaterThan(0);
+    expect(rendered.html).toContain("<!doctype html>");
+    expect(rendered.text.trim().length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    "booking_confirmed",
+    "booking_declined",
+    "booking_expired",
+    "provider_booking_pending",
+  ] as const)("renders accommodation details in the %s template", async (eventType) => {
+    const rendered = await renderNotificationEmail(eventType, {
+      ...basePayload,
+      booking: {
+        id: "stay-1",
+        accommodationTitle: "Ocean View Suite",
+        checkIn: "2026-02-01",
+        checkOut: "2026-02-05",
+        guests: 2,
+      },
+    });
+
+    expect(rendered.subject).toContain("Ocean View Suite");
+    expect(rendered.text).toContain("Stay: Ocean View Suite");
+    expect(rendered.html).toContain("Ocean View Suite");
+  });
+
   it("sends through the configured adapter, stores the provider message id, and marks the event sent", async () => {
     const supabase = makeSupabase();
     const sendEmail = vi.fn().mockResolvedValue({
@@ -129,7 +220,7 @@ describe("email-worker", () => {
       {
         notificationId: "notification-1",
       },
-      { sendEmail },
+      { sendEmail, config: testConfig },
     );
 
     expect(sendEmail).toHaveBeenCalledWith(
@@ -139,6 +230,12 @@ describe("email-worker", () => {
         subject: expect.stringContaining("Sunset Cruise"),
       }),
     );
+    expect(supabase.rpc).toHaveBeenCalledWith("claim_notification_events", {
+      p_limit: 1,
+      p_claim_token: expect.any(String),
+      p_notification_id: "notification-1",
+      p_lease_seconds: 300,
+    });
     expect(supabase.__inserts).toEqual([
       expect.objectContaining({
         notification_id: "notification-1",
@@ -146,7 +243,9 @@ describe("email-worker", () => {
         event_type: "send",
       }),
     ]);
-    expect(supabase.__updates).toContainEqual({ status: "sent" });
+    expect(supabase.__updates).toContainEqual(
+      expect.objectContaining({ status: "sent", claim_token: null }),
+    );
   });
 
   it("sends transactional booking email even when optional booking updates are disabled", async () => {
@@ -168,11 +267,13 @@ describe("email-worker", () => {
       {
         notificationId: "notification-1",
       },
-      { sendEmail },
+      { sendEmail, config: testConfig },
     );
 
     expect(sendEmail).toHaveBeenCalledOnce();
-    expect(supabase.__updates).toContainEqual({ status: "sent" });
+    expect(supabase.__updates).toContainEqual(
+      expect.objectContaining({ status: "sent" }),
+    );
   });
 
   it("marks daily digest skipped when optional digest email is disabled", async () => {
@@ -192,11 +293,16 @@ describe("email-worker", () => {
       {
         notificationId: "notification-1",
       },
-      { sendEmail },
+      { sendEmail, config: testConfig },
     );
 
     expect(sendEmail).not.toHaveBeenCalled();
-    expect(supabase.__updates).toContainEqual({ status: "skipped" });
+    expect(supabase.__updates).toContainEqual(
+      expect.objectContaining({
+        status: "skipped",
+        status_reason: "daily_digest_disabled",
+      }),
+    );
   });
 
   it("marks transactional email skipped when the address is system suppressed", async () => {
@@ -218,11 +324,13 @@ describe("email-worker", () => {
       {
         notificationId: "notification-1",
       },
-      { sendEmail },
+      { sendEmail, config: testConfig },
     );
 
     expect(sendEmail).not.toHaveBeenCalled();
-    expect(supabase.__updates).toContainEqual({ status: "skipped" });
+    expect(supabase.__updates).toContainEqual(
+      expect.objectContaining({ status: "skipped" }),
+    );
   });
 
   it("processes queued notification records", async () => {
@@ -234,6 +342,7 @@ describe("email-worker", () => {
 
     const result = await processQueuedNotificationEmails(supabase, {
       sendEmail,
+      config: testConfig,
     });
 
     expect(sendEmail).toHaveBeenCalledOnce();
@@ -241,7 +350,143 @@ describe("email-worker", () => {
       processed: 1,
       sent: 1,
       skipped: 0,
+      retried: 0,
       failed: 0,
+      exhausted: 0,
     });
+    expect(supabase.rpc).toHaveBeenCalledWith("claim_notification_events", {
+      p_limit: 25,
+      p_claim_token: expect.any(String),
+      p_notification_id: null,
+      p_lease_seconds: 300,
+    });
+  });
+
+  it("leaves work queued without claiming when delivery is disabled", async () => {
+    const supabase = makeSupabase();
+    const config: NotificationConfig = {
+      ...testConfig,
+      deliveryEnabled: false,
+    };
+
+    await expect(
+      processNotificationMessage(
+        supabase,
+        { notificationId: "notification-1" },
+        { config },
+      ),
+    ).resolves.toBe("pending");
+    await expect(
+      processQueuedNotificationEmails(supabase, { config }),
+    ).resolves.toEqual({
+      processed: 0,
+      sent: 0,
+      skipped: 0,
+      retried: 0,
+      failed: 0,
+      exhausted: 0,
+    });
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("skips staging recipients outside the configured allowlist", async () => {
+    const supabase = makeSupabase();
+    const sendEmail = vi.fn();
+    const config: NotificationConfig = {
+      ...testConfig,
+      appEnv: "staging",
+      recipientPolicy: "allowlist",
+      recipientAllowlist: new Set(["qa@example.com"]),
+    };
+
+    const result = await processNotificationMessage(
+      supabase,
+      { notificationId: "notification-1" },
+      { sendEmail, config },
+    );
+
+    expect(result).toBe("skipped");
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(supabase.__updates).toContainEqual(
+      expect.objectContaining({
+        status: "skipped",
+        status_reason: "recipient_not_allowlisted",
+      }),
+    );
+  });
+
+  it.each([
+    [1, "2026-01-01T00:01:00.000Z"],
+    [2, "2026-01-01T00:05:00.000Z"],
+    [3, "2026-01-01T00:15:00.000Z"],
+    [4, "2026-01-01T01:00:00.000Z"],
+  ])(
+    "schedules retry attempt %s with the expected backoff",
+    async (attemptCount, nextAttemptAt) => {
+    const supabase = makeSupabase({ attemptCount });
+    const sendEmail = vi.fn().mockRejectedValue(
+      new NotificationDeliveryError("Resend email delivery failed with 503", {
+        retryable: true,
+        statusCode: 503,
+      }),
+    );
+
+    const result = await processNotificationMessage(
+      supabase,
+      { notificationId: "notification-1" },
+      {
+        sendEmail,
+        config: testConfig,
+        now: new Date("2026-01-01T00:00:00.000Z"),
+      },
+    );
+
+    expect(result).toBe("retried");
+    expect(supabase.__updates).toContainEqual(
+      expect.objectContaining({
+        status: "pending",
+        next_attempt_at: nextAttemptAt,
+      }),
+    );
+    },
+  );
+
+  it("marks non-retryable provider failures terminal", async () => {
+    const supabase = makeSupabase();
+    const sendEmail = vi.fn().mockRejectedValue(
+      new NotificationDeliveryError("Resend email delivery failed with 403", {
+        retryable: false,
+        statusCode: 403,
+      }),
+    );
+
+    const result = await processNotificationMessage(
+      supabase,
+      { notificationId: "notification-1" },
+      { sendEmail, config: testConfig },
+    );
+
+    expect(result).toBe("failed");
+    expect(supabase.__updates).toContainEqual(
+      expect.objectContaining({ status: "failed" }),
+    );
+  });
+
+  it("exhausts transient delivery after five attempts", async () => {
+    const supabase = makeSupabase({ attemptCount: 5 });
+    const sendEmail = vi.fn().mockRejectedValue(
+      new NotificationDeliveryError("network unavailable", { retryable: true }),
+    );
+
+    const result = await processNotificationMessage(
+      supabase,
+      { notificationId: "notification-1" },
+      { sendEmail, config: testConfig },
+    );
+
+    expect(result).toBe("exhausted");
+    expect(supabase.__updates).toContainEqual(
+      expect.objectContaining({ status: "failed" }),
+    );
   });
 });

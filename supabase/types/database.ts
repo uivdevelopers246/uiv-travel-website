@@ -579,6 +579,7 @@ export type Database = {
           event_type: string
           id: string
           notification_id: string
+          provider_event_id: string | null
           raw_provider_payload: Json
           provider_message_id: string
           updated_at: string
@@ -588,6 +589,7 @@ export type Database = {
           event_type: string
           id?: string
           notification_id: string
+          provider_event_id?: string | null
           raw_provider_payload?: Json
           provider_message_id: string
           updated_at?: string
@@ -597,6 +599,7 @@ export type Database = {
           event_type?: string
           id?: string
           notification_id?: string
+          provider_event_id?: string | null
           raw_provider_payload?: Json
           provider_message_id?: string
           updated_at?: string
@@ -613,35 +616,53 @@ export type Database = {
       }
       notification_events: {
         Row: {
+          attempt_count: number
           channel: string
+          claim_token: string | null
+          claimed_at: string | null
           created_at: string
           dedupe_key: string | null
           event_type: string
           id: string
+          last_attempt_at: string | null
+          next_attempt_at: string
           payload: Json
           status: string
+          status_reason: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
+          attempt_count?: number
           channel?: string
+          claim_token?: string | null
+          claimed_at?: string | null
           created_at?: string
           dedupe_key?: string | null
           event_type: string
           id?: string
+          last_attempt_at?: string | null
+          next_attempt_at?: string
           payload?: Json
           status?: string
+          status_reason?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
+          attempt_count?: number
           channel?: string
+          claim_token?: string | null
+          claimed_at?: string | null
           created_at?: string
           dedupe_key?: string | null
           event_type?: string
           id?: string
+          last_attempt_at?: string | null
+          next_attempt_at?: string
           payload?: Json
           status?: string
+          status_reason?: string | null
           updated_at?: string
           user_id?: string
         }
@@ -891,6 +912,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_notification_events: {
+        Args: {
+          p_claim_token: string
+          p_lease_seconds?: number
+          p_limit: number
+          p_notification_id?: string | null
+        }
+        Returns: Database["public"]["Tables"]["notification_events"]["Row"][]
+      }
       accommodation_stay_is_held: {
         Args: {
           p_accommodation_id: string

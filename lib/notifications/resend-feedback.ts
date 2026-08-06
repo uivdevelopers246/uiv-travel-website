@@ -5,15 +5,26 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database, Json } from "@/supabase/types/database";
 
-type ResendFeedbackType = "delivery" | "bounce" | "complaint" | "reject";
+type ResendFeedbackType =
+  | "sent"
+  | "delivered"
+  | "delayed"
+  | "failed"
+  | "bounced"
+  | "complained"
+  | "suppressed";
 
 type ResendWebhookPayload = {
   type: string;
   data: Record<string, unknown>;
+  providerEventId: string | null;
 };
 
 type ResendFeedbackResult =
-  | { status: "ignored"; reason: "unsupported_event" | "unknown_message" }
+  | {
+      status: "ignored";
+      reason: "unsupported_event" | "unknown_message" | "duplicate_event";
+    }
   | { status: "processed"; eventType: ResendFeedbackType; suppressed: boolean };
 
 const SIGNATURE_TOLERANCE_SECONDS = 5 * 60;
@@ -101,7 +112,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function parseResendWebhookPayload(value: unknown): ResendWebhookPayload {
+export function parseResendWebhookPayload(
+  value: unknown,
+  providerEventId: string | null = null,
+): ResendWebhookPayload {
   if (!isRecord(value)) {
     throw new Error("Resend webhook payload must be an object");
   }
@@ -111,21 +125,26 @@ export function parseResendWebhookPayload(value: unknown): ResendWebhookPayload 
   return {
     type: value.type,
     data: value.data,
+    providerEventId,
   };
 }
 
 function mapResendEventType(type: string): ResendFeedbackType | null {
   switch (type) {
     case "email.sent":
+      return "sent";
     case "email.delivered":
-      return "delivery";
+      return "delivered";
     case "email.bounced":
-      return "bounce";
+      return "bounced";
     case "email.complained":
-      return "complaint";
+      return "complained";
     case "email.delivery_delayed":
+      return "delayed";
     case "email.failed":
-      return "reject";
+      return "failed";
+    case "email.suppressed":
+      return "suppressed";
     default:
       return null;
   }
@@ -191,7 +210,7 @@ async function suppressEmailForNotification(
   supabase: SupabaseClient<Database>,
   input: {
     notificationId: string;
-    reason: "bounce" | "complaint";
+    reason: "bounce" | "complaint" | "provider_suppressed";
     address: string | null;
   },
 ): Promise<void> {
@@ -235,19 +254,44 @@ export async function processResendWebhookFeedback(
   const { error } = await supabase.from("email_delivery_events").insert({
     notification_id: notificationId,
     provider_message_id: providerMessageId,
+    provider_event_id: payload.providerEventId,
     event_type: eventType,
     raw_provider_payload: payload as unknown as Json,
   });
 
+  const suppressed =
+    eventType === "bounced" ||
+    eventType === "complained" ||
+    eventType === "suppressed";
+
+  if (error && error.code === "23505" && payload.providerEventId) {
+    if (suppressed) {
+      await suppressEmailForNotification(supabase, {
+        notificationId,
+        reason:
+          eventType === "complained"
+            ? "complaint"
+            : eventType === "suppressed"
+              ? "provider_suppressed"
+              : "bounce",
+        address: firstEmailAddress(payload),
+      });
+    }
+    return { status: "ignored", reason: "duplicate_event" };
+  }
   if (error) {
     throw new Error(`Could not store Resend feedback event: ${error.message}`);
   }
 
-  const suppressed = eventType === "bounce" || eventType === "complaint";
   if (suppressed) {
     await suppressEmailForNotification(supabase, {
       notificationId,
-      reason: eventType === "complaint" ? "complaint" : "bounce",
+      reason:
+        eventType === "complained"
+          ? "complaint"
+          : eventType === "suppressed"
+            ? "provider_suppressed"
+            : "bounce",
       address: firstEmailAddress(payload),
     });
   }

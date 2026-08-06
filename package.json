@@ -10,6 +10,9 @@
     "db:migrate": "supabase db push",
     "db:reset": "supabase db reset",
     "db:seed": "tsx scripts/seed.ts",
+    "notifications:check": "node --conditions=react-server --import tsx scripts/notifications-check.ts",
+    "notifications:test": "node --conditions=react-server --import tsx scripts/notifications-test.ts",
+    "notifications:drain": "node --import tsx scripts/notifications-drain.ts",
     "test": "vitest",
     "test:run": "vitest run"
   },
@@ -22,6 +25,7 @@
     "next": "^16.2.6",
     "react": "19.2.0",
     "react-dom": "19.2.0",
+    "resend": "^6.16.0",
     "server-only": "^0.0.1",
     "stripe": "^22.0.0"
   },
@@ -35,6 +39,7 @@
     "eslint-config-next": "16.0.3",
     "supabase": "^2.88.1",
     "tailwindcss": "^4",
+    "tsx": "^4.23.5",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },

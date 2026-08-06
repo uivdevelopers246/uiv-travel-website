@@ -25,7 +25,7 @@ function signedHeaders(rawBody: string, timestamp = Math.floor(Date.now() / 1000
   });
 }
 
-function makeSupabase() {
+function makeSupabase(insertError: { code: string; message: string } | null = null) {
   const inserts: unknown[] = [];
   const upserts: unknown[] = [];
   const supabase = {
@@ -42,7 +42,7 @@ function makeSupabase() {
           }),
           insert: vi.fn((value) => {
             inserts.push(value);
-            return Promise.resolve({ error: null });
+            return Promise.resolve({ error: insertError });
           }),
         };
       }
@@ -97,32 +97,41 @@ describe("resend feedback", () => {
 
   it("stores delivery lifecycle events", async () => {
     const supabase = makeSupabase();
-    const payload = parseResendWebhookPayload({
-      type: "email.delivered",
-      data: { email_id: "resend-email-1", to: ["traveler@example.com"] },
-    });
+    const payload = parseResendWebhookPayload(
+      {
+        type: "email.delivered",
+        data: { email_id: "resend-email-1", to: ["traveler@example.com"] },
+      },
+      "svix-event-1",
+    );
 
     const result = await processResendWebhookFeedback(supabase, payload);
 
     expect(result).toEqual({
       status: "processed",
-      eventType: "delivery",
+      eventType: "delivered",
       suppressed: false,
     });
     expect(supabase.__inserts).toEqual([
       expect.objectContaining({
         notification_id: "notification-1",
         provider_message_id: "resend-email-1",
-        event_type: "delivery",
+        provider_event_id: "svix-event-1",
+        event_type: "delivered",
       }),
     ]);
     expect(supabase.__upserts).toEqual([]);
   });
 
-  it("suppresses future email on bounce or complaint", async () => {
+  it.each([
+    ["email.bounced", "bounced", "bounce"],
+    ["email.complained", "complained", "complaint"],
+  ])(
+    "suppresses future email on %s",
+    async (providerType, eventType, suppressionReason) => {
     const supabase = makeSupabase();
     const payload = parseResendWebhookPayload({
-      type: "email.bounced",
+      type: providerType,
       data: { email_id: "resend-email-1", to: ["traveler@example.com"] },
     });
 
@@ -130,15 +139,83 @@ describe("resend feedback", () => {
 
     expect(result).toEqual({
       status: "processed",
-      eventType: "bounce",
+      eventType,
       suppressed: true,
     });
     expect(supabase.__upserts).toEqual([
       expect.objectContaining({
         user_id: "user-1",
-        email_suppressed_reason: "bounce",
+        email_suppressed_reason: suppressionReason,
         email_suppressed_address: "traveler@example.com",
       }),
     ]);
+    },
+  );
+
+  it.each([
+    ["email.sent", "sent"],
+    ["email.delivery_delayed", "delayed"],
+    ["email.failed", "failed"],
+  ])("records %s as %s", async (providerType, eventType) => {
+    const supabase = makeSupabase();
+    const payload = parseResendWebhookPayload({
+      type: providerType,
+      data: { email_id: "resend-email-1" },
+    });
+
+    await expect(processResendWebhookFeedback(supabase, payload)).resolves.toEqual({
+      status: "processed",
+      eventType,
+      suppressed: false,
+    });
+  });
+
+  it("suppresses future email when Resend reports provider suppression", async () => {
+    const supabase = makeSupabase();
+    const payload = parseResendWebhookPayload({
+      type: "email.suppressed",
+      data: { email_id: "resend-email-1", to: ["traveler@example.com"] },
+    });
+
+    await expect(processResendWebhookFeedback(supabase, payload)).resolves.toEqual({
+      status: "processed",
+      eventType: "suppressed",
+      suppressed: true,
+    });
+    expect(supabase.__upserts).toContainEqual(
+      expect.objectContaining({
+        email_suppressed_reason: "provider_suppressed",
+      }),
+    );
+  });
+
+  it("ignores a retried Svix event that was already stored", async () => {
+    const supabase = makeSupabase({ code: "23505", message: "duplicate" });
+    const payload = parseResendWebhookPayload(
+      { type: "email.delivered", data: { email_id: "resend-email-1" } },
+      "svix-duplicate",
+    );
+
+    await expect(processResendWebhookFeedback(supabase, payload)).resolves.toEqual({
+      status: "ignored",
+      reason: "duplicate_event",
+    });
+  });
+
+  it("re-applies suppression when a permanent feedback event is retried", async () => {
+    const supabase = makeSupabase({ code: "23505", message: "duplicate" });
+    const payload = parseResendWebhookPayload(
+      {
+        type: "email.bounced",
+        data: { email_id: "resend-email-1", to: ["traveler@example.com"] },
+      },
+      "svix-duplicate-bounce",
+    );
+
+    await expect(processResendWebhookFeedback(supabase, payload)).resolves.toEqual({
+      status: "ignored",
+      reason: "duplicate_event",
+    });
+    expect(supabase.__upserts).toHaveLength(1);
   });
 });

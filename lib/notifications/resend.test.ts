@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { isResendEmailConfigured, sendEmailWithResend } from "./resend";
+import { NotificationDeliveryError } from "./delivery-error";
 
 beforeEach(() => {
   vi.unstubAllEnvs();
@@ -61,5 +62,51 @@ describe("resend transport", () => {
         }),
       }),
     );
+  });
+
+  it.each([
+    [429, true],
+    [500, true],
+    [503, true],
+    [400, false],
+    [403, false],
+  ])("classifies HTTP %s retryability", async (status, retryable) => {
+    vi.stubEnv("RESEND_API_KEY", "re_test");
+    vi.stubEnv("EMAIL_FROM", "UIV Travel <bookings@example.com>");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status,
+        text: vi.fn().mockResolvedValue("provider error"),
+      }),
+    );
+
+    const promise = sendEmailWithResend({
+      to: "traveler@example.com",
+      subject: "Test",
+      html: "<p>Test</p>",
+      text: "Test",
+    });
+
+    await expect(promise).rejects.toMatchObject<Partial<NotificationDeliveryError>>({
+      retryable,
+      statusCode: status,
+    });
+  });
+
+  it("classifies network failures as retryable", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test");
+    vi.stubEnv("EMAIL_FROM", "UIV Travel <bookings@example.com>");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("network down")));
+
+    await expect(
+      sendEmailWithResend({
+        to: "traveler@example.com",
+        subject: "Test",
+        html: "<p>Test</p>",
+        text: "Test",
+      }),
+    ).rejects.toMatchObject({ retryable: true });
   });
 });

@@ -5,8 +5,13 @@
         <mj-text font-size="20px" font-weight="700" color="#16251f">Booking request expired</mj-text>
         <mj-text font-size="15px" color="#24342e">Hi {{recipientName}}, this pending booking was not approved before the deadline.</mj-text>
         <mj-table color="#24342e" font-size="14px">
+          {{#if booking.accommodationTitle}}
+          <tr><td>Stay</td><td align="right">{{booking.accommodationTitle}}</td></tr>
+          <tr><td>Requested dates</td><td align="right">{{booking.checkIn}} to {{booking.checkOut}}</td></tr>
+          {{else}}
           <tr><td>Experience</td><td align="right">{{booking.activityTitle}}</td></tr>
           <tr><td>Requested time</td><td align="right">{{formatDateTime booking.slotStartsAt}}</td></tr>
+          {{/if}}
           <tr><td>Order</td><td align="right">{{order.id}}</td></tr>
         </mj-table>
       </mj-column>

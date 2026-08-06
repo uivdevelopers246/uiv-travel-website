@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Json } from "@/supabase/types/database";
 import type { EmailSendInput, EmailSendResult } from "./email-worker";
+import { NotificationDeliveryError } from "./delivery-error";
 
 const RESEND_EMAILS_ENDPOINT = "https://api.resend.com/emails";
 
@@ -53,21 +54,35 @@ export async function sendEmailWithResend(
     headers["idempotency-key"] = input.idempotencyKey;
   }
 
-  const response = await fetch(RESEND_EMAILS_ENDPOINT, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      from: getEmailFrom(),
-      to: input.to,
-      subject: input.subject,
-      html: input.html,
-      text: input.text,
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(RESEND_EMAILS_ENDPOINT, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        from: getEmailFrom(),
+        to: input.to,
+        subject: input.subject,
+        html: input.html,
+        text: input.text,
+      }),
+    });
+  } catch (error) {
+    throw new NotificationDeliveryError("Resend email delivery request failed", {
+      retryable: true,
+      cause: error,
+    });
+  }
   const text = await response.text();
 
   if (!response.ok) {
-    throw new Error(`Resend email delivery failed with ${response.status}: ${text}`);
+    throw new NotificationDeliveryError(
+      `Resend email delivery failed with ${response.status}: ${text}`,
+      {
+        retryable: response.status === 429 || response.status >= 500,
+        statusCode: response.status,
+      },
+    );
   }
 
   try {

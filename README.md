@@ -4,6 +4,8 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+Notification environment setup, testing, retries, and rollback are documented in [docs/notifications.md](docs/notifications.md).
+
 First, run the development server:
 
 ```bash

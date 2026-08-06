@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getActivityBookingById } from "@/lib/activity-bookings/service";
+import { getAccommodationBookingById } from "@/lib/accommodation-bookings/service";
 import { getOrderById } from "@/lib/orders/service";
 import type { Database } from "@/supabase/types/database";
 import { createNotificationEvent } from "./events";
@@ -27,7 +28,7 @@ async function loadVendor(
   return data;
 }
 
-export async function sendProviderBookingPendingNotice(
+async function sendActivityProviderBookingPendingNotice(
   supabase: SupabaseClient<Database>,
   bookingId: string,
 ): Promise<VendorNoticeResult> {
@@ -121,12 +122,105 @@ export async function sendProviderBookingPendingNotice(
   return { queued: true, notificationId: notification.id };
 }
 
+async function sendAccommodationProviderBookingPendingNotice(
+  supabase: SupabaseClient<Database>,
+  bookingId: string,
+): Promise<VendorNoticeResult> {
+  const booking = await getAccommodationBookingById(supabase, bookingId);
+  if (!booking || !booking.order_id) {
+    return { queued: false, reason: "missing_context" };
+  }
+
+  const [order, vendor, accommodationResult, profileResult] = await Promise.all([
+    getOrderById(supabase, booking.order_id),
+    loadVendor(supabase, booking.vendor_id),
+    supabase
+      .from("accommodations")
+      .select("name")
+      .eq("id", booking.accommodation_id)
+      .maybeSingle(),
+    supabase
+      .from("profiles")
+      .select("display_name")
+      .eq("id", booking.user_id)
+      .maybeSingle(),
+  ]);
+
+  if (!order || !vendor) {
+    return { queued: false, reason: "missing_context" };
+  }
+
+  const ownerResult = await supabase.auth.admin.getUserById(vendor.owner_user_id);
+  const providerEmail =
+    vendor.contact_email?.trim() || ownerResult.data.user?.email || null;
+  if (!providerEmail) {
+    return { queued: false, reason: "missing_recipient" };
+  }
+
+  const payload = {
+    source: "uiv-travel-website",
+    category: "provider",
+    event: "provider_booking_pending",
+    occurredAt: new Date().toISOString(),
+    recipient: { email: providerEmail, displayName: vendor.name },
+    provider: {
+      id: vendor.id,
+      name: vendor.name,
+      email: providerEmail,
+    },
+    customer: {
+      id: booking.user_id,
+      displayName: profileResult.data?.display_name ?? null,
+    },
+    order: {
+      id: order.id,
+      status: order.status,
+      currency: order.currency,
+      totalCents: order.total_cents,
+    },
+    booking: {
+      id: booking.id,
+      lineType: "accommodation",
+      status: booking.status,
+      guests: booking.guests,
+      accommodationId: booking.accommodation_id,
+      accommodationTitle: accommodationResult.data?.name ?? null,
+      checkIn: booking.check_in,
+      checkOut: booking.check_out,
+      approvalDeadlineAt: booking.expires_at,
+    },
+  } satisfies NotificationPayload;
+
+  const notification = await createNotificationEvent(supabase, {
+    userId: vendor.owner_user_id,
+    eventType: "provider_booking_pending",
+    payload,
+    dedupeKey: `provider-booking-pending:${booking.id}`,
+  });
+
+  if (notification.status !== "sent" && notification.status !== "skipped") {
+    await processNotificationMessage(supabase, { notificationId: notification.id });
+  }
+  return { queued: true, notificationId: notification.id };
+}
+
+export async function sendProviderBookingPendingNotice(
+  supabase: SupabaseClient<Database>,
+  bookingId: string,
+  lineType: "activity" | "accommodation" = "activity",
+): Promise<VendorNoticeResult> {
+  return lineType === "accommodation"
+    ? sendAccommodationProviderBookingPendingNotice(supabase, bookingId)
+    : sendActivityProviderBookingPendingNotice(supabase, bookingId);
+}
+
 export async function safeSendProviderBookingPendingNotice(
   supabase: SupabaseClient<Database>,
   bookingId: string,
+  lineType: "activity" | "accommodation" = "activity",
 ): Promise<void> {
   try {
-    await sendProviderBookingPendingNotice(supabase, bookingId);
+    await sendProviderBookingPendingNotice(supabase, bookingId, lineType);
   } catch (error) {
     console.error("Provider booking pending notification failed", error);
   }

@@ -687,6 +687,11 @@ async function fulfillM4cVendorApprovalRequestAfterSetupSaved(
         expires_at: expiresAt,
       });
       knownAccommodationBookings = [...knownAccommodationBookings, booking];
+      await safeSendProviderBookingPendingNotice(
+        supabase,
+        booking.id,
+        "accommodation",
+      );
     }
   } catch {
     await cancelActivityBookingsForOrder(supabase, order.id);

@@ -4,10 +4,8 @@ import { getAccommodationBookingById } from "@/lib/accommodation-bookings/servic
 import { getActivityBookingById } from "@/lib/activity-bookings/service";
 import {
   createNotificationEvent,
-  updateNotificationEventStatus,
 } from "@/lib/notifications/events";
 import { processNotificationMessage } from "@/lib/notifications/email-worker";
-import { isResendEmailConfigured } from "@/lib/notifications/resend";
 import type { NotificationEventType, NotificationPayload } from "@/lib/notifications/types";
 import { getOrderById } from "@/lib/orders/service";
 import type { Database } from "@/supabase/types/database";
@@ -33,31 +31,16 @@ type BookingStatusEmailInput = {
 
 type StatusEmailWebhookResult =
   | { delivered: true }
-  | { delivered: false; reason: "not_configured" | "missing_context" };
+  | {
+      delivered: false;
+      reason: "not_configured" | "missing_context" | "queued" | "failed";
+    };
 
 type RecipientSummary = {
   userId: string;
   email: string | null;
   displayName: string | null;
 };
-
-function getStatusEmailWebhookUrl(): string | null {
-  const value = process.env.STATUS_EMAIL_WEBHOOK_URL?.trim();
-  return value ? value : null;
-}
-
-function getStatusEmailWebhookSecret(): string | null {
-  const value = process.env.STATUS_EMAIL_WEBHOOK_SECRET?.trim();
-  return value ? value : null;
-}
-
-function hasNotificationTransportConfigured(): boolean {
-  return Boolean(
-    isResendEmailConfigured() ||
-      process.env.EMAIL_DELIVERY_WEBHOOK_URL?.trim() ||
-      getStatusEmailWebhookUrl(),
-  );
-}
 
 async function loadRecipientSummary(
   supabase: SupabaseClient<Database>,
@@ -79,34 +62,6 @@ async function loadRecipientSummary(
   };
 }
 
-async function postStatusEmailHook(payload: unknown): Promise<StatusEmailWebhookResult> {
-  const webhookUrl = getStatusEmailWebhookUrl();
-  if (!webhookUrl) {
-    return { delivered: false, reason: "not_configured" };
-  }
-
-  const secret = getStatusEmailWebhookSecret();
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-  };
-
-  if (secret) {
-    headers.authorization = `Bearer ${secret}`;
-  }
-
-  const response = await fetch(webhookUrl, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Status email webhook failed with ${response.status}`);
-  }
-
-  return { delivered: true };
-}
-
 async function publishStatusNotification(
   supabase: SupabaseClient<Database>,
   input: {
@@ -123,14 +78,11 @@ async function publishStatusNotification(
     dedupeKey: input.dedupeKey,
   });
 
-  if (notification.status === "published" || notification.status === "sent") {
+  if (notification.status === "sent") {
     return { delivered: true };
   }
-
-  if (getStatusEmailWebhookUrl()) {
-    const result = await postStatusEmailHook(input.payload);
-    await updateNotificationEventStatus(supabase, notification.id, "sent");
-    return result;
+  if (notification.status === "skipped") {
+    return { delivered: false, reason: "failed" };
   }
 
   const status = await processNotificationMessage(supabase, {
@@ -139,7 +91,13 @@ async function publishStatusNotification(
   if (status === "skipped") {
     return { delivered: false, reason: "missing_context" };
   }
-  return { delivered: true };
+  if (status === "sent") {
+    return { delivered: true };
+  }
+  if (status === "failed" || status === "exhausted") {
+    return { delivered: false, reason: "failed" };
+  }
+  return { delivered: false, reason: "queued" };
 }
 
 async function sendActivityBookingStatusEmailHook(
@@ -261,10 +219,6 @@ export async function sendBookingStatusEmailHook(
   supabase: SupabaseClient<Database>,
   input: BookingStatusEmailInput,
 ): Promise<StatusEmailWebhookResult> {
-  if (!hasNotificationTransportConfigured()) {
-    return { delivered: false, reason: "not_configured" };
-  }
-
   if (input.lineType === "accommodation") {
     return sendAccommodationBookingStatusEmailHook(supabase, input);
   }
@@ -283,10 +237,6 @@ export async function sendOrderStatusEmailHook(
   supabase: SupabaseClient<Database>,
   input: { orderId: string; event: OrderNotificationEvent },
 ): Promise<StatusEmailWebhookResult> {
-  if (!hasNotificationTransportConfigured()) {
-    return { delivered: false, reason: "not_configured" };
-  }
-
   const order = await getOrderById(supabase, input.orderId);
   if (!order) {
     return { delivered: false, reason: "missing_context" };

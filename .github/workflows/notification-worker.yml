@@ -1,0 +1,27 @@
+name: Notification worker
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: production-notification-worker
+  cancel-in-progress: false
+
+jobs:
+  drain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Drain production notification queue
+        env:
+          WORKER_URL: ${{ secrets.PRODUCTION_NOTIFICATION_CRON_URL }}
+          CRON_SECRET: ${{ secrets.PRODUCTION_CRON_SECRET }}
+        run: |
+          test -n "$WORKER_URL"
+          test -n "$CRON_SECRET"
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer $CRON_SECRET" \
+            "$WORKER_URL"
