@@ -1,7 +1,9 @@
 -- M6 notification data model. Preferences are user-owned; notification events
 -- and delivery logs are service-role owned durable infrastructure records.
 
-create table public.notification_preferences (
+-- The June 1 migration already created a smaller preferences table on the
+-- shared database. Preserve its rows and disabled_reason for the legacy app.
+create table if not exists public.notification_preferences (
   user_id uuid primary key references auth.users (id) on delete cascade,
   email_enabled boolean not null default true,
   daily_digest_enabled boolean not null default false,
@@ -10,6 +12,11 @@ create table public.notification_preferences (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.notification_preferences
+  add column if not exists daily_digest_enabled boolean not null default false,
+  add column if not exists booking_updates_enabled boolean not null default true,
+  add column if not exists provider_updates_enabled boolean not null default true;
 
 comment on table public.notification_preferences is
   'Per-user notification preferences for M6 email publishing.';
@@ -20,6 +27,10 @@ before update on public.notification_preferences
 for each row execute function public.set_updated_at();
 
 alter table public.notification_preferences enable row level security;
+
+drop policy if exists "Notification preferences read own" on public.notification_preferences;
+drop policy if exists "Notification preferences insert own" on public.notification_preferences;
+drop policy if exists "Notification preferences update own" on public.notification_preferences;
 
 drop policy if exists "Notification preferences user select own" on public.notification_preferences;
 drop policy if exists "Notification preferences user insert own" on public.notification_preferences;
@@ -98,6 +109,9 @@ for each row execute function public.set_updated_at();
 
 alter table public.notification_events enable row level security;
 
+revoke all on public.notification_events from anon, authenticated;
+grant all on public.notification_events to service_role;
+
 create table public.email_delivery_events (
   id uuid primary key default gen_random_uuid(),
   notification_id uuid not null references public.notification_events (id) on delete cascade,
@@ -132,3 +146,6 @@ before update on public.email_delivery_events
 for each row execute function public.set_updated_at();
 
 alter table public.email_delivery_events enable row level security;
+
+revoke all on public.email_delivery_events from anon, authenticated;
+grant all on public.email_delivery_events to service_role;

@@ -24,9 +24,17 @@ Staging fails closed if the allowlist is missing. All environments reject partia
 
 For Vercel, define the staging values as branch-specific Preview variables for the `staging` branch. Define production values in the Production environment. Vercel cron invokes only Production deployments, so staging worker runs are manual.
 
+While all deployments are still in development, they can share one Supabase
+database. Treat them as one environment: use designated test accounts, consistent
+recipient allowlists, and one scheduled notification worker. A Git branch or an
+allowlist does not isolate database writes. The notification queue has no
+environment column, so workers connected to the same database can claim each
+other's events; non-allowlisted events are marked skipped, not retained for a
+different environment's worker. Revisit isolation before serving real customers.
+
 ## Initial setup and rollout
 
-1. Apply `supabase/migrations/20260804150000_notification_delivery_reliability.sql` before deploying application code.
+1. Confirm the target Supabase project, run `npx supabase migration list` and `npx supabase db push --dry-run`, and review all pending migrations before applying them through the CLI. See the [migration reconciliation record](notification-migration-reconciliation.md) for the legacy schema upgrade. Do not apply only the reliability migration to a database missing the notification data model.
 2. Verify each sending domain in Resend and create distinct API keys/sender addresses per environment.
 3. Configure the Resend webhook at `/api/webhooks/resend/events` for sent, delivered, delayed, failed, bounced, complained, and suppressed feedback.
 4. Add branch-specific staging Preview variables and Production variables in Vercel.
@@ -64,8 +72,8 @@ from notification_events
 order by created_at desc
 limit 100;
 
-select notification_event_id, provider, provider_event_id, event_type,
-       occurred_at, created_at
+select notification_id, provider_message_id, provider_event_id, event_type,
+       created_at
 from email_delivery_events
 order by created_at desc
 limit 100;
