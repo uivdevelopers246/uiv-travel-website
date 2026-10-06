@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { listActivityBookings } from "@/lib/activity-bookings/service";
+import { listAccommodationBookings } from "@/lib/accommodation-bookings/service";
+import { hasStartedConfirmedStay } from "@/lib/accommodation-bookings/constants";
 import { getOrderById } from "@/lib/orders/service";
 import {
   createPaymentMethodUpdateSessionForOrder,
@@ -73,14 +75,20 @@ export async function POST(
       return badRequest("Payment retry limit reached for this order.");
     }
 
-    const bookings = await listActivityBookings(supabase, {
+    const bookingOptions = {
       orderId: order.id,
       userId: user.id,
+      status: "confirmed" as const,
       limit: 500,
-    });
-    const confirmedCount = bookings.filter(
-      (booking) => booking.status === "confirmed",
-    ).length;
+    };
+    const [activities, accommodations] = await Promise.all([
+      listActivityBookings(supabase, bookingOptions),
+      listAccommodationBookings(supabase, bookingOptions),
+    ]);
+    const confirmedCount = activities.length + accommodations.length;
+    if (hasStartedConfirmedStay(accommodations)) {
+      return badRequest("A stay has already started. Contact support to resolve payment for this order.");
+    }
     if (confirmedCount === 0) {
       return badRequest("Order has no confirmed bookings to charge.");
     }

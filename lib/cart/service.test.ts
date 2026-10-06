@@ -22,7 +22,6 @@ import {
   listCartLines,
   listCartLinesWithPreview,
   parseAndValidateStayDates,
-  priceMinUsdToCents,
   pricePerPersonUsdToCents,
   removeCartLine,
   updateCartLineGuests,
@@ -148,8 +147,21 @@ function baseStayCartLine(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-function stayAvailableRpc(held = false) {
-  return vi.fn().mockResolvedValue({ data: held, error: null });
+function stayAvailableRpc(held = false, prices?: number[]) {
+  return vi.fn().mockImplementation((_name, args) => {
+    const nightlyPrices = [];
+    for (let time = Date.parse(args.p_check_in); time < Date.parse(args.p_check_out); time += 86_400_000) {
+      nightlyPrices.push({ night: new Date(time).toISOString().slice(0, 10), price_cents: prices?.[nightlyPrices.length] ?? 15000 });
+    }
+    return { data: {
+      available: !held,
+      nights: nightlyPrices.length,
+      unit_price_cents: Math.min(...nightlyPrices.map((night) => night.price_cents)),
+      total_cents: nightlyPrices.reduce((sum, night) => sum + night.price_cents, 0),
+      currency: "usd",
+      nightly_prices: nightlyPrices,
+    }, error: null };
+  });
 }
 
 function authUser() {
@@ -191,26 +203,18 @@ describe("pricePerPersonUsdToCents", () => {
   });
 });
 
-describe("priceMinUsdToCents", () => {
-  it("converts nightly USD to integer cents", () => {
-    expect(priceMinUsdToCents(150)).toBe(15000);
-    expect(priceMinUsdToCents(99.5)).toBe(9950);
-  });
-
-  it("throws when price is null or non-finite", () => {
-    expect(() => priceMinUsdToCents(null)).toThrow(
-      "Accommodation price is not set",
-    );
-    expect(() => priceMinUsdToCents(undefined)).toThrow(
-      "Accommodation price is not set",
-    );
-    expect(() => priceMinUsdToCents(Number.NaN)).toThrow(
-      "Accommodation price is not set",
-    );
-  });
-});
-
 describe("parseAndValidateStayDates", () => {
+  it.each([
+    ["2026-02-30", "2026-03-04", "Invalid check_in date"],
+    ["2026-12-30", "2026-13-02", "Invalid check_out date"],
+    ["2027-02-29", "2027-03-02", "Invalid check_in date"],
+  ])("rejects nonexistent dates %s / %s", (start, end, message) => {
+    expect(() => parseAndValidateStayDates(start, end, new Date("2026-01-01"))).toThrow(message);
+  });
+
+  it("counts a leap day as a real night", () => {
+    expect(parseAndValidateStayDates("2028-02-28", "2028-03-01", stayNow).nights).toBe(2);
+  });
   it("returns nights as check_out minus check_in", () => {
     expect(parseAndValidateStayDates(checkIn, checkOut, stayNow)).toEqual({
       check_in: checkIn,
@@ -376,7 +380,7 @@ describe("listCartLinesWithPreview", () => {
     );
   });
 
-  it("includes stay preview fields for accommodation lines", async () => {
+  it.each([false, true])("includes nightly prices and flags a changed quote: %s", async (changed) => {
     const line = baseStayCartLine({ guests: 2 });
     const cartQuery: Record<string, unknown> = {
       select: vi.fn().mockReturnThis(),
@@ -404,7 +408,7 @@ describe("listCartLinesWithPreview", () => {
         if (table === "accommodations") return accommodationsQuery;
         throw new Error(`unexpected table ${table}`);
       }),
-      rpc: stayAvailableRpc(false),
+      rpc: stayAvailableRpc(false, changed ? [10000, 20000, 25000] : undefined),
       ...authUser(),
     };
 
@@ -417,11 +421,17 @@ describe("listCartLinesWithPreview", () => {
       nights: 3,
       max_guest_capacity: 4,
       stay_dates_available: true,
+      stay_price_changed: changed,
+      stay_nightly_prices: [
+        { night: checkIn, price_cents: changed ? 10000 : 15000 },
+        { night: "2026-08-02", price_cents: changed ? 20000 : 15000 },
+        { night: "2026-08-03", price_cents: changed ? 25000 : 15000 },
+      ],
       activity_title: "",
       max_capacity: 0,
       remaining_capacity: 0,
     });
-    expect(supabase.rpc).toHaveBeenCalledWith("accommodation_stay_is_held", {
+    expect(supabase.rpc).toHaveBeenCalledWith("accommodation_stay_quote", {
       p_accommodation_id: accommodationId,
       p_check_in: checkIn,
       p_check_out: checkOut,
@@ -674,7 +684,8 @@ describe("addOrMergeActivityLine", () => {
 });
 
 describe("addOrMergeAccommodationLine", () => {
-  it("inserts a stay line with unit × nights snapshots (guests do not multiply)", async () => {
+  it("inserts a stay from the calendar even without a listing base price (guests do not multiply)", async () => {
+    vi.mocked(getAccommodationById).mockResolvedValue({ ...publicAccommodation, price_min_usd: null });
     const inserted = baseStayCartLine({ guests: 2 });
     const cartFindQuery: Record<string, unknown> = {
       select: vi.fn().mockReturnThis(),
@@ -708,7 +719,7 @@ describe("addOrMergeAccommodationLine", () => {
     );
 
     expect(row).toEqual(inserted);
-    expect(supabase.rpc).toHaveBeenCalledWith("accommodation_stay_is_held", {
+    expect(supabase.rpc).toHaveBeenCalledWith("accommodation_stay_quote", {
       p_accommodation_id: accommodationId,
       p_check_in: checkIn,
       p_check_out: checkOut,
@@ -878,12 +889,7 @@ describe("addOrMergeAccommodationLine", () => {
     ).rejects.toThrow("These stay dates are not available");
   });
 
-  it("throws when accommodation price is not set", async () => {
-    vi.mocked(getAccommodationById).mockResolvedValue({
-      ...publicAccommodation,
-      price_min_usd: null,
-    });
-
+  it("rejects a quote that changed after the guest reviewed it without writing a cart line", async () => {
     const supabase: Record<string, unknown> = {
       from: vi.fn(),
       rpc: stayAvailableRpc(false),
@@ -898,10 +904,12 @@ describe("addOrMergeAccommodationLine", () => {
           check_in: checkIn,
           check_out: checkOut,
           guests: 2,
+          expected_total_cents: 30000,
         },
         { now: stayNow },
       ),
-    ).rejects.toThrow("Accommodation price is not set");
+    ).rejects.toThrow("Accommodation price has changed");
+    expect(supabase.from).not.toHaveBeenCalled();
   });
 
   it("throws when guests is not a positive integer", async () => {
@@ -926,6 +934,18 @@ describe("addOrMergeAccommodationLine", () => {
 });
 
 describe("updateCartLineGuests", () => {
+  it("requires a fresh reviewed quote when rates changed before a guest-count edit", async () => {
+    const query = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: baseStayCartLine(), error: null }),
+    };
+    const supabase = { from: vi.fn(() => query), rpc: stayAvailableRpc(false, [10000, 20000, 25000]), ...authUser() };
+    await expect(updateCartLineGuests(supabase as never,
+      { cart_line_id: stayLineId, guests: 3 }, { now: stayNow }))
+      .rejects.toThrow("Accommodation price has changed");
+    expect(supabase.from).toHaveBeenCalledTimes(1);
+  });
   it("sets absolute guests and recomputes stay snapshots", async () => {
     const line = baseStayCartLine({ guests: 2 });
     const updated = baseStayCartLine({
@@ -1141,6 +1161,44 @@ describe("removeCartLine", () => {
 });
 
 describe("validateCartForCheckout", () => {
+  it("rejects overlapping requests for the same property before saving a card", async () => {
+    const query = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [
+        baseStayCartLine(),
+        baseStayCartLine({ id: "overlap", check_in: "2026-08-03", check_out: "2026-08-06" }),
+      ], error: null }),
+    };
+    const supabase = { from: vi.fn(() => query), ...authUser() };
+    await expect(validateCartForCheckout(supabase as never, { now: stayNow }))
+      .rejects.toThrow("Your cart contains overlapping stays");
+  });
+
+  it("allows back-to-back stays with checkout day excluded from the first stay", async () => {
+    const query = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [
+        baseStayCartLine(),
+        baseStayCartLine({ id: "next", check_in: "2026-08-04", check_out: "2026-08-07" }),
+      ], error: null }),
+    };
+    const supabase = { from: vi.fn(() => query), rpc: stayAvailableRpc(false), ...authUser() };
+    await expect(validateCartForCheckout(supabase as never, { now: stayNow })).resolves.toBeUndefined();
+  });
+
+  it.each([
+    { unit_price_cents: 1 },
+    { line_subtotal_cents: 1, line_total_cents: 1 },
+    { line_discount_cents: 100, line_total_cents: 44900 },
+  ])("rejects stale or tampered stay prices %o", async (overrides) => {
+    const query = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [baseStayCartLine(overrides)], error: null }),
+    };
+    const supabase = { from: vi.fn(() => query), rpc: stayAvailableRpc(false), ...authUser() };
+    await expect(validateCartForCheckout(supabase as never, { now: stayNow }))
+      .rejects.toThrow("Accommodation price has changed");
+  });
   it("throws Unauthorized without a user", async () => {
     const supabase: Record<string, unknown> = {
       auth: {
@@ -1206,8 +1264,8 @@ describe("validateCartForCheckout", () => {
     expect(getActivityById).toHaveBeenCalledWith(supabase, activityId);
   });
 
-  it("passes when accommodation lines are valid", async () => {
-    const line = baseStayCartLine();
+  it("validates a varied nightly sum instead of multiplying the minimum price", async () => {
+    const line = baseStayCartLine({ unit_price_cents: 10000, line_subtotal_cents: 55000, line_total_cents: 55000 });
     const cartQuery: Record<string, unknown> = {
       select: vi.fn().mockReturnThis(),
       order: vi.fn().mockResolvedValue({ data: [line], error: null }),
@@ -1217,7 +1275,7 @@ describe("validateCartForCheckout", () => {
         if (table === "cart_lines") return cartQuery;
         throw new Error(`unexpected table ${table}`);
       }),
-      rpc: stayAvailableRpc(false),
+      rpc: stayAvailableRpc(false, [10000, 20000, 25000]),
       ...authUser(),
     };
 
@@ -1438,6 +1496,16 @@ describe("validateCartForCheckout", () => {
 });
 
 describe("deleteAllCartLinesForUser", () => {
+  it("can remove only checkout lines, preserving items added while fulfillment runs", async () => {
+    const query = {
+      delete: vi.fn().mockReturnThis(), in: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ error: null }),
+    };
+    const supabase = { from: vi.fn(() => query) };
+    await deleteAllCartLinesForUser(supabase as never, userId, [lineId]);
+    expect(query.in).toHaveBeenCalledWith("id", [lineId]);
+    expect(query.eq).toHaveBeenCalledWith("user_id", userId);
+  });
   it("deletes all rows for user_id", async () => {
     const delQuery: Record<string, unknown> = {
       delete: vi.fn().mockReturnThis(),

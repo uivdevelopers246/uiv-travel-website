@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const activityBookingServiceMocks = vi.hoisted(() => ({
   listActivityBookings: vi.fn(),
 }));
+const accommodationBookingServiceMocks = vi.hoisted(() => ({
+  listAccommodationBookings: vi.fn(),
+}));
 
 const orderServiceMocks = vi.hoisted(() => ({
   getOrderById: vi.fn(),
@@ -23,7 +26,7 @@ const routeHelperMocks = vi.hoisted(() => ({
     Response.json({ error: message }, { status: 400 }),
   ),
   parseUuidParam: vi.fn(),
-  requireSameOriginPost: vi.fn(() => null),
+  requireSameOriginPost: vi.fn((): Response | null => null),
   requireRole: vi.fn(),
   serverError: vi.fn((message: string) =>
     Response.json({ error: message }, { status: 500 }),
@@ -34,6 +37,7 @@ const routeHelperMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/activity-bookings/service", () => activityBookingServiceMocks);
+vi.mock("@/lib/accommodation-bookings/service", () => accommodationBookingServiceMocks);
 vi.mock("@/lib/orders/service", () => orderServiceMocks);
 vi.mock("@/lib/stripe/server", () => stripeServerMocks);
 vi.mock("@/lib/supabase/server", () => supabaseServerMocks);
@@ -87,6 +91,7 @@ describe("POST /api/orders/[orderId]/payment-recovery", () => {
     activityBookingServiceMocks.listActivityBookings.mockResolvedValue([
       { id: "booking-1", status: "confirmed" },
     ]);
+    accommodationBookingServiceMocks.listAccommodationBookings.mockResolvedValue([]);
     stripeServerMocks.getPublicSiteUrl.mockReturnValue("http://localhost:3000");
     stripeServerMocks.ensureStripeCustomerForOrder.mockResolvedValue("cus_123");
     stripeServerMocks.createPaymentMethodUpdateSessionForOrder.mockResolvedValue({
@@ -147,6 +152,37 @@ describe("POST /api/orders/[orderId]/payment-recovery", () => {
     expect(body).toEqual({
       url: "https://checkout.stripe.com/session/test",
     });
+  });
+
+  it("allows recovery for a failed stay-only order with confirmed bookings", async () => {
+    activityBookingServiceMocks.listActivityBookings.mockResolvedValue([]);
+    accommodationBookingServiceMocks.listAccommodationBookings.mockResolvedValue([
+      { id: "stay-1", status: "confirmed" },
+    ]);
+    const response = await invokePost();
+    expect(response.status).toBe(200);
+    expect(accommodationBookingServiceMocks.listAccommodationBookings).toHaveBeenCalledWith(
+      expect.anything(), { orderId: ORDER_ID, userId: USER_ID, status: "confirmed", limit: 500 },
+    );
+    expect(stripeServerMocks.createPaymentMethodUpdateSessionForOrder).toHaveBeenCalledOnce();
+  });
+
+  it("rejects orders with no confirmed activity or accommodation bookings", async () => {
+    activityBookingServiceMocks.listActivityBookings.mockResolvedValue([]);
+    const response = await invokePost();
+    expect(response.status).toBe(400);
+    expect(stripeServerMocks.createPaymentMethodUpdateSessionForOrder).not.toHaveBeenCalled();
+  });
+
+  it("rejects recovery for an already-started stay before creating a Stripe session", async () => {
+    accommodationBookingServiceMocks.listAccommodationBookings.mockResolvedValue([
+      { id: "stay-1", status: "confirmed", check_in: "2000-01-01" },
+    ]);
+    const response = await invokePost();
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "A stay has already started. Contact support to resolve payment for this order." });
+    expect(stripeServerMocks.ensureStripeCustomerForOrder).not.toHaveBeenCalled();
+    expect(stripeServerMocks.createPaymentMethodUpdateSessionForOrder).not.toHaveBeenCalled();
   });
 
   it("rejects cross-origin recovery posts before loading the order", async () => {
