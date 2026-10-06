@@ -15,6 +15,9 @@ import {
   type GalleryImage,
 } from "@/components/shared";
 import { hasValidCoordinates } from "@/lib/utils/geo";
+import { AccommodationBookingForm } from "./AccommodationBookingForm";
+import type { StaySelection } from "./booking-helpers";
+import { formatAccommodationNightlyPrice } from "@/components/accommodations/pricing";
 
 type Accommodation = {
   id: string;
@@ -54,13 +57,14 @@ type Accommodation = {
 type Props = {
   accommodation: Accommodation;
   images: GalleryImage[];
+  initialSelection?: StaySelection;
 };
 
 function formatPhoneHref(phone: string) {
   return `tel:${phone.replace(/[^\d+]/g, "")}`;
 }
 
-export function AccommodationDetailClient({ accommodation, images }: Props) {
+export function AccommodationDetailClient({ accommodation, images, initialSelection }: Props) {
   const typeLabel =
     accommodationTypes.find((t) => t.value === accommodation.accommodation_type)?.label ||
     accommodation.accommodation_type;
@@ -77,17 +81,6 @@ export function AccommodationDetailClient({ accommodation, images }: Props) {
     { label: "Vacation Planning", href: "/vacation-planning" },
     { label: accommodation.name },
   ];
-
-  const formatPrice = () => {
-    if (accommodation.price_min_usd === null) return "Price on request";
-    if (
-      accommodation.price_max_usd &&
-      accommodation.price_max_usd !== accommodation.price_min_usd
-    ) {
-      return `$${accommodation.price_min_usd} - $${accommodation.price_max_usd}`;
-    }
-    return `$${accommodation.price_min_usd}`;
-  };
 
   const getAmenityLabel = (value: string) => {
     return amenityOptions.find((a) => a.value === value)?.label || value;
@@ -120,8 +113,8 @@ export function AccommodationDetailClient({ accommodation, images }: Props) {
         <div className="absolute inset-x-0 top-0 h-[520px] bg-[radial-gradient(circle_at_top_left,rgba(64,127,194,0.2),transparent_34%),radial-gradient(circle_at_top_right,rgba(251,202,26,0.14),transparent_26%)]" />
 
         <div className="relative mx-auto max-w-7xl px-4 pt-8">
-          <div className="grid gap-8 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)]">
-            <div>
+          <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)] xl:grid-rows-[auto_1fr]">
+            <div className="min-w-0">
               <ImageGallery
                 images={allImages}
                 title={accommodation.name}
@@ -130,7 +123,7 @@ export function AccommodationDetailClient({ accommodation, images }: Props) {
               />
             </div>
 
-            <aside>
+            <aside className="min-w-0 xl:col-start-2 xl:row-span-2 xl:row-start-1">
               <section className="rounded-[28px] border border-white/70 bg-white/92 p-5 shadow-[0_24px_70px_rgba(25,48,89,0.12)] backdrop-blur-sm md:p-6">
                 <div className="inline-flex rounded-full bg-[#193059] px-4 py-1.5 text-sm font-semibold text-white">
                   {typeLabel}
@@ -316,27 +309,8 @@ export function AccommodationDetailClient({ accommodation, images }: Props) {
                   </div>
                 )}
 
-                <div
-                  id="accommodation-booking"
-                  className="mt-4 rounded-[24px] bg-[#193059] p-4 text-white shadow-[0_22px_50px_rgba(25,48,89,0.22)]"
-                >
-                  <div className="flex flex-wrap items-end justify-between gap-4">
-                    <div>
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/65">
-                        Nightly Rate
-                      </p>
-                      <p className="mt-1.5 text-[2rem] font-bold leading-none">{formatPrice()}</p>
-                      <p className="mt-1 text-xs text-white/70">
-                        {accommodation.price_min_usd !== null ? "Before taxes and extras" : "Request pricing from the host"}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-white/15 bg-white/10 px-3 py-2 text-xs text-white/80">
-                      Direct host coordination
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <div className="mt-4 rounded-[24px] bg-[#193059] p-4 text-white shadow-[0_22px_50px_rgba(25,48,89,0.22)]">
+                  <div className="grid gap-2 sm:grid-cols-2">
                     <div className="rounded-2xl border border-white/12 bg-white/8 px-4 py-3">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/55">
                         Check-in / Check-out
@@ -362,9 +336,9 @@ export function AccommodationDetailClient({ accommodation, images }: Props) {
                     {accommodation.vendors?.contact_email ? (
                       <a
                         href={`mailto:${accommodation.vendors.contact_email}`}
-                        className="inline-flex items-center justify-center rounded-full bg-[#FBCA1A] px-5 py-3 text-sm font-semibold text-[#193059] transition-colors hover:bg-[#f0bf10]"
+                        className="inline-flex items-center justify-center rounded-full border border-white/30 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/10"
                       >
-                        Email host
+                        Email host a question
                       </a>
                     ) : (
                       <button
@@ -396,6 +370,34 @@ export function AccommodationDetailClient({ accommodation, images }: Props) {
                 </div>
               </section>
             </aside>
+
+            <section
+              id="accommodation-booking"
+              aria-label="Accommodation booking"
+              className="min-w-0 scroll-mt-28 rounded-[28px] bg-[#193059] p-5 text-white shadow-[0_22px_50px_rgba(25,48,89,0.22)] md:p-6 xl:col-start-1 xl:row-start-2"
+            >
+              <div className="flex flex-wrap items-end justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/65">
+                    Nightly Rate
+                  </p>
+                  <p className="mt-1.5 text-[2rem] font-bold leading-none">{formatAccommodationNightlyPrice(accommodation)}</p>
+                  <p className="mt-1 text-xs text-white/70">
+                    {accommodation.price_min_usd !== null ? "USD for available nights · choose dates for your total" : "The host has no open nights available to request right now"}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-white/15 bg-white/10 px-3 py-2 text-xs text-white/80">
+                  Host approval required
+                </div>
+              </div>
+
+              <AccommodationBookingForm
+                accommodationId={accommodation.id}
+                maxGuests={accommodation.max_guest_capacity}
+                initialSelection={initialSelection}
+              />
+            </section>
           </div>
         </div>
       </section>
@@ -418,7 +420,7 @@ export function AccommodationDetailClient({ accommodation, images }: Props) {
                   locationLabel:
                     [accommodation.address, accommodation.parish].filter(Boolean).join(", ") ||
                     null,
-                  detailLine: `${typeLabel}${accommodation.price_min_usd != null ? ` | ${formatPrice()}/night` : ""}`,
+                  detailLine: `${typeLabel} | ${formatAccommodationNightlyPrice(accommodation)}`,
                   badge: typeLabel,
                 },
               ]}

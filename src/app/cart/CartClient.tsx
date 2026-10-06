@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { formatCurrencyFromCents, formatSlotDateTime } from "@/lib/utils/formatting";
+import { formatCurrencyFromCents, formatSlotDateTime, formatStayDateRange } from "@/lib/utils/formatting";
 import type { CartLineWithPreview } from "@/lib/cart/types";
 import { redirectToLogin } from "@/app/_shared/client-auth";
 import { getSemanticNoticeClasses } from "@/app/_shared/client-tone";
@@ -16,6 +16,7 @@ import {
   getDraftLineTotalCents,
   getLineParticipants,
   getLineTotalCents,
+  getSavedStayNightlyPrices,
 } from "./cart-ui";
 
 type StatusMessage = {
@@ -35,6 +36,11 @@ const CART_REFRESH_ERROR_MESSAGES = new Set([
   "This slot is no longer available",
   "Not enough spots left for this time slot",
   "Activity is not available for booking",
+  "Accommodation is not available for booking",
+  "These stay dates are not available",
+  "Guest count exceeds accommodation capacity",
+  "Accommodation price has changed. Remove this stay and add it again to review the current price.",
+  "check_in must not be in the past",
 ]);
 
 function shouldRefreshCartAfterError(message: string) {
@@ -42,7 +48,20 @@ function shouldRefreshCartAfterError(message: string) {
 }
 
 function getDraftParticipantLimit(line: CartLineWithPreview) {
+  if (line.line_type === "accommodation") {
+    return Math.max(1, getLineParticipants(line), line.max_guest_capacity ?? 2147483647);
+  }
   return Math.max(1, getLineParticipants(line), line.remaining_capacity);
+}
+
+function quantityLabel(line: CartLineWithPreview, count: number) {
+  return line.line_type === "accommodation"
+    ? `${count} ${count === 1 ? "guest" : "guests"}`
+    : formatParticipantsLabel(count);
+}
+
+function lineTitle(line: CartLineWithPreview) {
+  return line.line_type === "accommodation" ? line.accommodation_name : line.activity_title;
 }
 
 function clampDraftParticipants(
@@ -98,6 +117,7 @@ async function fetchCartLines(): Promise<CartLineWithPreview[]> {
 }
 
 type ParticipantStepperProps = {
+  label: string;
   value: number;
   max: number;
   disabled?: boolean;
@@ -105,6 +125,7 @@ type ParticipantStepperProps = {
 };
 
 function ParticipantStepper({
+  label,
   value,
   max,
   disabled = false,
@@ -124,7 +145,7 @@ function ParticipantStepper({
     >
       <button
         type="button"
-        aria-label="Decrease participants"
+        aria-label={`Decrease ${label}`}
         disabled={!canDecrease}
         onClick={() => onChange(value - 1)}
         className="flex h-12 w-12 items-center justify-center rounded-l-2xl text-lg font-semibold transition-colors hover:bg-[#eef5fb] disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
@@ -132,6 +153,7 @@ function ParticipantStepper({
         -
       </button>
       <input
+        aria-label={label}
         type="number"
         min={1}
         max={max}
@@ -151,7 +173,7 @@ function ParticipantStepper({
       />
       <button
         type="button"
-        aria-label="Increase participants"
+        aria-label={`Increase ${label}`}
         disabled={!canIncrease}
         onClick={() => onChange(value + 1)}
         className="flex h-12 w-12 items-center justify-center rounded-r-2xl text-lg font-semibold transition-colors hover:bg-[#eef5fb] disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
@@ -259,7 +281,7 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ participants }),
+        body: JSON.stringify(line.line_type === "accommodation" ? { guests: participants } : { participants }),
       });
 
       if (response.status === 401) {
@@ -277,7 +299,8 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
         );
       }
 
-      if (!payload || typeof payload !== "object" || !("participants" in payload)) {
+      if (!payload || typeof payload !== "object" ||
+          !((line.line_type === "accommodation" ? "guests" : "participants") in payload)) {
         throw new Error("Unexpected response while updating your cart.");
       }
 
@@ -297,8 +320,8 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
       }));
       setMessage({
         tone: "success",
-        text: `Saved ${formatParticipantsLabel(participants)} for ${
-          line.activity_title || "this activity"
+        text: `Saved ${quantityLabel(line, participants)} for ${
+          lineTitle(line) || "this request"
         }. Your payment method can be saved next, and no charge is created unless the vendor confirms availability.`,
       });
     } catch (nextError: unknown) {
@@ -356,7 +379,7 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
       setConfirmingRemovalLineId(null);
       setMessage({
         tone: "success",
-        text: `${line.activity_title || "This activity"} was removed from your cart. You can keep browsing or continue with the remaining activity requests.`,
+        text: `${lineTitle(line) || "This request"} was removed from your cart. You can keep browsing or continue with the remaining requests.`,
       });
     } catch (nextError: unknown) {
       setMessage({
@@ -448,7 +471,7 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
                 Your cart
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-white/72 md:text-base">
-                Review each activity request, update participants, and save a payment method for
+                Review your activities and stays, update your party size, and save a payment method for
                 vendor review. Stripe does not charge the guest during checkout. A charge only
                 happens later for bookings the vendor confirms.
               </p>
@@ -493,10 +516,10 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
               className="text-3xl font-bold text-[#193059]"
               style={{ fontFamily: "var(--font-playfair)" }}
             >
-              No activity requests in your cart yet
+              No booking requests in your cart yet
             </h2>
             <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-slate-600 md:text-base">
-              Add an activity departure to start your trip. When you are ready, checkout will save
+              Add an activity or accommodation to start your trip. When you are ready, checkout will save
               a payment method first, then vendors review live availability. You are only charged
               later if a vendor confirms the booking.
             </p>
@@ -504,13 +527,16 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
               href="/vacation-planning"
               className="mt-6 inline-flex rounded-full bg-gradient-to-r from-[#407FC2] to-[#193059] px-6 py-3 text-sm font-semibold text-white transition-all duration-300 hover:from-[#193059] hover:to-[#407FC2]"
             >
-              Explore activities
+              Explore activities and stays
             </Link>
           </section>
         ) : (
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.9fr)] lg:items-start">
             <section className="space-y-4">
               {lines.map((line) => {
+                const isStay = line.line_type === "accommodation";
+                const title = lineTitle(line);
+                const imageUrl = isStay ? line.accommodation_image_url : line.activity_image_url;
                 const currentParticipants = getLineParticipants(line);
                 const participants = participantDrafts[line.id] ?? currentParticipants;
                 const isBusy = busyAction?.lineId === line.id;
@@ -522,11 +548,12 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
                 const availabilityState = getCartLineAvailabilityState(line);
                 const maxDraftParticipants = getDraftParticipantLimit(line);
                 const currentLineTotalCents = getLineTotalCents(line.line_total_cents);
+                const nightlyPrices = getSavedStayNightlyPrices(line);
                 const draftLineTotalCents = getDraftLineTotalCents(line, participants);
                 const canSaveParticipants =
                   availabilityState.canEditParticipants &&
                   hasParticipantChange &&
-                  participants <= line.remaining_capacity;
+                  participants <= (isStay ? (line.max_guest_capacity ?? Infinity) : line.remaining_capacity);
                 const isConfirmingRemove = confirmingRemovalLineId === line.id;
 
                 return (
@@ -537,16 +564,16 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
                     <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
                       <div className="flex min-w-0 flex-1 gap-4">
                         <div className="h-32 w-32 shrink-0 overflow-hidden rounded-[24px] bg-[linear-gradient(135deg,#dbe8f6_0%,#8ec7ff_48%,#193059_100%)] shadow-[0_18px_40px_rgba(25,48,89,0.12)]">
-                          {line.activity_image_url ? (
+                          {imageUrl ? (
                             <img
-                              src={line.activity_image_url}
-                              alt={line.activity_title || "Activity cover"}
+                              src={imageUrl}
+                              alt={title || "Listing cover"}
                               className="h-full w-full object-cover"
                             />
                           ) : (
                             <div className="flex h-full w-full items-end bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.5),transparent_55%)] p-4 text-left">
                               <span className="text-xs font-semibold uppercase tracking-[0.2em] text-white/90">
-                                Activity
+                                {isStay ? "Stay" : "Activity"}
                               </span>
                             </div>
                           )}
@@ -555,17 +582,25 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
                         <div className="min-w-0 space-y-4">
                           <div>
                             <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#407FC2]">
-                              Activity booking
+                              {isStay ? "Accommodation booking" : "Activity booking"}
                             </p>
                             <h2
                               className="mt-2 text-2xl font-bold text-[#193059]"
                               style={{ fontFamily: "var(--font-playfair)" }}
                             >
-                              {line.activity_title || "Unavailable activity"}
+                              {title || "Unavailable listing"}
                             </h2>
                             <p className="mt-2 text-sm text-slate-600">
-                              {formatSlotDateTime(line.slot_starts_at, line.slot_ends_at)}
+                              {isStay
+                                ? `${formatStayDateRange(line.check_in ?? "", line.check_out ?? "")} · ${line.nights} ${line.nights === 1 ? "night" : "nights"}`
+                                : formatSlotDateTime(line.slot_starts_at, line.slot_ends_at)}
                             </p>
+                            {isStay && line.accommodation_id && (
+                              <Link className="mt-2 inline-block text-sm font-semibold text-[#407FC2] underline"
+                                href={`/accommodations/${line.accommodation_id}?${new URLSearchParams({ check_in: line.check_in ?? "", check_out: line.check_out ?? "", guests: String(currentParticipants) })}#accommodation-booking`}>
+                                {line.stay_price_changed ? "Review current prices and update stay" : "View stay or choose different dates"}
+                              </Link>
+                            )}
                           </div>
 
                         </div>
@@ -582,9 +617,24 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
                         </p>
                         <p className="mt-2 text-sm text-slate-600">
                           {hasParticipantChange
-                            ? `${formatParticipantsLabel(participants)} pending save`
-                            : "Matches the participant count currently saved in your cart."}
+                            ? `${quantityLabel(line, participants)} pending save`
+                            : isStay
+                              ? `Total for ${line.nights} ${line.nights === 1 ? "night" : "nights"}. Guests do not change the price.`
+                              : "Matches the participant count currently saved in your cart."}
                         </p>
+                        {nightlyPrices.length > 0 && (
+                          <details className="mt-3 text-sm text-slate-600">
+                            <summary className="cursor-pointer font-medium text-[#193059]">Nightly prices</summary>
+                            <dl className="mt-2 max-h-48 space-y-1 overflow-y-auto">
+                              {nightlyPrices.map((night) => (
+                                <div key={night.night} className="flex justify-between gap-3">
+                                  <dt><time dateTime={night.night}>{night.night}</time></dt>
+                                  <dd>{formatCurrencyFromCents(night.price_cents)}</dd>
+                                </div>
+                              ))}
+                            </dl>
+                          </details>
+                        )}
                       </div>
                     </div>
 
@@ -603,9 +653,10 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
                       <div className="space-y-3">
                         <div>
                           <span className="mb-2 block text-sm font-medium text-[#193059]">
-                            Participants
+                            {isStay ? "Guests" : "Participants"}
                           </span>
                           <ParticipantStepper
+                            label={isStay ? "guests" : "participants"}
                             value={participants}
                             max={maxDraftParticipants}
                             disabled={
@@ -630,10 +681,14 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
                               ? `Draft total: ${formatCurrencyFromCents(
                                   draftLineTotalCents,
                                 )}. Save this change before you continue to checkout.`
-                              : `You can request up to ${formatSpotLabel(
+                              : isStay
+                                ? line.max_guest_capacity == null ? "Confirm your guest count with the host." : `Up to ${line.max_guest_capacity} guests for this accommodation.`
+                                : `You can request up to ${formatSpotLabel(
                                   maxDraftParticipants,
                                 )} from this cart view.`
-                            : "This line cannot be edited anymore. Remove it to continue."}
+                            : line.stay_price_changed
+                              ? "Open this stay above to review prices and update your request."
+                              : "This line cannot be edited anymore. Remove it to continue."}
                         </p>
                       </div>
 
@@ -645,7 +700,7 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
                             disabled={!canSaveParticipants || isBusy || checkoutLoading}
                             className="rounded-full border border-[#193059] px-5 py-3 text-sm font-semibold text-[#193059] transition-colors hover:bg-[#193059] hover:text-white disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400"
                           >
-                            {isUpdating ? "Saving..." : "Save participants"}
+                            {isUpdating ? "Saving..." : isStay ? "Save guests" : "Save participants"}
                           </button>
                           <button
                             type="button"
@@ -675,7 +730,7 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
 
                         {isConfirmingRemove ? (
                           <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-                            <p>Remove this activity request from your cart?</p>
+                            <p>Remove this booking request from your cart?</p>
                             <div className="mt-3 flex flex-col gap-3 sm:flex-row">
                               <button
                                 type="button"
@@ -691,7 +746,7 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
                                 disabled={isRemoving}
                                 className="rounded-full bg-rose-600 px-4 py-2 font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-slate-400"
                               >
-                                {isRemoving ? "Removing..." : "Remove activity"}
+                                {isRemoving ? "Removing..." : "Remove request"}
                               </button>
                             </div>
                           </div>
@@ -724,6 +779,10 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
                   <span>{summary.participantCount}</span>
                 </div>
                 <div className="flex items-center justify-between gap-4 text-sm text-slate-600">
+                  <span>Stays</span>
+                  <span>{summary.accommodationCount}</span>
+                </div>
+                <div className="flex items-center justify-between gap-4 text-sm text-slate-600">
                   <span>Subtotal</span>
                   <span className="font-semibold text-[#193059]">
                     {formatCurrencyFromCents(summary.subtotalCents)}
@@ -750,7 +809,7 @@ export function CartClient({ initialMessage = null }: CartClientProps) {
                     <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#193059] text-xs font-semibold text-white">
                       2
                     </span>
-                    <span>Vendors review live availability for each activity request.</span>
+                    <span>Vendors review availability for each activity and stay within 24 hours.</span>
                   </li>
                   <li className="flex gap-3">
                     <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#193059] text-xs font-semibold text-white">
