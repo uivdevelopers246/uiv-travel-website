@@ -6,6 +6,8 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 Notification environment setup, testing, retries, and rollback are documented in [docs/notifications.md](docs/notifications.md).
 
+Accommodation booking behavior, required migrations, and Stripe test-mode checks are documented in [docs/accommodation-booking.md](docs/accommodation-booking.md).
+
 First, run the development server:
 
 ```bash
