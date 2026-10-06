@@ -34,6 +34,18 @@ export type Database = {
   }
   public: {
     Tables: {
+      accommodation_nights: {
+        Row: { accommodation_id: string; night: string; price_cents: number | null; is_available: boolean }
+        Insert: { accommodation_id: string; night: string; price_cents?: number | null; is_available?: boolean }
+        Update: { accommodation_id?: string; night?: string; price_cents?: number | null; is_available?: boolean }
+        Relationships: [{
+          foreignKeyName: "accommodation_nights_accommodation_id_fkey"
+          columns: ["accommodation_id"]
+          isOneToOne: false
+          referencedRelation: "accommodations"
+          referencedColumns: ["id"]
+        }]
+      }
       accommodation_images: {
         Row: {
           accommodation_id: string
@@ -928,6 +940,30 @@ export type Database = {
           p_check_out: string
         }
         Returns: boolean
+      }
+      accommodation_stay_quote: {
+        Args: { p_accommodation_id: string; p_check_in: string; p_check_out: string }
+        Returns: Json
+      }
+      accommodation_bookable_price_ranges: {
+        Args: { p_accommodation_ids: string[] }
+        Returns: { accommodation_id: string; price_min_usd: number | null; price_max_usd: number | null }[]
+      }
+      accommodation_booking_calendar: {
+        Args: { p_accommodation_id: string; p_first_night: string; p_last_night: string }
+        Returns: { night: string; price_cents: number | null }[]
+      }
+      get_accommodation_calendar: {
+        Args: { p_accommodation_id: string; p_first_night: string; p_last_night: string }
+        Returns: { night: string; price_cents: number | null; is_available: boolean; is_held: boolean }[]
+      }
+      set_accommodation_nights: {
+        Args: { p_accommodation_id: string; p_first_night: string; p_last_night: string; p_is_available: boolean; p_price_cents?: number | null }
+        Returns: number
+      }
+      reopen_confirmed_accommodation_bookings_for_order: {
+        Args: { p_order_id: string; p_expires_at: string }
+        Returns: Database["public"]["Tables"]["accommodation_bookings"]["Row"][]
       }
       cancel_accommodation_booking: {
         Args: { p_booking_id: string }

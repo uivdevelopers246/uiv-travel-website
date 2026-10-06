@@ -53,6 +53,7 @@ import {
   fulfillSettlementPaymentIntentPaymentFailed,
   fulfillSettlementPaymentIntentSucceeded,
   getStripe,
+  getOrderPaymentSummary,
 } from "./server";
 import {
   STRIPE_METADATA_FLOW_M4C_PAYMENT_RECOVERY,
@@ -189,6 +190,9 @@ describe("createCheckoutSetupSessionForOrder", () => {
       expect.objectContaining({
         mode: "setup",
         client_reference_id: "order-stay",
+        custom_text: {
+          submit: { message: expect.stringContaining("$450.00") },
+        },
       }),
     );
   });
@@ -226,13 +230,29 @@ describe("createCheckoutSetupSessionForOrder", () => {
         mode: "setup",
         success_url: "http://localhost:3000/checkout/success?order_id=order-xyz",
         cancel_url: "http://localhost:3000/checkout/cancel?order_id=order-xyz",
-        metadata: { order_id: "order-xyz", flow: "m4c_setup" },
+        metadata: { order_id: "order-xyz", flow: "m4c_setup", cart_fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/), cart_line_count: "1" },
         setup_intent_data: {
-          metadata: { order_id: "order-xyz", flow: "m4c_setup" },
+          metadata: { order_id: "order-xyz", flow: "m4c_setup", cart_fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/), cart_line_count: "1" },
         },
         client_reference_id: "order-xyz",
       }),
     );
+  });
+});
+
+describe("stay payment recovery summary", () => {
+  it("directs past confirmed stays to support instead of another card setup", async () => {
+    expect(await getOrderPaymentSummary({
+      status: "failed", stripe_payment_intent_id: null, settlement_charge_attempt_count: 2,
+      accommodation_bookings: [{ status: "confirmed", check_in: "2000-01-01" }],
+    })).toMatchObject({ can_retry_with_payment_method_update: false, show_contact_support: true });
+  });
+
+  it("allows a replacement card for future confirmed stays", async () => {
+    expect(await getOrderPaymentSummary({
+      status: "failed", stripe_payment_intent_id: null, settlement_charge_attempt_count: 2,
+      accommodation_bookings: [{ status: "confirmed", check_in: "2099-01-01" }],
+    })).toMatchObject({ can_retry_with_payment_method_update: true, show_contact_support: false });
   });
 });
 
@@ -689,7 +709,8 @@ describe("fulfillSetupIntentSucceeded", () => {
   it("reopens confirmed bookings and sends the order back to vendor review for payment recovery", async () => {
     let step = 0;
     const supabase = {
-      from: vi.fn(() => {
+      from: vi.fn((table: string) => {
+        if (table === "accommodation_bookings") return bookingListFromQuery([]);
         step += 1;
         if (step === 1) {
           return {

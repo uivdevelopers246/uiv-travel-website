@@ -2,13 +2,18 @@ import { Header } from "@/components/layout/header";
 import { createClient } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
 import { AccommodationDetailClient } from "./AccommodationDetailClient";
+import { withAccommodationBookablePrices } from "@/lib/accommodation-calendar/pricing";
+
+export const dynamic = "force-dynamic";
 
 type Props = {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
-export default async function AccommodationDetailPage({ params }: Props) {
+export default async function AccommodationDetailPage({ params, searchParams }: Props) {
   const resolvedParams = await params;
+  const query = (await searchParams) ?? {};
   const { id } = resolvedParams;
 
   // Validate UUID format
@@ -20,7 +25,7 @@ export default async function AccommodationDetailPage({ params }: Props) {
   const supabase = await createClient();
 
   // Fetch accommodation with vendor info
-  const { data: accommodation, error } = await (supabase as any)
+  const { data: accommodation, error } = await supabase
     .from("accommodations")
     .select(
       `
@@ -33,8 +38,6 @@ export default async function AccommodationDetailPage({ params }: Props) {
       bed_count,
       bathroom_count,
       max_guest_capacity,
-      price_min_usd,
-      price_max_usd,
       check_in_time,
       check_out_time,
       suitable_for_children,
@@ -60,27 +63,32 @@ export default async function AccommodationDetailPage({ params }: Props) {
   if (error || !accommodation) {
     notFound();
   }
+  const [pricedAccommodation] = await withAccommodationBookablePrices(supabase, [accommodation]);
 
-  // Fetch accommodation images (once migration is applied)
-  // For now, this will return empty array if table doesn't exist
+  // Keep the cover image available if the gallery cannot be loaded.
   let images: { id: string; image_url: string; alt_text: string | null; display_order: number }[] = [];
   try {
     const { data: imageData } = await supabase
-      .from("accommodation_images" as "accommodations") // Type assertion until types are regenerated
+      .from("accommodation_images")
       .select("id, image_url, alt_text, display_order")
-      .eq("accommodation_id" as "id", id)
+      .eq("accommodation_id", id)
       .order("display_order", { ascending: true });
-    images = (imageData as unknown as typeof images) ?? [];
+    images = imageData ?? [];
   } catch {
-    // Table may not exist yet
+    // The cover image remains available without the gallery.
   }
 
   return (
     <>
       <Header />
       <AccommodationDetailClient 
-        accommodation={accommodation as any} 
+        accommodation={pricedAccommodation}
         images={images} 
+        initialSelection={{
+          checkIn: typeof query.check_in === "string" ? query.check_in : "",
+          checkOut: typeof query.check_out === "string" ? query.check_out : "",
+          guests: typeof query.guests === "string" ? query.guests : "1",
+        }}
       />
     </>
   );

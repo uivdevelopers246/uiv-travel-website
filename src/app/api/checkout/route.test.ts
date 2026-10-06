@@ -23,7 +23,7 @@ const supabaseServerMocks = vi.hoisted(() => ({
 const routeHelperMocks = vi.hoisted(() => ({
   badRequest: vi.fn((message: string) => Response.json({ error: message }, { status: 400 })),
   notFound: vi.fn((message: string) => Response.json({ error: message }, { status: 404 })),
-  requireSameOriginPost: vi.fn(() => null),
+  requireSameOriginPost: vi.fn((): Response | null => null),
   requireRole: vi.fn(),
   serverError: vi.fn((message: string) => Response.json({ error: message }, { status: 500 })),
 }));

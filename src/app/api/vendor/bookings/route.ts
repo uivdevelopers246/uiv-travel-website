@@ -12,9 +12,29 @@ import {
   parseOptionalUuidParam,
 } from "@/lib/activity-bookings/route-utils";
 import type { ActivityBookingStatus } from "@/lib/activity-bookings/constants";
+import {
+  listVendorAccommodationOptions,
+  listVendorAccommodationBookingPreviews,
+} from "@/lib/accommodation-bookings/vendor-bookings";
 import { serverError } from "@/api-shared/route-helpers";
 
 export const dynamic = "force-dynamic";
+
+async function listBookingPrefix<T>(
+  count: number,
+  fetchPage: (offset: number, limit: number) => Promise<T[]>,
+): Promise<T[]> {
+  const bookings: T[] = [];
+  // Bound each read below Supabase's row limit and keep preview lookup URLs small.
+  // ponytail: merging prefixes rereads older pages; use a database UNION if histories make this costly.
+  while (bookings.length < count) {
+    const pageSize = Math.min(100, count - bookings.length);
+    const page = await fetchPage(bookings.length, pageSize);
+    bookings.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return bookings;
+}
 
 function parseVendorBookingStatus(
   raw: string | null,
@@ -49,18 +69,17 @@ function parseVendorBookingStatus(
 
 export async function GET(req: Request) {
   const supabase = await createClient();
-  const role = await getUserRole(supabase);
-
-  if (role !== "vendor") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const role = await getUserRole(supabase);
+  if (role !== "vendor") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   let vendor;
@@ -91,22 +110,48 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: activityIdParsed.error }, { status: 400 });
   }
 
+  const accommodationIdParsed = parseOptionalUuidParam(
+    "accommodation_id", url.searchParams.get("accommodationId"),
+  );
+  if (!accommodationIdParsed.ok) {
+    return NextResponse.json({ error: accommodationIdParsed.error }, { status: 400 });
+  }
+  if (activityIdParsed.value && accommodationIdParsed.value) {
+    return NextResponse.json({ error: "Choose one listing filter." }, { status: 400 });
+  }
+
   const { limit, offset } = parseLimitOffset(url.searchParams);
   const service = createServiceRoleClient();
 
   try {
-    const [bookings, activities] = await Promise.all([
-      listVendorBookingPreviews(service, {
+    const [activityBookings, accommodationBookings, activities, accommodations] = await Promise.all([
+      accommodationIdParsed.value ? [] : listBookingPrefix(offset + limit + 1, (pageOffset, pageLimit) => listVendorBookingPreviews(service, {
         vendorId: vendor.id,
         activityId: activityIdParsed.value,
         status: statusParsed.status,
-        limit,
-        offset,
-      }),
+        limit: pageLimit,
+        offset: pageOffset,
+      })),
+      activityIdParsed.value ? [] : listBookingPrefix(offset + limit + 1, (pageOffset, pageLimit) => listVendorAccommodationBookingPreviews(service, {
+        vendorId: vendor.id,
+        accommodationId: accommodationIdParsed.value,
+        status: statusParsed.status,
+        limit: pageLimit,
+        offset: pageOffset,
+      })),
       listVendorBookingActivityOptions(service, vendor.id),
+      listVendorAccommodationOptions(service, vendor.id),
     ]);
-
-    return NextResponse.json({ bookings, activities });
+    const bookings = [
+      ...activityBookings.map((booking) => ({ ...booking, line_type: "activity" as const })),
+      ...accommodationBookings.map((booking) => ({ ...booking, line_type: "accommodation" as const })),
+    ].sort((left, right) => right.created_at.localeCompare(left.created_at) || left.id.localeCompare(right.id));
+    return NextResponse.json({
+      bookings: bookings.slice(offset, offset + limit),
+      hasMore: bookings.length > offset + limit,
+      activities,
+      accommodations,
+    });
   } catch {
     return serverError("Something went wrong. Please try again.");
   }

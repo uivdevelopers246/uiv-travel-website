@@ -45,15 +45,6 @@ function validatePositiveInt(
   return value;
 }
 
-function validatePrice(value: unknown, field: string): number | null | undefined {
-  if (value === undefined) return undefined;
-  if (value === null) return null;
-  if (typeof value !== "number" || Number.isNaN(value) || value < 0) {
-    throw new Error(`${field} must be a non-negative number or null`);
-  }
-  return value;
-}
-
 function parseAmenities(value: unknown): string[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) {
@@ -82,6 +73,10 @@ export async function POST(req: Request) {
     return parsedBody.response;
   }
   const { body } = parsedBody;
+
+  if ("price_min_usd" in body || "price_max_usd" in body) {
+    return badRequest("Prices are managed in Calendar & prices.");
+  }
 
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) {
@@ -135,17 +130,6 @@ export async function POST(req: Request) {
       body.max_guest_capacity,
       "max_guest_capacity",
     );
-    const price_min_usd = validatePrice(body.price_min_usd, "price_min_usd");
-    const price_max_usd = validatePrice(body.price_max_usd, "price_max_usd");
-
-    if (
-      price_min_usd != null &&
-      price_max_usd != null &&
-      price_min_usd > price_max_usd
-    ) {
-      return badRequest("price_min_usd must be less than or equal to price_max_usd");
-    }
-
     const amenities = parseAmenities(body.amenities);
 
     const createPayload: Parameters<typeof createAccommodation>[1] = {
@@ -159,8 +143,6 @@ export async function POST(req: Request) {
       createPayload.bathroom_count = bathroom_count;
     if (max_guest_capacity !== undefined)
       createPayload.max_guest_capacity = max_guest_capacity;
-    if (price_min_usd !== undefined) createPayload.price_min_usd = price_min_usd;
-    if (price_max_usd !== undefined) createPayload.price_max_usd = price_max_usd;
 
     if (typeof body.check_in_time === "string") {
       createPayload.check_in_time = body.check_in_time.trim() || null;

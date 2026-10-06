@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import {
   approveActivityBookingAsVendor,
+  approveAccommodationBookingAsVendor,
+  declineAccommodationBookingAsVendor,
   declineActivityOrderAsAdmin,
   syncOrderDeclinedWhenNoPendingHoldsRemain,
 } from "./vendor-approval";
@@ -62,6 +64,8 @@ vi.mock("@/lib/accommodation-bookings/service", async () => {
     ...actual,
     listAccommodationBookings: vi.fn(),
     getAccommodationBookingById: vi.fn(),
+    confirmPendingAccommodationBookingForVendor: vi.fn(),
+    declinePendingAccommodationBookingForVendor: vi.fn(),
     declineAllPendingAccommodationBookingsForOrder: vi.fn().mockResolvedValue(undefined),
   };
 });
@@ -293,5 +297,73 @@ describe("declineActivityOrderAsAdmin", () => {
     expect(
       activityBookingsService.declineAllPendingActivityBookingsForOrder,
     ).not.toHaveBeenCalled();
+  });
+});
+
+describe("accommodation vendor decisions", () => {
+  beforeEach(() => {
+    vi.mocked(createServiceRoleClient).mockReturnValue(mockSupabase);
+    vi.mocked(getVendorIdForCurrentUser).mockResolvedValue("vendor-1");
+    vi.mocked(accommodationBookingsService.getAccommodationBookingById).mockResolvedValue({
+      id: "stay-1", status: "pending_approval", vendor_id: "vendor-1", order_id: "order-1",
+    } as never);
+    vi.mocked(accommodationBookingsService.confirmPendingAccommodationBookingForVendor).mockResolvedValue(1);
+    vi.mocked(accommodationBookingsService.declinePendingAccommodationBookingForVendor).mockResolvedValue(1);
+    vi.mocked(orderService.getOrderById).mockReset().mockResolvedValue({
+      id: "order-1", status: "awaiting_vendor_approval",
+    } as never);
+    vi.mocked(orderBookingLines.listOrderBookingLinesForM4c).mockResolvedValue([]);
+  });
+
+  it.each([approveAccommodationBookingAsVendor, declineAccommodationBookingAsVendor])(
+    "rejects decisions by another property's vendor",
+    async (decide) => {
+      vi.mocked(accommodationBookingsService.getAccommodationBookingById).mockResolvedValue({
+        id: "stay-1", status: "pending_approval", vendor_id: "another-vendor", order_id: "order-1",
+      } as never);
+      await expect(decide(mockSupabase, "stay-1")).rejects.toThrow("Forbidden");
+      expect(accommodationBookingsService.confirmPendingAccommodationBookingForVendor).not.toHaveBeenCalled();
+      expect(accommodationBookingsService.declinePendingAccommodationBookingForVendor).not.toHaveBeenCalled();
+      expect(tryBeginSettlementChargeForOrder).not.toHaveBeenCalled();
+    },
+  );
+
+  it("approves the owned stay and uses the shared settlement flow", async () => {
+    await expect(approveAccommodationBookingAsVendor(mockSupabase, "stay-1")).resolves.toEqual({ outcome: "approved" });
+    expect(accommodationBookingsService.confirmPendingAccommodationBookingForVendor).toHaveBeenCalledWith(mockSupabase, "stay-1", "vendor-1");
+    expect(tryBeginSettlementChargeForOrder).toHaveBeenCalledWith(mockSupabase, "order-1");
+    expect(safeSendBookingStatusEmailHook).toHaveBeenCalledWith(mockSupabase, {
+      bookingId: "stay-1", event: "booking_confirmed", lineType: "accommodation",
+    });
+  });
+
+  it.each(["failed", "reconciliation_required"])("reports %s settlement without sending a confirmation", async (status) => {
+    vi.mocked(orderService.getOrderById)
+      .mockResolvedValueOnce({ id: "order-1", status: "awaiting_vendor_approval" } as never)
+      .mockResolvedValueOnce({ id: "order-1", status: "awaiting_vendor_approval" } as never)
+      .mockResolvedValueOnce({ id: "order-1", status } as never);
+    await expect(approveAccommodationBookingAsVendor(mockSupabase, "stay-1")).resolves.toEqual({
+      outcome: status === "failed" ? "payment_failed" : "payment_review",
+    });
+    expect(safeSendBookingStatusEmailHook).not.toHaveBeenCalled();
+  });
+
+  it("does not settle or notify when the database rejects an expired or changed hold", async () => {
+    vi.mocked(accommodationBookingsService.confirmPendingAccommodationBookingForVendor).mockResolvedValue(0);
+    await expect(approveAccommodationBookingAsVendor(mockSupabase, "stay-1")).rejects.toThrow("Could not confirm booking");
+    expect(tryBeginSettlementChargeForOrder).not.toHaveBeenCalled();
+    expect(safeSendBookingStatusEmailHook).not.toHaveBeenCalled();
+  });
+
+  it("declines the stay, recalculates the order and sends the stay notification", async () => {
+    vi.mocked(orderBookingLines.listOrderBookingLinesForM4c).mockResolvedValue([
+      { status: "declined", total_cents: 45000 },
+    ]);
+    await declineAccommodationBookingAsVendor(mockSupabase, "stay-1");
+    expect(accommodationBookingsService.declinePendingAccommodationBookingForVendor).toHaveBeenCalledWith(mockSupabase, "stay-1", "vendor-1");
+    expect(orderService.updateOrderStatus).toHaveBeenCalledWith(mockSupabase, "order-1", "declined");
+    expect(safeSendBookingStatusEmailHook).toHaveBeenCalledWith(mockSupabase, {
+      bookingId: "stay-1", event: "booking_declined", lineType: "accommodation",
+    });
   });
 });

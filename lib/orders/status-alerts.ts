@@ -1,4 +1,5 @@
 import type { OrderWithActivityBookingsPreview } from "./types";
+import { getOrderBookings } from "./types";
 
 export type StatusAlert = {
   tone: "success" | "warning" | "error";
@@ -26,7 +27,7 @@ export function collectOrderStatusAlerts(
   );
   const previousBookingStatusById = new Map(
     previousOrders.flatMap((order) =>
-      order.activity_bookings.map((booking) => [booking.id, booking.status] as const),
+      getOrderBookings(order).map((booking) => [booking.id, booking.status] as const),
     ),
   );
 
@@ -51,7 +52,7 @@ export function collectOrderStatusAlerts(
       }
     }
 
-    for (const booking of order.activity_bookings) {
+    for (const booking of getOrderBookings(order)) {
       const previousBookingStatus = previousBookingStatusById.get(booking.id);
       if (!previousBookingStatus || previousBookingStatus === booking.status) {
         continue;

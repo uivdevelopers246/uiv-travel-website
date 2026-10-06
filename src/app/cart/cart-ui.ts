@@ -14,7 +14,7 @@ export type CartLineAvailabilityState =
       canEditParticipants: true;
     }
   | {
-      kind: "capacity";
+      kind: "capacity" | "price_changed";
       tone: "warning";
       title: string;
       detail: string;
@@ -30,6 +30,7 @@ export type CartLineAvailabilityState =
 
 export type CartSummary = {
   activityCount: number;
+  accommodationCount: number;
   participantCount: number;
   subtotalCents: number;
   totalCents: number;
@@ -51,11 +52,12 @@ function normalizeWholeNumber(value: number | null | undefined): number {
 }
 
 export function getLineParticipants(line: CartLineWithPreview): number {
-  if (typeof line.participants !== "number" || !Number.isFinite(line.participants)) {
+  const quantity = line.line_type === "accommodation" ? line.guests : line.participants;
+  if (typeof quantity !== "number" || !Number.isFinite(quantity)) {
     return 1;
   }
 
-  return Math.max(1, Math.trunc(line.participants));
+  return Math.max(1, Math.trunc(quantity));
 }
 
 export function getLineTotalCents(value: number | null | undefined): number {
@@ -78,12 +80,24 @@ export function getDraftLineTotalCents(
   line: CartLineWithPreview,
   participants: number,
 ): number {
-  return getUnitPriceCents(line) * Math.max(1, Math.trunc(participants));
+  return line.line_type === "accommodation"
+    ? getLineTotalCents(line.line_total_cents)
+    : getUnitPriceCents(line) * Math.max(1, Math.trunc(participants));
+}
+
+export function getSavedStayNightlyPrices(line: CartLineWithPreview) {
+  const prices = line.stay_nightly_prices;
+  if (line.line_type !== "accommodation" || line.stay_price_changed ||
+      !prices || prices.length !== line.nights ||
+      prices.reduce((sum, night) => sum + night.price_cents, 0) !== line.line_total_cents) {
+    return [];
+  }
+  return prices;
 }
 
 export function getCartSummary(lines: CartLineWithPreview[]): CartSummary {
   const participantCount = lines.reduce(
-    (sum, line) => sum + getLineParticipants(line),
+    (sum, line) => sum + (line.line_type === "activity" ? getLineParticipants(line) : 0),
     0,
   );
   const subtotalCents = lines.reduce(
@@ -92,7 +106,8 @@ export function getCartSummary(lines: CartLineWithPreview[]): CartSummary {
   );
 
   return {
-    activityCount: lines.length,
+    activityCount: lines.filter((line) => line.line_type === "activity").length,
+    accommodationCount: lines.filter((line) => line.line_type === "accommodation").length,
     participantCount,
     subtotalCents,
     totalCents: subtotalCents,
@@ -102,6 +117,36 @@ export function getCartSummary(lines: CartLineWithPreview[]): CartSummary {
 export function getCartLineAvailabilityState(
   line: CartLineWithPreview,
 ): CartLineAvailabilityState {
+  if (line.line_type === "accommodation") {
+    if (!line.accommodation_name || !line.check_in || !line.check_out ||
+        line.nights < 1 || line.check_in < new Date().toISOString().slice(0, 10) ||
+        !line.stay_dates_available) {
+      return {
+        kind: "unavailable", tone: "error", title: "Stay unavailable",
+        detail: "These dates are no longer available. Remove this stay and choose new dates before continuing.",
+        canEditParticipants: false,
+      };
+    }
+    if (line.stay_price_changed) {
+      return {
+        kind: "price_changed", tone: "warning", title: "Nightly prices have changed",
+        detail: "Your saved total is shown above. Open this stay to review the current nightly prices and add these dates to your cart again before continuing.",
+        canEditParticipants: false,
+      };
+    }
+    if (line.max_guest_capacity != null && getLineParticipants(line) > line.max_guest_capacity) {
+      return {
+        kind: "capacity", tone: "warning", title: "Guest count needs attention",
+        detail: `This accommodation allows up to ${line.max_guest_capacity} guests. Reduce your guest count before continuing.`,
+        canEditParticipants: line.max_guest_capacity > 0,
+      };
+    }
+    return {
+      kind: "valid", tone: "success", title: "Dates available to request",
+      detail: "Your host must approve the stay. Dates are reserved only after you save a payment method; no charge is made at checkout.",
+      canEditParticipants: true,
+    };
+  }
   if (!line.activity_title) {
     return {
       kind: "unavailable",
@@ -177,7 +222,9 @@ export function getCheckoutCallToActionState(input: {
       supportText:
         "Checkout saves a payment method first. Stripe only charges confirmed bookings after vendor approval.",
       blockingMessage:
-        invalidLines === 1
+        input.lines.some((line) => line.stay_price_changed)
+          ? "Review the changed nightly prices and add the affected stays to your cart again before saving a payment method."
+          : invalidLines === 1
           ? "Resolve the unavailable or over-capacity request in your cart before saving a payment method."
           : "Resolve the unavailable or over-capacity requests in your cart before saving a payment method.",
     };
@@ -188,11 +235,11 @@ export function getCheckoutCallToActionState(input: {
       disabled: true,
       label: "Save payment method",
       supportText:
-        "No charge today. Save or reset your participant edits first, then continue to secure checkout.",
+        "No charge at checkout. Save or reset your guest or participant edits first, then continue to secure checkout.",
       blockingMessage:
         input.dirtyLineCount === 1
-          ? "Save or reset the participant change on 1 activity before continuing."
-          : `Save or reset the participant changes on ${input.dirtyLineCount} activities before continuing.`,
+          ? "Save or reset the guest or participant change on 1 request before continuing."
+          : `Save or reset the guest or participant changes on ${input.dirtyLineCount} requests before continuing.`,
     };
   }
 
@@ -210,7 +257,7 @@ export function getCheckoutCallToActionState(input: {
     disabled: false,
     label: "Save payment method",
     supportText:
-      "No charge today. Stripe saves your payment method first and only charges confirmed bookings after vendor approval.",
+      "No charge at checkout. Stripe saves your payment method first and only charges confirmed bookings after vendor approval.",
     blockingMessage: null,
   };
 }

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { AccommodationCard } from "./AccommodationCard";
 import { AccommodationFilters, type AccommodationFilterState } from "./AccommodationFilters";
 import type { AccommodationDisplay } from "@/lib/accommodations/types";
+import { matchesAccommodationPriceRange } from "./pricing";
 
 type Props = {
   accommodations: AccommodationDisplay[];
@@ -35,15 +36,7 @@ export function AccommodationGrid({ accommodations, showFilters = true, showHead
       }
 
       // Price filter
-      if (filters.priceRange !== "all") {
-        const price = accommodation.price_min_usd || 0;
-        const [min, max] = filters.priceRange.split("-").map(s => s.replace("+", ""));
-        if (filters.priceRange.includes("+")) {
-          if (price < parseInt(min)) return false;
-        } else {
-          if (price < parseInt(min) || price > parseInt(max)) return false;
-        }
-      }
+      if (!matchesAccommodationPriceRange(accommodation.price_min_usd, filters.priceRange)) return false;
 
       // Max guests filter
       if (accommodation.max_guest_capacity && accommodation.max_guest_capacity > filters.maxGuests) {

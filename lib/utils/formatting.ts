@@ -27,6 +27,19 @@ export function formatParticipantsLabel(count: number): string {
   return formatCount(count, "participant", "participants");
 }
 
+/** Stay dates are calendar dates, so never shift them into the viewer's timezone. */
+export function formatStayDateRange(checkIn: string, checkOut: string): string {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    month: "short", day: "numeric", year: "numeric", timeZone: "UTC",
+  });
+  const start = new Date(`${checkIn}T00:00:00Z`);
+  const end = new Date(`${checkOut}T00:00:00Z`);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
+    return "Stay dates unavailable";
+  }
+  return `${formatter.format(start)} to ${formatter.format(end)}`;
+}
+
 export function formatSpotLabel(count: number): string {
   return formatCount(count, "spot", "spots");
 }
