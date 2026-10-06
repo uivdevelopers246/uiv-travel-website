@@ -20,6 +20,10 @@ const vendorBookingMocks = vi.hoisted(() => ({
   listVendorBookingActivityOptions: vi.fn(),
   listVendorBookingPreviews: vi.fn(),
 }));
+const accommodationBookingMocks = vi.hoisted(() => ({
+  listVendorAccommodationOptions: vi.fn(),
+  listVendorAccommodationBookingPreviews: vi.fn(),
+}));
 
 const routeHelperMocks = vi.hoisted(() => ({
   serverError: vi.fn((message: string) =>
@@ -32,6 +36,7 @@ vi.mock("@/lib/supabase/service-role", () => serviceRoleMocks);
 vi.mock("@/lib/auth/roles", () => roleMocks);
 vi.mock("@/lib/vendors/service", () => vendorServiceMocks);
 vi.mock("@/lib/activity-bookings/vendor-bookings", () => vendorBookingMocks);
+vi.mock("@/lib/accommodation-bookings/vendor-bookings", () => accommodationBookingMocks);
 vi.mock("@/api-shared/route-helpers", () => routeHelperMocks);
 
 import { GET } from "./route";
@@ -65,6 +70,8 @@ describe("GET /api/vendor/bookings", () => {
     roleMocks.getUserRole.mockResolvedValue("vendor");
     vendorServiceMocks.getVendorByOwner.mockResolvedValue({ id: VENDOR_ID });
     vendorBookingMocks.listVendorBookingPreviews.mockResolvedValue([]);
+    accommodationBookingMocks.listVendorAccommodationBookingPreviews.mockResolvedValue([]);
+    accommodationBookingMocks.listVendorAccommodationOptions.mockResolvedValue([]);
     vendorBookingMocks.listVendorBookingActivityOptions.mockResolvedValue([
       { id: ACTIVITY_ID, title: "Kayak Tour" },
     ]);
@@ -116,5 +123,81 @@ describe("GET /api/vendor/bookings", () => {
 
     expect(response.status).toBe(403);
     expect(body).toEqual({ error: "User is not associated with a vendor" });
+  });
+
+  it("requires a signed-in vendor before using service-role booking queries", async () => {
+    supabaseServerMocks.createClient.mockResolvedValue(createSupabaseClient(""));
+    expect((await GET(createRequest())).status).toBe(401);
+    supabaseServerMocks.createClient.mockResolvedValue(createSupabaseClient());
+    roleMocks.getUserRole.mockResolvedValue("user");
+    expect((await GET(createRequest())).status).toBe(403);
+    expect(serviceRoleMocks.createServiceRoleClient).not.toHaveBeenCalled();
+    expect(accommodationBookingMocks.listVendorAccommodationBookingPreviews).not.toHaveBeenCalled();
+  });
+
+  it("merges both booking kinds before applying pagination, scoped to the current vendor", async () => {
+    vendorBookingMocks.listVendorBookingPreviews.mockResolvedValue([
+      { id: "activity-booking", created_at: "2026-06-01T00:00:00Z" },
+    ]);
+    accommodationBookingMocks.listVendorAccommodationBookingPreviews.mockResolvedValue([
+      { id: "stay-booking", created_at: "2026-06-02T00:00:00Z", check_in: "2026-07-01", guests: 2 },
+    ]);
+    const response = await GET(createRequest("limit=1&offset=1"));
+    const body = await response.json();
+    expect(body.bookings).toEqual([
+      { id: "activity-booking", created_at: "2026-06-01T00:00:00Z", line_type: "activity" },
+    ]);
+    expect(accommodationBookingMocks.listVendorAccommodationBookingPreviews).toHaveBeenCalledWith(
+      { client: "service-role" }, expect.objectContaining({ vendorId: VENDOR_ID, status: "pending_approval", limit: 3, offset: 0 }),
+    );
+  });
+
+  it("filters stays by property without including activity requests", async () => {
+    const response = await GET(createRequest(`accommodationId=${ACTIVITY_ID}`));
+    expect(response.status).toBe(200);
+    expect(vendorBookingMocks.listVendorBookingPreviews).not.toHaveBeenCalled();
+    expect(accommodationBookingMocks.listVendorAccommodationBookingPreviews).toHaveBeenCalledWith(
+      expect.anything(), expect.objectContaining({ accommodationId: ACTIVITY_ID, vendorId: VENDOR_ID }),
+    );
+  });
+
+  it("reports another page only when a booking exists beyond the current page", async () => {
+    accommodationBookingMocks.listVendorAccommodationBookingPreviews.mockResolvedValue([
+      { id: "stay-newer", created_at: "2026-06-02T00:00:00Z" },
+      { id: "stay-older", created_at: "2026-06-01T00:00:00Z" },
+    ]);
+    const firstPage = await (await GET(createRequest("limit=1"))).json();
+    const secondPage = await (await GET(createRequest("limit=1&offset=1"))).json();
+    expect(firstPage.hasMore).toBe(true);
+    expect(firstPage.bookings[0].id).toBe("stay-newer");
+    expect(secondPage.hasMore).toBe(false);
+    expect(secondPage.bookings[0].id).toBe("stay-older");
+  });
+
+  it.each(["activity", "accommodation"])("paginates %s bookings beyond the database response limit", async (kind) => {
+    const rows = Array.from({ length: 1022 }, (_, index) => ({
+      id: `booking-${index}`,
+      created_at: new Date(Date.UTC(2026, 9, 2) - index * 60_000).toISOString(),
+    }));
+    const list = kind === "activity"
+      ? vendorBookingMocks.listVendorBookingPreviews
+      : accommodationBookingMocks.listVendorAccommodationBookingPreviews;
+    list.mockImplementation(async (_client, { offset, limit }) =>
+      rows.slice(offset, offset + Math.min(limit, 1000)),
+    );
+
+    const response = await GET(createRequest("limit=20&offset=1000"));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.bookings.map((booking: { id: string }) => booking.id)).toEqual(
+      rows.slice(1000, 1020).map((booking) => booking.id),
+    );
+    expect(body.hasMore).toBe(true);
+  });
+
+  it("rejects malformed or conflicting property filters before querying bookings", async () => {
+    expect((await GET(createRequest("accommodationId=not-a-uuid"))).status).toBe(400);
+    expect((await GET(createRequest(`accommodationId=${ACTIVITY_ID}&activityId=${ACTIVITY_ID}`))).status).toBe(400);
+    expect(accommodationBookingMocks.listVendorAccommodationBookingPreviews).not.toHaveBeenCalled();
   });
 });

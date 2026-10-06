@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { ActivityBookingWithPreview, OrderWithActivityBookingsPaymentPreview } from "@/lib/orders/types";
+import { getCheckoutSuccessState } from "@/lib/orders/buyer-flow";
+import { collectOrderStatusAlerts } from "@/lib/orders/status-alerts";
 
 import {
   getOrderIdsToPoll,
@@ -63,6 +65,43 @@ function makeOrder(
 }
 
 describe("getOrderCardState", () => {
+  it("separates confirmed totals from the requested total after mixed vendor decisions", () => {
+    const order = makeOrder({
+      total_cents: 55000,
+      activity_bookings: [makeBooking({ status: "declined", total_cents: 10000 })],
+      accommodation_bookings: [{
+        ...makeBooking(), id: "stay-1", accommodation_id: "villa-1", status: "confirmed",
+        accommodation_name: "Beach Villa", accommodation_image_url: null,
+        check_in: "2026-06-10", check_out: "2026-06-13", guests: 4, total_cents: 45000,
+      }],
+    });
+    const state = getOrderCardState(order, Date.parse("2026-01-02T08:00:00Z"));
+    expect(state.order.total_cents).toBe(55000);
+    expect(state.confirmedTotalCents).toBe(45000);
+  });
+
+  it("shows stay-only requests as submitted and tracks accommodation decisions", () => {
+    const order = makeOrder({
+      activity_bookings: [],
+      accommodation_bookings: [{
+        ...makeBooking(), id: "stay-1", accommodation_id: "villa-1",
+        accommodation_name: "Beach Villa", accommodation_image_url: "/villa.jpg",
+        check_in: "2026-06-10", check_out: "2026-06-13", guests: 4,
+      }],
+    });
+    const state = getOrderCardState(order, Date.parse("2026-01-02T08:00:00Z"));
+    expect(state.isFinalizing).toBe(false);
+    expect(state.notice.title).toBe("Booking request received!");
+    expect(state.bookingStates[0].booking).toMatchObject({ accommodation_name: "Beach Villa", guests: 4 });
+    expect(state.pendingApprovalCount).toBe(1);
+    expect(state.hasActiveCountdown).toBe(true);
+    expect(getCheckoutSuccessState(order.id, order).kind).toBe("submitted");
+    expect(collectOrderStatusAlerts([order], [{
+      ...order,
+      accommodation_bookings: order.accommodation_bookings?.map((booking) => ({ ...booking, status: "confirmed" })),
+    }])).toEqual([{ tone: "success", message: "Your booking was confirmed by the vendor." }]);
+  });
+
   it("summarizes pending approval orders with the earliest countdown and polling enabled", () => {
     const state = getOrderCardState(
       makeOrder({

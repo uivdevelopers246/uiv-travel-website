@@ -6,7 +6,7 @@ import {
   getCheckoutSuccessState,
   getOrderStatusNotice,
 } from "@/lib/orders/buyer-flow";
-import type { OrderWithActivityBookingsPaymentPreview } from "@/lib/orders/types";
+import { getOrderBookings, type OrderWithActivityBookingsPaymentPreview } from "@/lib/orders/types";
 
 const FINALIZE_REFRESH_INTERVAL_MS = 3_000;
 const READY_REDIRECT_DELAY_MS = 2_000;
@@ -202,7 +202,7 @@ export function CheckoutSuccessClient({
                   <div className="mt-4 grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
                     <div className="rounded-2xl bg-white px-4 py-3">
                       <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                        Order total
+                        Requested total
                       </span>
                       <span className="mt-2 block text-xl font-semibold text-[#193059]">
                         {formatCurrencyFromCents(viewState.order.total_cents)}
@@ -213,7 +213,7 @@ export function CheckoutSuccessClient({
                         Booking items
                       </span>
                       <span className="mt-2 block text-xl font-semibold text-[#193059]">
-                        {viewState.order.activity_bookings.length}
+                        {getOrderBookings(viewState.order).length}
                       </span>
                     </div>
                   </div>

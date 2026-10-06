@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { formatCurrencyFromCents } from "@/lib/utils/formatting";
+import { formatCurrencyFromCents, formatStayDateRange } from "@/lib/utils/formatting";
 import { redirectToLogin as redirectClientToLogin } from "@/app/_shared/client-auth";
 
 type BookingStatus =
@@ -27,22 +27,33 @@ type VendorBookingActivityOption = {
 
 type VendorBookingPreview = {
   id: string;
-  activity_id: string;
   created_at: string;
-  participants: number;
   total_cents: number;
   status: BookingStatus;
   customer_name: string;
+  approval_deadline_at: string | null;
+} & ({
+  line_type: "activity";
+  participants: number;
   activity_title: string;
   slot_starts_at: string;
   slot_ends_at: string;
-  approval_deadline_at: string | null;
-};
+} | {
+  line_type: "accommodation";
+  accommodation_name: string;
+  guests: number;
+  check_in: string;
+  check_out: string;
+});
 
 type VendorBookingsResponse = {
   bookings: VendorBookingPreview[];
+  hasMore: boolean;
   activities: VendorBookingActivityOption[];
+  accommodations: { id: string; name: string }[];
 };
+
+const PAGE_SIZE = 20;
 
 type Toast = {
   id: number;
@@ -151,13 +162,17 @@ function getSlaClasses(value: string) {
 
 async function fetchVendorBookings(
   status: StatusFilterValue,
-  activityId: string,
+  listingFilter: string,
+  page: number,
 ): Promise<VendorBookingsResponse> {
   const params = new URLSearchParams();
   params.set("status", status);
+  params.set("limit", String(PAGE_SIZE));
+  params.set("offset", String(page * PAGE_SIZE));
 
-  if (activityId) {
-    params.set("activityId", activityId);
+  if (listingFilter) {
+    const [type, id] = listingFilter.split(":");
+    params.set(type === "accommodation" ? "accommodationId" : "activityId", id);
   }
 
   const response = await fetch(`/api/vendor/bookings?${params.toString()}`, {
@@ -166,7 +181,7 @@ async function fetchVendorBookings(
 
   if (response.status === 401) {
     redirectToLogin();
-    return { bookings: [], activities: [] };
+    return { bookings: [], activities: [], accommodations: [], hasMore: false };
   }
 
   const payload = await response.json().catch(() => null);
@@ -187,7 +202,8 @@ async function fetchVendorBookings(
     !payload ||
     typeof payload !== "object" ||
     !Array.isArray(payload.bookings) ||
-    !Array.isArray(payload.activities)
+    !Array.isArray(payload.activities) ||
+    !Array.isArray(payload.accommodations)
   ) {
     throw new Error("Unexpected response while loading booking requests.");
   }
@@ -195,11 +211,14 @@ async function fetchVendorBookings(
   return payload as VendorBookingsResponse;
 }
 
-export function VendorBookingsClient() {
+export function VendorBookingsClient({ initialListingFilter = "" }: { initialListingFilter?: string }) {
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("pending");
-  const [activityFilter, setActivityFilter] = useState("");
+  const [activityFilter, setActivityFilter] = useState(initialListingFilter);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [bookings, setBookings] = useState<VendorBookingPreview[]>([]);
   const [activities, setActivities] = useState<VendorBookingActivityOption[]>([]);
+  const [accommodations, setAccommodations] = useState<VendorBookingsResponse["accommodations"]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [accessDenied, setAccessDenied] = useState(false);
@@ -220,13 +239,15 @@ export function VendorBookingsClient() {
 
       void (async () => {
         try {
-          const nextData = await fetchVendorBookings(statusFilter, activityFilter);
+          const nextData = await fetchVendorBookings(statusFilter, activityFilter, page);
           if (!active) {
             return;
           }
 
           setBookings(nextData.bookings);
           setActivities(nextData.activities);
+          setAccommodations(nextData.accommodations);
+          setHasMore(nextData.hasMore);
         } catch (nextError: unknown) {
           if (!active) {
             return;
@@ -259,7 +280,7 @@ export function VendorBookingsClient() {
       active = false;
       window.clearTimeout(timeoutId);
     };
-  }, [activityFilter, reloadToken, statusFilter]);
+  }, [activityFilter, page, reloadToken, statusFilter]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -282,14 +303,15 @@ export function VendorBookingsClient() {
   }
 
   async function handleBookingAction(
-    bookingId: string,
+    booking: VendorBookingPreview,
     action: "approve" | "decline",
   ) {
+    const bookingId = `${booking.line_type}:${booking.id}`;
     setPendingActionById((current) => ({ ...current, [bookingId]: action }));
 
     try {
       const response = await fetch(
-        `/api/vendor/activity-bookings/${bookingId}/${action}`,
+        `/api/vendor/${booking.line_type}-bookings/${booking.id}/${action}`,
         {
           method: "POST",
         },
@@ -324,6 +346,7 @@ export function VendorBookingsClient() {
         );
       }
       setReloadToken((value) => value + 1);
+      setPage(0);
     } catch (nextError: unknown) {
       pushToast(
         "error",
@@ -399,7 +422,7 @@ export function VendorBookingsClient() {
                 Vendor bookings
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-white/72 md:text-base">
-                Review booking requests across your activities, track the 24-hour approval SLA, and confirm or decline requests without leaving your dashboard.
+                Review booking requests across your activities and accommodations, track the 24-hour approval window, and confirm or decline requests without leaving your dashboard.
               </p>
             </div>
             <div className="grid gap-3 rounded-[24px] bg-white/8 p-4 text-sm text-white/80 sm:min-w-[250px]">
@@ -423,9 +446,10 @@ export function VendorBookingsClient() {
               Status
               <select
                 value={statusFilter}
-                onChange={(event) =>
-                  setStatusFilter(event.target.value as StatusFilterValue)
-                }
+                onChange={(event) => {
+                  setStatusFilter(event.target.value as StatusFilterValue);
+                  setPage(0);
+                }}
                 className="rounded-2xl border border-[#d8e5f2] bg-[#f8fbfe] px-4 py-3 text-sm font-medium text-[#193059] outline-none transition-colors focus:border-[#407FC2]"
               >
                 <option value="pending">Pending</option>
@@ -437,20 +461,42 @@ export function VendorBookingsClient() {
             </label>
 
             <label className="grid gap-2 text-sm font-semibold text-[#193059]">
-              Activity
+              Listing
               <select
                 value={activityFilter}
-                onChange={(event) => setActivityFilter(event.target.value)}
+                onChange={(event) => {
+                  setActivityFilter(event.target.value);
+                  setPage(0);
+                }}
                 className="rounded-2xl border border-[#d8e5f2] bg-[#f8fbfe] px-4 py-3 text-sm font-medium text-[#193059] outline-none transition-colors focus:border-[#407FC2]"
               >
-                <option value="">All activities</option>
+                <option value="">All listings</option>
+                <optgroup label="Activities">
                 {activities.map((activity) => (
-                  <option key={activity.id} value={activity.id}>
+                  <option key={activity.id} value={`activity:${activity.id}`}>
                     {activity.title}
                   </option>
                 ))}
+                </optgroup>
+                <optgroup label="Accommodations">
+                  {accommodations.map((accommodation) => (
+                    <option key={accommodation.id} value={`accommodation:${accommodation.id}`}>
+                      {accommodation.name}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
             </label>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            {activityFilter.startsWith("accommodation:") && accommodations.some((accommodation) => activityFilter === `accommodation:${accommodation.id}`) && (
+              <Link href={`/my-listings/manage/accommodations/${activityFilter.split(":")[1]}/calendar`} className="rounded-lg border border-[#407FC2] px-4 py-2 text-sm font-semibold text-[#407FC2] hover:bg-blue-50">
+                Calendar &amp; prices for this accommodation
+              </Link>
+            )}
+            <button type="button" disabled={loading} onClick={() => setReloadToken((value) => value + 1)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+              Refresh bookings
+            </button>
           </div>
         </section>
 
@@ -478,13 +524,13 @@ export function VendorBookingsClient() {
               No bookings found
             </h2>
             <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-600 md:text-base">
-              Adjust the status or activity filters to review a different set of booking requests.
+              Adjust the status or listing filters to review a different set of booking requests.
             </p>
           </section>
         ) : (
           <section className="space-y-5">
             {bookings.map((booking) => {
-              const pendingAction = pendingActionById[booking.id];
+              const pendingAction = pendingActionById[`${booking.line_type}:${booking.id}`];
               const slaValue = formatRemainingSla(
                 booking.approval_deadline_at,
                 booking.status,
@@ -493,14 +539,14 @@ export function VendorBookingsClient() {
 
               return (
                 <article
-                  key={booking.id}
+                  key={`${booking.line_type}:${booking.id}`}
                   className="rounded-[28px] border border-[#d8e5f2] bg-white p-6 shadow-[0_20px_60px_rgba(25,48,89,0.08)]"
                 >
                   <div className="flex flex-col gap-5 border-b border-[#e5eef7] pb-5 lg:flex-row lg:items-start lg:justify-between">
                     <div className="space-y-3">
                       <div className="flex flex-wrap items-center gap-3">
                         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#407FC2]">
-                          Booking {booking.id.slice(0, 8)}
+                          {booking.line_type === "accommodation" ? "Stay" : "Activity"} booking {booking.id.slice(0, 8)}
                         </p>
                         <span
                           className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${getStatusClasses(
@@ -516,7 +562,7 @@ export function VendorBookingsClient() {
                           className="text-3xl font-bold text-[#193059]"
                           style={{ fontFamily: "var(--font-playfair)" }}
                         >
-                          {booking.activity_title}
+                          {booking.line_type === "accommodation" ? booking.accommodation_name : booking.activity_title}
                         </h2>
                         <p className="mt-2 text-sm text-slate-600">
                           Customer: {booking.customer_name}
@@ -532,9 +578,9 @@ export function VendorBookingsClient() {
                         </span>
                       </div>
                       <div className="flex items-center justify-between gap-4">
-                        <span>Participants</span>
+                        <span>{booking.line_type === "accommodation" ? "Guests" : "Participants"}</span>
                         <span className="font-semibold text-[#193059]">
-                          {booking.participants}
+                          {booking.line_type === "accommodation" ? booking.guests : booking.participants}
                         </span>
                       </div>
                       <div className="flex items-center justify-between gap-4">
@@ -554,10 +600,10 @@ export function VendorBookingsClient() {
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                       <div className="rounded-[22px] border border-[#d8e5f2] bg-[#f8fbfe] p-4">
                         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-                          Slot
+                          {booking.line_type === "accommodation" ? "Check-in to check-out" : "Slot"}
                         </p>
                         <p className="mt-2 text-sm font-semibold text-[#193059]">
-                          {formatSlotDateTime(
+                          {booking.line_type === "accommodation" ? formatStayDateRange(booking.check_in, booking.check_out) : formatSlotDateTime(
                             booking.slot_starts_at,
                             booking.slot_ends_at,
                           )}
@@ -566,10 +612,10 @@ export function VendorBookingsClient() {
 
                       <div className="rounded-[22px] border border-[#d8e5f2] bg-[#f8fbfe] p-4">
                         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-                          Participants
+                          {booking.line_type === "accommodation" ? "Guests" : "Participants"}
                         </p>
                         <p className="mt-2 text-sm font-semibold text-[#193059]">
-                          {formatParticipants(booking.participants)}
+                          {booking.line_type === "accommodation" ? `${booking.guests} ${booking.guests === 1 ? "guest" : "guests"}` : formatParticipants(booking.participants)}
                         </p>
                       </div>
 
@@ -593,7 +639,7 @@ export function VendorBookingsClient() {
                       <div className="flex flex-col gap-3 sm:flex-row">
                         <button
                           type="button"
-                          onClick={() => handleBookingAction(booking.id, "decline")}
+                          onClick={() => handleBookingAction(booking, "decline")}
                           disabled={Boolean(pendingAction)}
                           className="inline-flex min-w-[140px] items-center justify-center rounded-full border border-rose-300 px-5 py-3 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
                         >
@@ -601,8 +647,8 @@ export function VendorBookingsClient() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleBookingAction(booking.id, "approve")}
-                          disabled={Boolean(pendingAction)}
+                          onClick={() => handleBookingAction(booking, "approve")}
+                          disabled={Boolean(pendingAction) || slaValue === "Expired"}
                           className="inline-flex min-w-[140px] items-center justify-center rounded-full bg-gradient-to-r from-[#407FC2] to-[#193059] px-5 py-3 text-sm font-semibold text-white transition-all duration-300 hover:from-[#193059] hover:to-[#407FC2] disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {pendingAction === "approve" ? "Approving..." : "Approve"}
@@ -615,6 +661,21 @@ export function VendorBookingsClient() {
             })}
           </section>
         )}
+        {!error && (page > 0 || hasMore) ? (
+          <nav aria-label="Booking pages" className="flex items-center justify-center gap-4">
+            <button type="button" onClick={() => setPage((current) => current - 1)}
+              disabled={loading || page === 0 || Object.keys(pendingActionById).length > 0}
+              className="rounded-full border border-[#d8e5f2] bg-white px-5 py-3 text-sm font-semibold text-[#193059] disabled:opacity-50">
+              Previous
+            </button>
+            <span className="text-sm text-[#193059]">Page {page + 1}</span>
+            <button type="button" onClick={() => setPage((current) => current + 1)}
+              disabled={loading || !hasMore || Object.keys(pendingActionById).length > 0}
+              className="rounded-full border border-[#d8e5f2] bg-white px-5 py-3 text-sm font-semibold text-[#193059] disabled:opacity-50">
+              Next
+            </button>
+          </nav>
+        ) : null}
       </div>
 
       <div
