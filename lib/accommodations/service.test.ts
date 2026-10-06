@@ -2,10 +2,11 @@ import { describe, it, expect, vi } from "vitest";
 import {
   createAccommodation,
   getAccommodationById,
+  listAccommodations,
 } from "./service";
 
 function makeMockSupabase() {
-  const query: any = {
+  const query = {
     select: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
     range: vi.fn().mockReturnThis(),
@@ -14,8 +15,9 @@ function makeMockSupabase() {
     maybeSingle: vi.fn(),
   };
 
-  const supabase: any = {
+  const supabase = {
     from: vi.fn(() => query),
+    rpc: vi.fn().mockResolvedValue({ data: [], error: null }),
     auth: {
       getUser: vi.fn(),
     },
@@ -25,20 +27,20 @@ function makeMockSupabase() {
 }
 
 function makeMockSupabaseForCreateAccommodation() {
-  const accommodationsQuery: any = {
+  const accommodationsQuery = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     insert: vi.fn().mockReturnThis(),
     single: vi.fn(),
   };
 
-  const vendorsQuery: any = {
+  const vendorsQuery = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn(),
   };
 
-  const supabase: any = {
+  const supabase = {
     from: vi.fn((table: string) =>
       table === "vendors" ? vendorsQuery : accommodationsQuery,
     ),
@@ -106,7 +108,7 @@ describe("accommodations service", () => {
       .mockResolvedValueOnce({ data: createdRow, error: null })
       .mockResolvedValueOnce({ data: createdRow, error: null });
 
-    const created = await createAccommodation(supabase, {
+    const created = await createAccommodation(supabase as never, {
       name: "Ocean Villa",
       accommodation_type: "Villa",
     });
@@ -124,7 +126,9 @@ describe("accommodations service", () => {
     );
     expect(created.id).toBe("acc1");
     expect(created.vendor_id).toBe("v1");
-    expect(supabase.rpc).not.toHaveBeenCalled();
+    expect(supabase.rpc).toHaveBeenCalledWith("accommodation_bookable_price_ranges", { p_accommodation_ids: ["acc1"] });
+    expect(created.price_min_usd).toBeNull();
+    expect(created.price_max_usd).toBeNull();
   });
 
   it("createAccommodation: calls set_accommodation_location_point when latitude and longitude are provided", async () => {
@@ -141,14 +145,14 @@ describe("accommodations service", () => {
       .mockResolvedValueOnce({ data: createdRow, error: null })
       .mockResolvedValueOnce({ data: createdRow, error: null });
 
-    await createAccommodation(supabase, {
+    await createAccommodation(supabase as never, {
       name: "Beach House",
       accommodation_type: "Hotel",
       latitude: 13.1,
       longitude: -59.6,
     });
 
-    expect(supabase.rpc).toHaveBeenCalledTimes(1);
+    expect(supabase.rpc).toHaveBeenCalledTimes(2);
     expect(supabase.rpc).toHaveBeenCalledWith(
       "set_accommodation_location_point",
       {
@@ -167,11 +171,32 @@ describe("accommodations service", () => {
       error: null,
     });
 
-    const result = await getAccommodationById(supabase, "nonexistent-id");
+    const result = await getAccommodationById(supabase as never, "nonexistent-id");
 
     expect(supabase.from).toHaveBeenCalledWith("accommodations");
     expect(query.eq).toHaveBeenCalledWith("id", "nonexistent-id");
     expect(query.eq).toHaveBeenCalledWith("status", "published");
     expect(result).toBeNull();
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("getAccommodationById replaces historical manual prices with the current bookable range", async () => {
+    const { supabase, query } = makeMockSupabase();
+    query.maybeSingle.mockResolvedValue({ data: minimalAccommodationRow({ price_min_usd: 1, price_max_usd: 999 }), error: null });
+    supabase.rpc.mockResolvedValue({ data: [{ accommodation_id: "acc1", price_min_usd: 100, price_max_usd: 150 }], error: null });
+    const result = await getAccommodationById(supabase as never, "acc1");
+    expect(result).toMatchObject({ price_min_usd: 100, price_max_usd: 150 });
+  });
+
+  it("listAccommodations uses one batch query and clears old prices for listings with no available nights", async () => {
+    const { supabase, query } = makeMockSupabase();
+    query.range.mockResolvedValue({ data: [minimalAccommodationRow({ price_min_usd: 1 }), minimalAccommodationRow({ id: "acc2", price_min_usd: 99 })], error: null });
+    supabase.rpc.mockResolvedValue({ data: [{ accommodation_id: "acc1", price_min_usd: 125, price_max_usd: 125 }], error: null });
+    const result = await listAccommodations(supabase as never);
+    expect(result.map(({ id, price_min_usd, price_max_usd }) => ({ id, price_min_usd, price_max_usd }))).toEqual([
+      { id: "acc1", price_min_usd: 125, price_max_usd: 125 },
+      { id: "acc2", price_min_usd: null, price_max_usd: null },
+    ]);
+    expect(supabase.rpc).toHaveBeenCalledExactlyOnceWith("accommodation_bookable_price_ranges", { p_accommodation_ids: ["acc1", "acc2"] });
   });
 });

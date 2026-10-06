@@ -51,10 +51,10 @@ export default async function ManageAccommodationEditPage({ params }: PageProps)
     );
   }
 
-  let accommodationQuery = (supabase as any)
+  let accommodationQuery = supabase
     .from("accommodations")
     .select(
-      "id, vendor_id, name, accommodation_type, latitude, longitude, bedroom_count, bed_count, bathroom_count, max_guest_capacity, price_min_usd, price_max_usd, check_in_time, check_out_time, suitable_for_children, wheelchair_accessible, smoking_allowed, pets_allowed, beach_access_or_view, transportation_provided, amenities, address, parish, transportation_notes, pickup_notes, image_url, status",
+      "id, vendor_id, name, accommodation_type, latitude, longitude, bedroom_count, bed_count, bathroom_count, max_guest_capacity, check_in_time, check_out_time, suitable_for_children, wheelchair_accessible, smoking_allowed, pets_allowed, beach_access_or_view, transportation_provided, amenities, address, parish, transportation_notes, pickup_notes, image_url, status",
     )
     .eq("id", resolvedParams.id);
 
@@ -76,13 +76,12 @@ export default async function ManageAccommodationEditPage({ params }: PageProps)
   // Fetch accommodation images
   let existingImages: AccommodationImage[] = [];
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: imageData } = await (supabase as any)
+    const { data: imageData } = await supabase
       .from("accommodation_images")
       .select("id, image_url, alt_text, display_order")
       .eq("accommodation_id", resolvedParams.id)
       .order("display_order", { ascending: true });
-    existingImages = (imageData as AccommodationImage[]) ?? [];
+    existingImages = imageData ?? [];
   } catch {
     // Table may not exist yet
   }
@@ -103,8 +102,6 @@ export default async function ManageAccommodationEditPage({ params }: PageProps)
           bed_count: accommodation.bed_count,
           bathroom_count: accommodation.bathroom_count,
           max_guest_capacity: accommodation.max_guest_capacity,
-          price_min_usd: accommodation.price_min_usd,
-          price_max_usd: accommodation.price_max_usd,
           check_in_time: accommodation.check_in_time,
           check_out_time: accommodation.check_out_time,
           suitable_for_children: accommodation.suitable_for_children,

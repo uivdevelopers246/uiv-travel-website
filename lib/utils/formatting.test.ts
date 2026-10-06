@@ -5,7 +5,13 @@ import {
   formatParticipantsLabel,
   formatSlotDateTime,
   formatSpotLabel,
+  formatStayDateRange,
 } from "./formatting";
+
+it("renders calendar stay dates without a timezone shift", () => {
+  expect(formatStayDateRange("2026-06-10", "2026-06-13")).toBe("Jun 10, 2026 to Jun 13, 2026");
+  expect(formatStayDateRange("invalid", "2026-06-13")).toBe("Stay dates unavailable");
+});
 
 describe("formatCurrencyFromCents", () => {
   it("formats zero dollars", () => {

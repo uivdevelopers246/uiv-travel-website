@@ -6,8 +6,9 @@ import { HomeShowcase } from "@/components/home/HomeShowcase";
 import type { AccommodationDisplay } from "@/lib/accommodations/types";
 import type { ActivityDisplay } from "@/lib/activities/types";
 import { createPublicClient } from "@/lib/supabase/public";
+import { withAccommodationBookablePrices } from "@/lib/accommodation-calendar/pricing";
 
-export const revalidate = 300;
+export const dynamic = "force-dynamic";
 
 const HERO_TEXT_HIGHLIGHT =
   "0 0 18px rgba(255,255,255,0.95), 0 0 36px rgba(255,255,255,0.7)";
@@ -15,7 +16,7 @@ const HERO_TEXT_HIGHLIGHT =
 const HOME_ACTIVITY_SELECT =
   "id, title, description, location, category, duration_hours, price_per_person, max_capacity, image_url, is_featured, vendors(name)" as const;
 const HOME_ACCOMMODATION_SELECT =
-  "id, name, accommodation_type, bedroom_count, bed_count, bathroom_count, max_guest_capacity, price_min_usd, price_max_usd, amenities, address, parish, image_url, is_featured, vendors(name)" as const;
+  "id, name, accommodation_type, bedroom_count, bed_count, bathroom_count, max_guest_capacity, amenities, address, parish, image_url, is_featured, vendors(name)" as const;
 
 type VendorPreview = { name: string | null } | null;
 
@@ -52,11 +53,9 @@ export default async function Home() {
     accommodationsQuery,
   ]);
   type HomeActivityRow = QueryData<typeof activitiesQuery>[number];
-  type HomeAccommodationRow = QueryData<typeof accommodationsQuery>[number];
 
   const activityRows: HomeActivityRow[] = activitiesResult.data ?? [];
-  const accommodationRows: HomeAccommodationRow[] =
-    accommodationsResult.data ?? [];
+  const accommodationRows = await withAccommodationBookablePrices(supabase, accommodationsResult.data ?? []);
   const activities: ActivityDisplay[] = activityRows.map(activity => ({
     id: activity.id,
     title: activity.title,

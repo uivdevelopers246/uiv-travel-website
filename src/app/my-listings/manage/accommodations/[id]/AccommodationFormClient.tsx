@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { accommodationTypes, amenityOptions } from "@/lib/accommodations/constants";
@@ -25,8 +26,6 @@ type AccommodationFormData = {
   bed_count: number | null;
   bathroom_count: number | null;
   max_guest_capacity: number | null;
-  price_min_usd: number | null;
-  price_max_usd: number | null;
   check_in_time: string | null;
   check_out_time: string | null;
   suitable_for_children: boolean;
@@ -59,8 +58,6 @@ const defaultFormData: AccommodationFormData = {
   bed_count: null,
   bathroom_count: null,
   max_guest_capacity: null,
-  price_min_usd: null,
-  price_max_usd: null,
   check_in_time: null,
   check_out_time: null,
   suitable_for_children: false,
@@ -144,8 +141,6 @@ export function AccommodationFormClient({
     bed_count: initial.bed_count?.toString() ?? "",
     bathroom_count: initial.bathroom_count?.toString() ?? "",
     max_guest_capacity: initial.max_guest_capacity?.toString() ?? "",
-    price_min_usd: initial.price_min_usd?.toString() ?? "",
-    price_max_usd: initial.price_max_usd?.toString() ?? "",
     check_in_time: normalizeTimeInputValue(initial.check_in_time),
     check_out_time: normalizeTimeInputValue(initial.check_out_time),
     suitable_for_children: initial.suitable_for_children ?? false,
@@ -240,8 +235,6 @@ export function AccommodationFormClient({
       bed_count: form.bed_count ? Number(form.bed_count) : null,
       bathroom_count: form.bathroom_count ? Number(form.bathroom_count) : null,
       max_guest_capacity: form.max_guest_capacity ? Number(form.max_guest_capacity) : null,
-      price_min_usd: form.price_min_usd ? Number(form.price_min_usd) : null,
-      price_max_usd: form.price_max_usd ? Number(form.price_max_usd) : null,
       check_in_time: form.check_in_time.trim() || null,
       check_out_time: form.check_out_time.trim() || null,
       suitable_for_children: form.suitable_for_children,
@@ -264,8 +257,6 @@ export function AccommodationFormClient({
       bed_count: number | null;
       bathroom_count: number | null;
       max_guest_capacity: number | null;
-      price_min_usd: number | null;
-      price_max_usd: number | null;
       check_in_time: string | null;
       check_out_time: string | null;
       suitable_for_children: boolean;
@@ -379,13 +370,24 @@ export function AccommodationFormClient({
                   : "Fill in the details to create a new accommodation listing."}
               </p>
             </div>
-            <a
+            <Link
               href="/my-listings"
               className="text-sm font-semibold text-[#407FC2] underline-offset-4 hover:underline"
             >
               Back to My Listings
-            </a>
+            </Link>
           </div>
+
+          {isEdit && accommodationId && (
+            <nav aria-label="Accommodation management" className="mb-8 flex flex-wrap gap-3">
+              <Link href={`/my-listings/manage/accommodations/${accommodationId}/calendar`} className="rounded-lg bg-[#193059] px-4 py-2 text-sm font-semibold text-white hover:bg-[#407FC2]">
+                Calendar &amp; prices
+              </Link>
+              <Link href={`/my-listings/bookings?accommodationId=${accommodationId}`} className="rounded-lg border border-[#407FC2] px-4 py-2 text-sm font-semibold text-[#407FC2] hover:bg-blue-50">
+                Manage bookings
+              </Link>
+            </nav>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-8">
             {/* Basic Information */}
@@ -531,38 +533,9 @@ export function AccommodationFormClient({
               </div>
             </section>
 
-            {/* Pricing */}
-            <section>
-              <h2 className="text-lg font-semibold text-slate-900 mb-4 pb-2 border-b">
-                Pricing
-              </h2>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700">Min Price per Night ($)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={form.price_min_usd}
-                    onChange={e => updateField("price_min_usd", e.target.value)}
-                    className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:ring-2 focus:ring-[#407FC2] focus:border-transparent"
-                    placeholder="0.00"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700">Max Price per Night ($)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={form.price_max_usd}
-                    onChange={e => updateField("price_max_usd", e.target.value)}
-                    className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:ring-2 focus:ring-[#407FC2] focus:border-transparent"
-                    placeholder="0.00"
-                  />
-                </div>
-              </div>
-            </section>
+            <p className="text-sm leading-6 text-slate-600">
+              {isEdit ? "Set" : "After saving your listing, set"} available nights and nightly prices in Calendar &amp; prices. Your listing&apos;s price range updates automatically from nights currently available to book.
+            </p>
 
             {/* Check-in/Check-out */}
             <section>
