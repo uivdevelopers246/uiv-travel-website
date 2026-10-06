@@ -4,16 +4,16 @@ import { getUserRole, type UserRole } from "@/lib/auth/roles";
 import type { Database } from "@/supabase/types/database";
 
 type JsonBodyResult =
-  | { body: Record<string, unknown>; response?: never }
-  | { body?: never; response: NextResponse };
+  | { body: Record<string, unknown> }
+  | { response: NextResponse };
 
 type UuidParamResult =
-  | { id: string; response?: never }
-  | { id?: never; response: NextResponse };
+  | { id: string }
+  | { response: NextResponse };
 
 type RoleResult =
-  | { role: UserRole; response?: never }
-  | { role?: never; response: NextResponse };
+  | { role: UserRole }
+  | { response: NextResponse };
 
 export function jsonError(error: string, status: number) {
   return NextResponse.json({ error }, { status });
