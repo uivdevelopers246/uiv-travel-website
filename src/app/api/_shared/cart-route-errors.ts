@@ -22,10 +22,13 @@ const BAD_REQUEST_EXACT = new Set([
   "Invalid check_in date",
   "Invalid check_out date",
   "Invalid stay dates",
+  "A stay cannot exceed 366 nights",
   "check_out must be after check_in",
   "check_in must not be in the past",
   "Only accommodation cart lines can update guests",
   "Cart line is missing stay details",
+  "Your cart contains overlapping stays for the same accommodation. Remove one before checkout.",
+  "Accommodation price has changed. Remove this stay and add it again to review the current price.",
 ]);
 
 /**

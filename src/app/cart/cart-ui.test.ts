@@ -6,6 +6,9 @@ import {
   getCartLineAvailabilityState,
   getCartSummary,
   getCheckoutCallToActionState,
+  getDraftLineTotalCents,
+  getLineParticipants,
+  getSavedStayNightlyPrices,
 } from "./cart-ui";
 
 function makeLine(
@@ -59,6 +62,7 @@ describe("getCartSummary", () => {
       ]),
     ).toEqual({
       activityCount: 2,
+      accommodationCount: 0,
       participantCount: 3,
       subtotalCents: 43000,
       totalCents: 43000,
@@ -114,7 +118,7 @@ describe("getCheckoutCallToActionState", () => {
       disabled: false,
       label: "Save payment method",
       supportText:
-        "No charge today. Stripe saves your payment method first and only charges confirmed bookings after vendor approval.",
+        "No charge at checkout. Stripe saves your payment method first and only charges confirmed bookings after vendor approval.",
       blockingMessage: null,
     });
   });
@@ -129,7 +133,7 @@ describe("getCheckoutCallToActionState", () => {
     ).toMatchObject({
       disabled: true,
       blockingMessage:
-        "Save or reset the participant change on 1 activity before continuing.",
+        "Save or reset the guest or participant change on 1 request before continuing.",
     });
   });
 
@@ -149,6 +153,73 @@ describe("getCheckoutCallToActionState", () => {
       disabled: true,
       blockingMessage:
         "Resolve the unavailable or over-capacity request in your cart before saving a payment method.",
+    });
+  });
+});
+
+function makeStay(overrides: Partial<CartLineWithPreview> = {}) {
+  return makeLine({
+    line_type: "accommodation", accommodation_id: "stay-1", accommodation_name: "Beach Villa",
+    activity_title: "", participants: null, guests: 3, check_in: "2099-08-01", check_out: "2099-08-04",
+    nights: 3, max_guest_capacity: 4, stay_dates_available: true,
+    unit_price_cents: 15000, line_subtotal_cents: 45000, line_total_cents: 45000, ...overrides,
+  });
+}
+
+describe("accommodation cart", () => {
+  it("allows accommodation-only and mixed carts to reach checkout", () => {
+    for (const lines of [[makeStay()], [makeLine(), makeStay()]]) {
+      expect(getCheckoutCallToActionState({ lines, dirtyLineCount: 0, hasPendingMutation: false }).disabled).toBe(false);
+    }
+  });
+
+  it("keeps nightly pricing unchanged when guests change and counts stays separately", () => {
+    expect(getLineParticipants(makeStay())).toBe(3);
+    expect(getDraftLineTotalCents(makeStay(), 4)).toBe(45000);
+    expect(getCartSummary([makeLine(), makeStay()])).toEqual({
+      activityCount: 1, accommodationCount: 1, participantCount: 2,
+      subtotalCents: 70000, totalCents: 70000,
+    });
+  });
+
+  it("preserves the saved sum of varying nightly prices for every guest count", () => {
+    const stay = makeStay({
+      line_total_cents: 52000,
+      stay_nightly_prices: [
+        { night: "2099-08-01", price_cents: 15000 },
+        { night: "2099-08-02", price_cents: 17000 },
+        { night: "2099-08-03", price_cents: 20000 },
+      ],
+    });
+    for (const guests of [1, 2, 4]) expect(getDraftLineTotalCents(stay, guests)).toBe(52000);
+    expect(getCartSummary([stay]).totalCents).toBe(52000);
+    expect(getSavedStayNightlyPrices(stay)).toEqual(stay.stay_nightly_prices);
+    expect(getSavedStayNightlyPrices({ ...stay, line_total_cents: 45000 })).toEqual([]);
+    expect(getSavedStayNightlyPrices({ ...stay, stay_price_changed: true })).toEqual([]);
+    expect(getSavedStayNightlyPrices({ ...stay, stay_nightly_prices: undefined })).toEqual([]);
+  });
+
+  it("blocks checkout when the host changed prices and asks the guest to review them", () => {
+    const stay = makeStay({ stay_price_changed: true });
+    expect(getCartLineAvailabilityState(stay)).toMatchObject({
+      kind: "price_changed", canEditParticipants: false,
+    });
+    expect(getCheckoutCallToActionState({ lines: [stay], dirtyLineCount: 0, hasPendingMutation: false })).toMatchObject({
+      disabled: true,
+      blockingMessage: "Review the changed nightly prices and add the affected stays to your cart again before saving a payment method.",
+    });
+  });
+
+  it.each([
+    { stay_dates_available: false }, { accommodation_name: "" },
+    { check_in: "2020-01-01" }, { nights: 0 }, { check_in: null }, { check_out: null },
+  ])("blocks unavailable stays %o", (overrides) => {
+    expect(getCartLineAvailabilityState(makeStay(overrides)).kind).toBe("unavailable");
+  });
+
+  it("lets buyers reduce guest count when capacity has decreased", () => {
+    expect(getCartLineAvailabilityState(makeStay({ guests: 5 }))).toMatchObject({
+      kind: "capacity", canEditParticipants: true,
     });
   });
 });

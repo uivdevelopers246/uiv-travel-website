@@ -13,6 +13,7 @@ import {
   declinePendingAccommodationBookingsForVendorOnOrder,
   getAccommodationBookingById,
   listAccommodationBookings,
+  reopenConfirmedAccommodationBookingsForOrder,
 } from "./service";
 
 type MockSupabase<T extends object> = SupabaseClient<Database> & T;
@@ -67,6 +68,7 @@ const baseCreateInput = {
   unit_price_cents: 15000,
   subtotal_cents: 45000,
   total_cents: 45000,
+  expires_at: "2099-07-27T00:00:00.000Z",
 };
 
 describe("accommodation-bookings service", () => {
@@ -123,7 +125,7 @@ describe("accommodation-bookings service", () => {
       "create_accommodation_booking_after_setup",
       expect.objectContaining({
         p_status: "pending_approval",
-        p_expires_at: null,
+        p_expires_at: baseCreateInput.expires_at,
         p_discount_cents: 0,
       }),
     );
@@ -285,5 +287,22 @@ describe("accommodation-bookings service", () => {
       "decline_accommodation_bookings_for_order",
       { p_order_id: "order-1" },
     );
+  });
+
+  it("payment recovery uses the service-only guarded RPC", async () => {
+    const supabase = makeMockSupabaseForRpc();
+    const reopened = [{ id: "stay-1", status: "pending_approval" }];
+    supabase.rpc.mockResolvedValueOnce({ data: reopened, error: null });
+    await expect(
+      reopenConfirmedAccommodationBookingsForOrder(supabase, "order-1", baseCreateInput.expires_at),
+    ).resolves.toEqual(reopened);
+    expect(supabase.rpc).toHaveBeenCalledWith("reopen_confirmed_accommodation_bookings_for_order", {
+      p_order_id: "order-1",
+      p_expires_at: baseCreateInput.expires_at,
+    });
+    supabase.rpc.mockResolvedValueOnce({ data: null, error: { message: "Order is not eligible for payment recovery" } });
+    await expect(
+      reopenConfirmedAccommodationBookingsForOrder(supabase, "paid-order", baseCreateInput.expires_at),
+    ).rejects.toThrow("Order is not eligible for payment recovery");
   });
 });

@@ -13,6 +13,7 @@ import { accommodationTypes } from "@/lib/accommodations/constants";
 import type { AccommodationDisplay } from "@/lib/accommodations/types";
 import { hasValidCoordinates } from "@/lib/utils/geo";
 import { DEFAULT_IMAGE_FALLBACK, getSafeImageUrl } from "@/lib/utils/image";
+import { formatAccommodationNightlyPrice } from "@/components/accommodations/pricing";
 
 type ActiveTab = "activities" | "accommodations";
 type MapView = ActiveTab | "all";
@@ -228,13 +229,6 @@ export function VacationPlanningClient({ activities, accommodations }: Props) {
     [activities],
   );
 
-  const accommodationStartingPrice = useMemo(
-    () => getStartingPrice(
-      accommodations.map(accommodation => accommodation.price_min_usd),
-    ),
-    [accommodations],
-  );
-
   const topCategories = useMemo(
     () => summarizeValues(activities.map(activity => activity.category), categoryLabelMap),
     [activities],
@@ -343,9 +337,7 @@ export function VacationPlanningClient({ activities, accommodations }: Props) {
             accommodation.max_guest_capacity != null
               ? `${accommodation.max_guest_capacity} guests`
               : null,
-            accommodation.price_min_usd != null
-              ? formatPrice(accommodation.price_min_usd, "/night")
-              : null,
+            formatAccommodationNightlyPrice(accommodation),
           ]
             .filter(Boolean)
             .join(" | "),
@@ -438,9 +430,7 @@ export function VacationPlanningClient({ activities, accommodations }: Props) {
                   </p>
                   <p className="mt-2 text-sm leading-6 text-slate-600">
                     {featuredAccommodation?.parish ?? "Island-wide options"} |{" "}
-                    {accommodationStartingPrice != null
-                      ? formatPrice(accommodationStartingPrice, "/night")
-                      : "Rates vary"}
+                    {featuredAccommodation ? formatAccommodationNightlyPrice(featuredAccommodation) : "No available nights"}
                   </p>
                 </div>
 
@@ -556,9 +546,7 @@ export function VacationPlanningClient({ activities, accommodations }: Props) {
                       </p>
                       <p className="mt-2 text-sm leading-6 text-white/78">
                         {featuredAccommodation?.parish ?? "Island-wide options"} |{" "}
-                        {accommodationStartingPrice != null
-                          ? formatPrice(accommodationStartingPrice, "/night")
-                          : "Rates vary"}
+                        {featuredAccommodation ? formatAccommodationNightlyPrice(featuredAccommodation) : "No available nights"}
                       </p>
                     </div>
 

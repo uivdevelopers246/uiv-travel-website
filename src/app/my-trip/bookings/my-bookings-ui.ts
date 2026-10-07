@@ -1,8 +1,9 @@
 import { getOrderStatusNotice } from "@/lib/orders/buyer-flow";
 import type {
-  ActivityBookingWithPreview,
+  BookingWithPreview,
   OrderWithActivityBookingsPaymentPreview,
 } from "@/lib/orders/types";
+import { getOrderBookings } from "@/lib/orders/types";
 
 export type UiTone = "amber" | "emerald" | "rose" | "sky" | "slate";
 
@@ -52,7 +53,7 @@ export type OrderNoticeState = {
 };
 
 export type BookingDisplayState = {
-  booking: ActivityBookingWithPreview;
+  booking: BookingWithPreview;
   statusLabel: string;
   tone: UiTone;
   detail: string;
@@ -68,6 +69,7 @@ export type OrderCardState = {
   shouldPoll: boolean;
   hasActiveCountdown: boolean;
   pendingApprovalCount: number;
+  confirmedTotalCents: number;
   pendingApprovalSummary: string | null;
   countdown: CountdownState;
 };
@@ -84,7 +86,7 @@ function pluralize(count: number, singular: string, plural: string) {
 function getPendingApprovalBookings(
   order: OrderWithActivityBookingsPaymentPreview,
 ) {
-  return order.activity_bookings.filter(
+  return getOrderBookings(order).filter(
     (booking) => booking.status === "pending_approval",
   );
 }
@@ -138,7 +140,7 @@ export function isOrderFinalizing(
   order: OrderWithActivityBookingsPaymentPreview,
 ): boolean {
   return (
-    order.activity_bookings.length === 0 &&
+    getOrderBookings(order).length === 0 &&
     (order.status === "awaiting_payment" ||
       order.status === "awaiting_vendor_approval")
   );
@@ -351,7 +353,7 @@ function getOrderNoticeState(
 }
 
 function getBookingStatusState(
-  booking: ActivityBookingWithPreview,
+  booking: BookingWithPreview,
   order: OrderWithActivityBookingsPaymentPreview,
   now: number,
 ): Omit<BookingDisplayState, "booking"> {
@@ -427,7 +429,7 @@ export function getOrderCardState(
 ): OrderCardState {
   const pendingApprovalCount = getPendingApprovalBookings(order).length;
   const countdown = getCountdownState(getPendingApprovalDeadlineAt(order), now);
-  const bookingStates = order.activity_bookings.map((booking) => ({
+  const bookingStates = getOrderBookings(order).map((booking) => ({
     booking,
     ...getBookingStatusState(booking, order, now),
   }));
@@ -443,6 +445,9 @@ export function getOrderCardState(
       (bookingState) => bookingState.countdown.kind === "active",
     ),
     pendingApprovalCount,
+    confirmedTotalCents: bookingStates.reduce((total, { booking }) =>
+      booking.status === "confirmed" || booking.status === "completed"
+        ? total + booking.total_cents : total, 0),
     pendingApprovalSummary:
       pendingApprovalCount > 1
         ? `${pendingApprovalCount} ${pluralize(

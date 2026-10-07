@@ -1,4 +1,4 @@
-import type { OrderWithActivityBookingsPaymentPreview } from "./types";
+import { getOrderBookings, type OrderWithActivityBookingsPaymentPreview } from "./types";
 
 export type BuyerFlowMessage = {
   tone: "success" | "warning" | "error";
@@ -102,7 +102,7 @@ export function getOrderStatusNotice(
   order: OrderWithActivityBookingsPaymentPreview,
 ): OrderStatusNotice | null {
   if (
-    order.activity_bookings.length === 0 &&
+    getOrderBookings(order).length === 0 &&
     (order.status === "awaiting_payment" ||
       order.status === "awaiting_vendor_approval")
   ) {
@@ -124,7 +124,7 @@ export function getOrderStatusNotice(
         tone: "warning",
         title: "Booking request received!",
         message:
-          "Your reservation details are in and your payment method is saved. The experience provider will confirm availability shortly.",
+          "Your reservation details are in and your payment method is saved. Your vendors will confirm availability shortly.",
         failureMessage: null,
         receiptUrl: null,
         canRetry: false,
@@ -240,7 +240,7 @@ export function getCheckoutSuccessState(
 
   if (
     order.status === "awaiting_payment" ||
-    order.activity_bookings.length === 0
+    getOrderBookings(order).length === 0
   ) {
     return {
       kind: "finalizing",

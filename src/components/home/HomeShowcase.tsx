@@ -7,6 +7,7 @@ import { accommodationTypes } from "@/lib/accommodations/constants";
 import type { AccommodationDisplay } from "@/lib/accommodations/types";
 import type { ActivityDisplay } from "@/lib/activities/types";
 import { DEFAULT_IMAGE_FALLBACK, getSafeImageUrl } from "@/lib/utils/image";
+import { formatAccommodationNightlyPrice } from "@/components/accommodations/pricing";
 
 const ROTATION_INTERVAL_MS = 5000;
 const SHOWCASE_PANEL_HEIGHT = "h-[640px] sm:h-[680px]";
@@ -51,19 +52,6 @@ type ShowcasePanelProps = {
     title: string;
   };
 };
-
-function formatAccommodationPrice(accommodation: AccommodationDisplay) {
-  if (accommodation.price_min_usd == null) return "Price on request";
-
-  if (
-    accommodation.price_max_usd != null &&
-    accommodation.price_max_usd !== accommodation.price_min_usd
-  ) {
-    return `$${accommodation.price_min_usd}-$${accommodation.price_max_usd}/night`;
-  }
-
-  return `$${accommodation.price_min_usd}/night`;
-}
 
 function toTitleCase(value: string) {
   return value
@@ -397,7 +385,7 @@ export function HomeShowcase({
             : null,
           {
             label: "Rate",
-            value: formatAccommodationPrice(accommodation),
+            value: formatAccommodationNightlyPrice(accommodation),
           },
         ].filter(Boolean) as Array<{ label: string; value: string }>;
 

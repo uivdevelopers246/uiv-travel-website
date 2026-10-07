@@ -3,6 +3,7 @@ import { listCartLines } from "@/lib/cart/service";
 import type { CartLine } from "@/lib/cart/types";
 import { BOOKING_APPROVAL_SLA_MS } from "@/lib/activity-bookings/sla";
 import type { ActivityBooking } from "@/lib/activity-bookings/service";
+import { enrichAccommodationBookings } from "@/lib/accommodation-bookings/previews";
 import { ORDER_CURRENCY_USD, ORDER_STATUS_SET, type OrderStatus } from "@/lib/orders/constants";
 import type {
   ActivityBookingWithPreview,
@@ -257,15 +258,8 @@ export async function listOrdersWithActivityBookingsPreview(
     );
   }
 
-  if (!bookings || bookings.length === 0) {
-    return orders.map((order) => ({
-      ...order,
-      activity_bookings: [],
-    }));
-  }
-
-  const slotIds = [...new Set(bookings.map((booking) => booking.slot_id))];
-  const activityIds = [...new Set(bookings.map((booking) => booking.activity_id))];
+  const slotIds = [...new Set((bookings ?? []).map((booking) => booking.slot_id))];
+  const activityIds = [...new Set((bookings ?? []).map((booking) => booking.activity_id))];
 
   const slotMap = new Map<
     string,
@@ -313,7 +307,7 @@ export async function listOrdersWithActivityBookingsPreview(
 
   const bookingsByOrderId = new Map<string, ActivityBookingWithPreview[]>();
 
-  for (const booking of bookings) {
+  for (const booking of bookings ?? []) {
     if (!booking.order_id) {
       continue;
     }
@@ -334,12 +328,21 @@ export async function listOrdersWithActivityBookingsPreview(
     bookingsByOrderId.set(booking.order_id, orderBookings);
   }
 
+  const { data: stays, error: staysError } = await supabase
+    .from("accommodation_bookings").select("*").eq("user_id", userId)
+    .in("order_id", orderIds).order("check_in", { ascending: true });
+  if (staysError) {
+    throw orderServiceError("Could not list accommodation bookings for orders", staysError);
+  }
+  const stayPreviews = await enrichAccommodationBookings(supabase, stays ?? []);
+
   return orders
     .map((order) => ({
       ...order,
       activity_bookings: (bookingsByOrderId.get(order.id) ?? []).sort(
         compareBookingsForDisplay,
       ),
+      accommodation_bookings: stayPreviews.filter((booking) => booking.order_id === order.id),
     }));
 }
 
@@ -366,6 +369,16 @@ export async function updateOrderStatus(
     throw new Error("Order not found");
   }
   return data;
+}
+
+/** A stale setup delivery must not overwrite a concurrently fulfilled order. */
+export async function failCheckoutOrderIfAwaitingPayment(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+): Promise<void> {
+  const { error } = await supabase.from("orders").update({ status: "failed" })
+    .eq("id", orderId).eq("status", "awaiting_payment");
+  if (error) throw orderServiceError("Could not fail changed checkout", error);
 }
 
 /**

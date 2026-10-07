@@ -65,7 +65,7 @@ async function upsertDefaultPreferences(
 
 export async function GET() {
   const auth = await getUserId();
-  if ("response" in auth) {
+  if (auth.response) {
     return auth.response;
   }
 
@@ -102,7 +102,7 @@ export async function PATCH(req: Request) {
   }
 
   const auth = await getUserId();
-  if ("response" in auth) {
+  if (auth.response) {
     return auth.response;
   }
 

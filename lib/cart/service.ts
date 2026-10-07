@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getActivityById } from "@/lib/activities/service";
 import { getAccommodationById } from "@/lib/accommodations/service";
+import { getAccommodationStayQuote, type AccommodationStayQuote } from "@/lib/accommodation-calendar/service";
 import { slotPlatformParticipantsBookedBySlotIds } from "@/lib/slots/service";
 import type { Database } from "@/supabase/types/database";
 import {
@@ -41,23 +42,6 @@ export function pricePerPersonUsdToCents(
   const cents = Math.round(Number(pricePerPerson) * 100);
   if (!Number.isFinite(cents) || cents < 0) {
     throw new Error("Activity price is not set");
-  }
-  return cents;
-}
-
-/**
- * Converts listing `price_min_usd` (USD per night) to integer cents for stay snapshots.
- * @throws Error with message `Accommodation price is not set` when null or non-finite.
- */
-export function priceMinUsdToCents(
-  priceMinUsd: number | null | undefined,
-): number {
-  if (priceMinUsd == null || !Number.isFinite(Number(priceMinUsd))) {
-    throw new Error("Accommodation price is not set");
-  }
-  const cents = Math.round(Number(priceMinUsd) * 100);
-  if (!Number.isFinite(cents) || cents < 0) {
-    throw new Error("Accommodation price is not set");
   }
   return cents;
 }
@@ -109,10 +93,19 @@ export function parseAndValidateStayDates(
   if (!Number.isFinite(inUtc) || !Number.isFinite(outUtc)) {
     throw new Error("Invalid stay dates");
   }
+  if (new Date(inUtc).toISOString().slice(0, 10) !== checkIn) {
+    throw new Error("Invalid check_in date");
+  }
+  if (new Date(outUtc).toISOString().slice(0, 10) !== checkOut) {
+    throw new Error("Invalid check_out date");
+  }
 
   const nights = Math.round((outUtc - inUtc) / 86_400_000);
   if (nights < 1) {
     throw new Error("check_out must be after check_in");
+  }
+  if (nights > 366) {
+    throw new Error("A stay cannot exceed 366 nights");
   }
 
   const today = utcDateOnlyString(now);
@@ -143,10 +136,9 @@ function buildActivityLineSnapshots(
   };
 }
 
-/** Snapshot math for MVP stay lines: unit × nights; guests do not multiply price. */
+/** Persist the quoted sum; the legacy unit column holds the lowest nightly rate. */
 function buildAccommodationLineSnapshots(
-  unitPriceCents: number,
-  nights: number,
+  quote: AccommodationStayQuote,
 ): Pick<
   CartLine,
   | "unit_price_cents"
@@ -154,12 +146,11 @@ function buildAccommodationLineSnapshots(
   | "line_discount_cents"
   | "line_total_cents"
 > {
-  const line_subtotal_cents = unitPriceCents * nights;
   return {
-    unit_price_cents: unitPriceCents,
-    line_subtotal_cents,
+    unit_price_cents: quote.unit_price_cents,
+    line_subtotal_cents: quote.total_cents,
     line_discount_cents: 0,
-    line_total_cents: line_subtotal_cents,
+    line_total_cents: quote.total_cents,
   };
 }
 
@@ -196,46 +187,30 @@ function assertGuestsWithinCapacity(
 }
 
 /**
- * Soft hold via `accommodation_stay_is_held` (confirmed or non-expired pending_approval).
- * @throws when dates overlap a holding booking.
+ * A stay needs an open, priced host calendar entry for every requested night.
  */
-async function assertStayDatesAvailable(
+async function getAvailableStayQuote(
   supabase: SupabaseClient<Database>,
   accommodationId: string,
   checkIn: string,
   checkOut: string,
-): Promise<void> {
-  const held = await accommodationStayIsHeld(
+): Promise<AccommodationStayQuote> {
+  const quote = await getAccommodationStayQuote(
     supabase,
     accommodationId,
     checkIn,
     checkOut,
   );
-  if (held) {
+  if (!quote.available) {
     throw new Error("These stay dates are not available");
   }
+  return quote;
 }
 
-/**
- * Soft overlap check: true if a holding booking overlaps `[check_in, check_out)`.
- * Uses SECURITY DEFINER RPC so other buyers' holds are visible under RLS.
- */
-export async function accommodationStayIsHeld(
-  supabase: SupabaseClient<Database>,
-  accommodationId: string,
-  checkIn: string,
-  checkOut: string,
-): Promise<boolean> {
-  const { data, error } = await supabase.rpc("accommodation_stay_is_held", {
-    p_accommodation_id: accommodationId,
-    p_check_in: checkIn,
-    p_check_out: checkOut,
-  });
-
-  if (error) {
-    throw cartServiceError("Could not check stay availability", error);
-  }
-  return data === true;
+function stayQuoteMatchesLine(line: CartLine, quote: AccommodationStayQuote): boolean {
+  return line.unit_price_cents === quote.unit_price_cents &&
+    line.line_subtotal_cents === quote.total_cents &&
+    line.line_discount_cents === 0 && line.line_total_cents === quote.total_cents;
 }
 
 async function requireAuthUserId(
@@ -515,7 +490,7 @@ export async function listCartLinesWithPreview(
     }
   }
 
-  const stayAvailabilityByLineId = new Map<string, boolean>();
+  const stayQuotesByLineId = new Map<string, AccommodationStayQuote>();
   await Promise.all(
     lines
       .filter(
@@ -526,13 +501,16 @@ export async function listCartLinesWithPreview(
           l.check_out,
       )
       .map(async (l) => {
-        const held = await accommodationStayIsHeld(
+        // Old or malformed cart rows must remain visible so buyers can remove them.
+        const nights = nightsFromStayDates(l.check_in, l.check_out);
+        if (nights < 1 || nights > 366) return;
+        const quote = await getAccommodationStayQuote(
           supabase,
           l.accommodation_id!,
           l.check_in!,
           l.check_out!,
         );
-        stayAvailabilityByLineId.set(l.id, !held);
+        stayQuotesByLineId.set(l.id, quote);
       }),
   );
 
@@ -542,6 +520,7 @@ export async function listCartLinesWithPreview(
         line.accommodation_id != null
           ? accommodationPreviewById.get(line.accommodation_id)
           : undefined;
+      const quote = stayQuotesByLineId.get(line.id);
       return {
         ...line,
         ...emptyActivityPreviewFields(),
@@ -549,7 +528,9 @@ export async function listCartLinesWithPreview(
         accommodation_image_url: preview?.image_url ?? null,
         nights: nightsFromStayDates(line.check_in, line.check_out),
         max_guest_capacity: preview?.max_guest_capacity ?? null,
-        stay_dates_available: stayAvailabilityByLineId.get(line.id) ?? false,
+        stay_dates_available: Boolean(preview && quote?.available),
+        stay_nightly_prices: quote?.nightly_prices ?? [],
+        stay_price_changed: quote?.available === true && !stayQuoteMatchesLine(line, quote),
       };
     }
 
@@ -653,7 +634,7 @@ export async function addOrMergeActivityLine(
 /**
  * Add or merge an accommodation stay line.
  * Merge key: `(user_id, accommodation_id, check_in, check_out)`.
- * Guests are an absolute set (not a delta); money = current nightly rate × nights.
+ * Guests are an absolute set (not a delta); money = sum of the host's nightly rates.
  */
 export async function addOrMergeAccommodationLine(
   supabase: SupabaseClient<Database>,
@@ -663,7 +644,7 @@ export async function addOrMergeAccommodationLine(
   const userId = await requireAuthUserId(supabase);
   assertPositiveInteger(input.guests, "guests");
 
-  const { check_in, check_out, nights } = parseAndValidateStayDates(
+  const { check_in, check_out } = parseAndValidateStayDates(
     input.check_in,
     input.check_out,
     options?.now,
@@ -677,13 +658,15 @@ export async function addOrMergeAccommodationLine(
     throw new Error("Accommodation is not available for booking");
   }
 
-  const unitPriceCents = priceMinUsdToCents(accommodation.price_min_usd);
-  await assertStayDatesAvailable(
+  const quote = await getAvailableStayQuote(
     supabase,
     input.accommodation_id,
     check_in,
     check_out,
   );
+  if (input.expected_total_cents !== undefined && input.expected_total_cents !== quote.total_cents) {
+    throw new Error("Accommodation price has changed. Remove this stay and add it again to review the current price.");
+  }
   assertGuestsWithinCapacity(input.guests, accommodation.max_guest_capacity);
 
   const existing = await findExistingAccommodationLine(
@@ -693,7 +676,7 @@ export async function addOrMergeAccommodationLine(
     check_out,
   );
 
-  const snapshots = buildAccommodationLineSnapshots(unitPriceCents, nights);
+  const snapshots = buildAccommodationLineSnapshots(quote);
 
   if (!existing) {
     const { data, error } = await supabase
@@ -807,7 +790,7 @@ export async function updateCartLineParticipants(
 
 /**
  * Set absolute guest count on an accommodation cart line; recomputes money from
- * current listing nightly rate × nights. Rejects non-accommodation lines.
+ * the host calendar's nightly prices. Rejects non-accommodation lines.
  */
 export async function updateCartLineGuests(
   supabase: SupabaseClient<Database>,
@@ -844,21 +827,23 @@ export async function updateCartLineGuests(
     throw new Error("Accommodation is not available for booking");
   }
 
-  const { nights } = parseAndValidateStayDates(
+  parseAndValidateStayDates(
     line.check_in,
     line.check_out,
     options?.now,
   );
-  const unitPriceCents = priceMinUsdToCents(accommodation.price_min_usd);
-  await assertStayDatesAvailable(
+  const quote = await getAvailableStayQuote(
     supabase,
     line.accommodation_id,
     line.check_in,
     line.check_out,
   );
+  if (!stayQuoteMatchesLine(line, quote)) {
+    throw new Error("Accommodation price has changed. Remove this stay and add it again to review the current price.");
+  }
   assertGuestsWithinCapacity(input.guests, accommodation.max_guest_capacity);
 
-  const snapshots = buildAccommodationLineSnapshots(unitPriceCents, nights);
+  const snapshots = buildAccommodationLineSnapshots(quote);
 
   const { data: updated, error: updateError } = await supabase
     .from("cart_lines")
@@ -972,6 +957,18 @@ async function validateAccommodationLinesForCheckout(
   lines: CartLine[],
   now?: Date,
 ): Promise<void> {
+  const sortedStays = [...lines].sort((a, b) =>
+    (a.accommodation_id ?? "").localeCompare(b.accommodation_id ?? "") ||
+    (a.check_in ?? "").localeCompare(b.check_in ?? ""),
+  );
+  for (let i = 1; i < sortedStays.length; i++) {
+    const previous = sortedStays[i - 1];
+    const current = sortedStays[i];
+    if (previous.accommodation_id === current.accommodation_id &&
+        previous.check_out && current.check_in && current.check_in < previous.check_out) {
+      throw new Error("Your cart contains overlapping stays for the same accommodation. Remove one before checkout.");
+    }
+  }
   for (const line of lines) {
     if (!line.accommodation_id || !line.check_in || !line.check_out) {
       throw new Error("Cart line is missing stay details");
@@ -991,13 +988,10 @@ async function validateAccommodationLinesForCheckout(
       throw new Error("Accommodation is not available for booking");
     }
 
-    priceMinUsdToCents(accommodation.price_min_usd);
-    await assertStayDatesAvailable(
-      supabase,
-      line.accommodation_id,
-      line.check_in,
-      line.check_out,
-    );
+    const quote = await getAvailableStayQuote(supabase, line.accommodation_id, line.check_in, line.check_out);
+    if (!stayQuoteMatchesLine(line, quote)) {
+      throw new Error("Accommodation price has changed. Remove this stay and add it again to review the current price.");
+    }
     assertGuestsWithinCapacity(line.guests, accommodation.max_guest_capacity);
   }
 }
@@ -1053,11 +1047,14 @@ export async function validateCartForCheckout(
 export async function deleteAllCartLinesForUser(
   supabase: SupabaseClient<Database>,
   userId: string,
+  lineIds?: string[],
 ): Promise<void> {
-  const { error } = await supabase
+  if (lineIds?.length === 0) return;
+  let query = supabase
     .from("cart_lines")
-    .delete()
-    .eq("user_id", userId);
+    .delete();
+  if (lineIds) query = query.in("id", lineIds);
+  const { error } = await query.eq("user_id", userId);
 
   if (error) {
     throw cartServiceError("Could not clear cart lines for user", error);

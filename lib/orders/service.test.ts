@@ -12,6 +12,7 @@ import {
   computeOrderTotalsFromCartLines,
   findCheckoutSetupOrderForUser,
   getOrderById,
+  failCheckoutOrderIfAwaitingPayment,
   markOrderReconciliationRequiredAfterSettlementMismatch,
   listOrdersWithActivityBookingsPreview,
   requeueFailedOrderForVendorApproval,
@@ -24,6 +25,17 @@ import type { Order } from "./types";
 const userId = "user-1";
 const orderId = "order-1";
 const slotId = "slot-1";
+
+describe("failCheckoutOrderIfAwaitingPayment", () => {
+  it("uses a database status condition so a concurrent successful setup is preserved", async () => {
+    const query = { update: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), error: null };
+    const supabase = { from: vi.fn(() => query) };
+    await failCheckoutOrderIfAwaitingPayment(supabase as never, orderId);
+    expect(query.update).toHaveBeenCalledWith({ status: "failed" });
+    expect(query.eq).toHaveBeenNthCalledWith(1, "id", orderId);
+    expect(query.eq).toHaveBeenNthCalledWith(2, "status", "awaiting_payment");
+  });
+});
 
 function authUser() {
   return {
@@ -623,6 +635,14 @@ describe("requeueFailedOrderForVendorApproval", () => {
 });
 
 describe("listOrdersWithActivityBookingsPreview", () => {
+  function emptyStaysQuery() {
+    return {
+      select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [], error: null }),
+    };
+  }
+
   it("returns orders with enriched booking lines", async () => {
     const order = baseOrder({
       id: orderId,
@@ -675,7 +695,8 @@ describe("listOrdersWithActivityBookingsPreview", () => {
         .mockImplementationOnce(() => ordersQuery)
         .mockImplementationOnce(() => bookingsQuery)
         .mockImplementationOnce(() => slotsQuery)
-        .mockImplementationOnce(() => activitiesQuery),
+        .mockImplementationOnce(() => activitiesQuery)
+        .mockImplementationOnce(emptyStaysQuery),
       ...authUser(),
     };
 
@@ -684,6 +705,7 @@ describe("listOrdersWithActivityBookingsPreview", () => {
     ).resolves.toEqual([
       {
         ...order,
+        accommodation_bookings: [],
         activity_bookings: [
           {
             ...booking,
@@ -731,7 +753,8 @@ describe("listOrdersWithActivityBookingsPreview", () => {
         .mockImplementationOnce(() => ordersQuery)
         .mockImplementationOnce(() => bookingsQuery)
         .mockImplementationOnce(() => slotsQuery)
-        .mockImplementationOnce(() => activitiesQuery),
+        .mockImplementationOnce(() => activitiesQuery)
+        .mockImplementationOnce(emptyStaysQuery),
       ...authUser(),
     };
 
@@ -760,7 +783,8 @@ describe("listOrdersWithActivityBookingsPreview", () => {
       from: vi
         .fn()
         .mockImplementationOnce(() => ordersQuery)
-        .mockImplementationOnce(() => bookingsQuery),
+        .mockImplementationOnce(() => bookingsQuery)
+        .mockImplementationOnce(emptyStaysQuery),
       ...authUser(),
     };
 
@@ -770,6 +794,7 @@ describe("listOrdersWithActivityBookingsPreview", () => {
       {
         ...order,
         activity_bookings: [],
+        accommodation_bookings: [],
       },
     ]);
   });
@@ -792,7 +817,8 @@ describe("listOrdersWithActivityBookingsPreview", () => {
       from: vi
         .fn()
         .mockImplementationOnce(() => ordersQuery)
-        .mockImplementationOnce(() => bookingsQuery),
+        .mockImplementationOnce(() => bookingsQuery)
+        .mockImplementationOnce(emptyStaysQuery),
       ...authUser(),
     };
 
@@ -804,9 +830,45 @@ describe("listOrdersWithActivityBookingsPreview", () => {
       {
         ...order,
         activity_bookings: [],
+        accommodation_bookings: [],
       },
     ]);
     expect(ordersQuery.eq).toHaveBeenCalledWith("user_id", userId);
     expect(ordersQuery.eq).toHaveBeenCalledWith("id", orderId);
+  });
+
+  it("loads stay-only orders with owner-scoped dates, guests, listing details and deadline", async () => {
+    const order = baseOrder({ status: "awaiting_vendor_approval" });
+    const stay = {
+      id: "stay-1", order_id: orderId, user_id: userId, accommodation_id: "villa-1",
+      check_in: "2026-06-10", check_out: "2026-06-13", guests: 4,
+      status: "pending_approval", created_at: "2026-01-03T12:00:00Z", expires_at: null,
+      total_cents: 45000,
+    };
+    const ordersQuery = emptyStaysQuery();
+    ordersQuery.order.mockResolvedValue({ data: [order], error: null } as never);
+    const staysQuery = emptyStaysQuery();
+    staysQuery.order.mockResolvedValue({ data: [stay], error: null } as never);
+    const listingQuery = {
+      select: vi.fn().mockReturnThis(),
+      in: vi.fn().mockResolvedValue({ data: [{ id: "villa-1", name: "Beach Villa", image_url: "/villa.jpg" }], error: null }),
+    };
+    const supabase = {
+      ...authUser(),
+      from: vi.fn().mockImplementation((table: string) => {
+        if (table === "orders") return ordersQuery;
+        if (table === "accommodation_bookings") return staysQuery;
+        if (table === "accommodations") return listingQuery;
+        return emptyStaysQuery();
+      }),
+    };
+    const rows = await listOrdersWithActivityBookingsPreview(supabase as never);
+    expect(rows[0].activity_bookings).toEqual([]);
+    expect(rows[0].accommodation_bookings).toEqual([{
+      ...stay, accommodation_name: "Beach Villa", accommodation_image_url: "/villa.jpg",
+      approval_deadline_at: "2026-01-04T12:00:00.000Z",
+    }]);
+    expect(staysQuery.eq).toHaveBeenCalledWith("user_id", userId);
+    expect(staysQuery.in).toHaveBeenCalledWith("order_id", [orderId]);
   });
 });

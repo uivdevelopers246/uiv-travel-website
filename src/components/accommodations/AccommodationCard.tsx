@@ -4,6 +4,7 @@ import Link from "next/link";
 import { accommodationTypes } from "@/lib/accommodations/constants";
 import { getSafeImageUrl, DEFAULT_IMAGE_FALLBACK } from "@/lib/utils/image";
 import type { AccommodationDisplay } from "@/lib/accommodations/types";
+import { formatAccommodationNightlyPrice } from "./pricing";
 
 type Props = {
   accommodation: AccommodationDisplay;
@@ -51,17 +52,9 @@ export function AccommodationCard({ accommodation }: Props) {
             )}
           </div>
           <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between">
-            {accommodation.price_min_usd != null ? (
-              <span className="text-lg font-bold text-[#193059]">
-                {accommodation.price_max_usd && accommodation.price_max_usd !== accommodation.price_min_usd ? (
-                  <>${accommodation.price_min_usd} - ${accommodation.price_max_usd}<span className="text-sm font-normal text-slate-500">/night</span></>
-                ) : (
-                  <>${accommodation.price_min_usd}<span className="text-sm font-normal text-slate-500">/night</span></>
-                )}
-              </span>
-            ) : (
-              <span className="text-sm text-slate-500">Price on request</span>
-            )}
+            <span className={accommodation.price_min_usd == null ? "text-sm text-slate-500" : "text-lg font-bold text-[#193059]"}>
+              {formatAccommodationNightlyPrice(accommodation)}
+            </span>
             <span className="px-4 py-2 bg-[#193059] group-hover:bg-[#407FC2] text-white text-sm font-medium rounded-full transition-colors">
               View
             </span>

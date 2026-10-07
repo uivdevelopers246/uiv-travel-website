@@ -4,7 +4,7 @@ import type Stripe from "stripe";
 import { CART_LINE_TYPE_ACTIVITY, CART_LINE_TYPE_ACCOMMODATION } from "@/lib/cart/constants";
 import type { CartLine } from "@/lib/cart/types";
 import type { Order } from "@/lib/orders/types";
-import { STRIPE_METADATA_FLOW_M4C_SETUP } from "@/lib/orders/constants";
+import { STRIPE_METADATA_FLOW_M4C_SETUP, STRIPE_METADATA_FLOW_M4C_PAYMENT_RECOVERY } from "@/lib/orders/constants";
 
 const activityBookingMocks = vi.hoisted(() => ({
   listActivityBookings: vi.fn(),
@@ -17,6 +17,7 @@ const accommodationBookingMocks = vi.hoisted(() => ({
   listAccommodationBookings: vi.fn(),
   createAccommodationBookingAfterSetup: vi.fn(),
   cancelAccommodationBookingsForOrder: vi.fn(),
+  reopenConfirmedAccommodationBookingsForOrder: vi.fn(),
 }));
 
 const orderServiceMocks = vi.hoisted(() => ({
@@ -24,6 +25,8 @@ const orderServiceMocks = vi.hoisted(() => ({
   updateOrderStatus: vi.fn(),
   updateOrderAwaitingVendorApprovalFromSetup: vi.fn(),
   revertOrderToAwaitingPaymentAfterSetupFailure: vi.fn(),
+  requeueFailedOrderForVendorApproval: vi.fn(),
+  failCheckoutOrderIfAwaitingPayment: vi.fn(),
 }));
 
 const cartServiceMocks = vi.hoisted(() => ({
@@ -55,6 +58,8 @@ vi.mock("@/lib/accommodation-bookings/service", () => ({
     accommodationBookingMocks.createAccommodationBookingAfterSetup,
   cancelAccommodationBookingsForOrder:
     accommodationBookingMocks.cancelAccommodationBookingsForOrder,
+  reopenConfirmedAccommodationBookingsForOrder:
+    accommodationBookingMocks.reopenConfirmedAccommodationBookingsForOrder,
 }));
 
 vi.mock("@/lib/orders/service", async (importOriginal) => {
@@ -67,6 +72,8 @@ vi.mock("@/lib/orders/service", async (importOriginal) => {
       orderServiceMocks.updateOrderAwaitingVendorApprovalFromSetup,
     revertOrderToAwaitingPaymentAfterSetupFailure:
       orderServiceMocks.revertOrderToAwaitingPaymentAfterSetupFailure,
+    requeueFailedOrderForVendorApproval: orderServiceMocks.requeueFailedOrderForVendorApproval,
+    failCheckoutOrderIfAwaitingPayment: orderServiceMocks.failCheckoutOrderIfAwaitingPayment,
   };
 });
 
@@ -80,7 +87,7 @@ vi.mock("@/lib/cart/service", async (importOriginal) => {
 
 vi.mock("@/lib/notifications/provider-notices", () => providerNoticeMocks);
 
-import { fulfillCheckoutSetupSessionCompleted } from "./server";
+import { checkoutCartFingerprint, fulfillCheckoutSetupSessionCompleted } from "./server";
 
 function baseOrder(overrides: Partial<Order> = {}): Order {
   return {
@@ -151,11 +158,12 @@ function checkoutSessionCompletedEvent(): Stripe.Event {
     data: {
       object: {
         id: "cs_1",
+        object: "checkout.session",
         mode: "setup",
         metadata: { order_id: "order-1", flow: STRIPE_METADATA_FLOW_M4C_SETUP },
         setup_intent: "seti_1",
         customer: "cus_1",
-      } as Stripe.Checkout.Session,
+      } as unknown as Stripe.Checkout.Session,
     },
   } as Stripe.Event;
 }
@@ -242,6 +250,7 @@ function makeSetupFulfillmentSupabase(input: {
 
 describe("fulfillCheckoutSetupSessionCompleted (mixed cart stays)", () => {
   beforeEach(() => {
+    accommodationBookingMocks.reopenConfirmedAccommodationBookingsForOrder.mockReset();
     activityBookingMocks.listActivityBookings.mockReset();
     activityBookingMocks.createActivityBookingAfterPayment.mockReset();
     activityBookingMocks.cancelActivityBookingsForOrder.mockReset();
@@ -332,6 +341,7 @@ describe("fulfillCheckoutSetupSessionCompleted (mixed cart stays)", () => {
     expect(cartServiceMocks.deleteAllCartLinesForUser).toHaveBeenCalledWith(
       expect.anything(),
       "user-1",
+      ["line-act", "line-stay"],
     );
     expect(providerNoticeMocks.safeSendProviderBookingPendingNotice).toHaveBeenCalledWith(
       expect.anything(),
@@ -381,6 +391,42 @@ describe("fulfillCheckoutSetupSessionCompleted (mixed cart stays)", () => {
     expect(cartServiceMocks.deleteAllCartLinesForUser).toHaveBeenCalled();
   });
 
+  it("reopens stay-only failed orders for host approval after a replacement card is saved", async () => {
+    orderServiceMocks.getOrderById.mockResolvedValue(baseOrder({
+      status: "failed", settlement_charge_attempt_count: 2,
+    }));
+    accommodationBookingMocks.listAccommodationBookings.mockResolvedValue([
+      { id: "stay-1", status: "confirmed" },
+    ]);
+    orderServiceMocks.requeueFailedOrderForVendorApproval.mockResolvedValue(true);
+    const event = checkoutSessionCompletedEvent();
+    (event.data.object as Stripe.Checkout.Session).metadata!.flow = STRIPE_METADATA_FLOW_M4C_PAYMENT_RECOVERY;
+    const { supabase } = makeSetupFulfillmentSupabase({ cartLines: [] });
+
+    expect(await fulfillCheckoutSetupSessionCompleted(event, supabase as never)).toEqual({ status: "success" });
+    expect(accommodationBookingMocks.reopenConfirmedAccommodationBookingsForOrder)
+      .toHaveBeenCalledWith(supabase, "order-1", expect.any(String));
+    expect(activityBookingMocks.reopenConfirmedActivityBookingsForOrder).not.toHaveBeenCalled();
+    expect(orderServiceMocks.requeueFailedOrderForVendorApproval).toHaveBeenCalledWith(supabase, {
+      orderId: "order-1", stripeCustomerId: "cus_1", stripeSetupIntentId: "seti_1",
+    });
+  });
+
+  it("acknowledges recovery that became ineligible while Stripe was open", async () => {
+    orderServiceMocks.getOrderById.mockResolvedValue(baseOrder({
+      status: "failed", settlement_charge_attempt_count: 2,
+    }));
+    accommodationBookingMocks.listAccommodationBookings.mockResolvedValue([
+      { id: "stay-1", status: "confirmed", check_in: "2000-01-01" },
+    ]);
+    const event = checkoutSessionCompletedEvent();
+    (event.data.object as Stripe.Checkout.Session).metadata!.flow = STRIPE_METADATA_FLOW_M4C_PAYMENT_RECOVERY;
+    const { supabase } = makeSetupFulfillmentSupabase({ cartLines: [] });
+    expect(await fulfillCheckoutSetupSessionCompleted(event, supabase as never))
+      .toEqual({ status: "ignored", reason: "order_not_recoverable" });
+    expect(accommodationBookingMocks.reopenConfirmedAccommodationBookingsForOrder).not.toHaveBeenCalled();
+  });
+
   it("compensates both booking kinds and keeps the cart on partial failure", async () => {
     orderServiceMocks.getOrderById.mockResolvedValue(baseOrder());
     activityBookingMocks.createActivityBookingAfterPayment.mockResolvedValue({
@@ -416,6 +462,7 @@ describe("fulfillCheckoutSetupSessionCompleted (mixed cart stays)", () => {
       orderServiceMocks.revertOrderToAwaitingPaymentAfterSetupFailure,
     ).toHaveBeenCalledWith(expect.anything(), "order-1");
     expect(cartServiceMocks.deleteAllCartLinesForUser).not.toHaveBeenCalled();
+    expect(providerNoticeMocks.safeSendProviderBookingPendingNotice).not.toHaveBeenCalled();
   });
 
   it("skips create when pending stays already cover accommodation cart lines", async () => {
@@ -451,5 +498,44 @@ describe("fulfillCheckoutSetupSessionCompleted (mixed cart stays)", () => {
       accommodationBookingMocks.createAccommodationBookingAfterSetup,
     ).not.toHaveBeenCalled();
     expect(cartServiceMocks.deleteAllCartLinesForUser).toHaveBeenCalled();
+    expect(providerNoticeMocks.safeSendProviderBookingPendingNotice).toHaveBeenCalledWith(
+      supabase, "stay-1", "accommodation",
+    );
+  });
+
+  it("rejects a cart edited while Stripe is open, even when its total is unchanged", async () => {
+    orderServiceMocks.getOrderById.mockResolvedValue(baseOrder({ total_cents: 45000 }));
+    const event = checkoutSessionCompletedEvent();
+    const metadata = (event.data.object as Stripe.Checkout.Session).metadata!;
+    metadata.cart_fingerprint = checkoutCartFingerprint([accommodationLine()]);
+    metadata.cart_line_count = "1";
+    const { supabase } = makeSetupFulfillmentSupabase({
+      cartLines: [accommodationLine({ guests: 4 })],
+    });
+
+    expect(await fulfillCheckoutSetupSessionCompleted(event, supabase as never))
+      .toEqual({ status: "ignored", reason: "order_not_eligible" });
+    expect(accommodationBookingMocks.createAccommodationBookingAfterSetup).not.toHaveBeenCalled();
+    expect(cartServiceMocks.deleteAllCartLinesForUser).not.toHaveBeenCalled();
+    expect(orderServiceMocks.failCheckoutOrderIfAwaitingPayment).toHaveBeenCalledWith(supabase, "order-1");
+  });
+
+  it("preserves the next trip's cart on a second success event and replays pending notices", async () => {
+    orderServiceMocks.getOrderById.mockResolvedValue(baseOrder({
+      status: "awaiting_vendor_approval", stripe_setup_intent_id: "seti_1", total_cents: 45000,
+    }));
+    accommodationBookingMocks.listAccommodationBookings.mockResolvedValue([
+      { id: "stay-1", order_id: "order-1", status: "pending_approval", total_cents: 45000 },
+    ]);
+    const event = checkoutSessionCompletedEvent();
+    const metadata = (event.data.object as Stripe.Checkout.Session).metadata!;
+    metadata.cart_fingerprint = checkoutCartFingerprint([accommodationLine()]);
+    metadata.cart_line_count = "1";
+    const { supabase } = makeSetupFulfillmentSupabase({ cartLines: [activityLine()] });
+
+    expect(await fulfillCheckoutSetupSessionCompleted(event, supabase as never)).toEqual({ status: "already_fulfilled" });
+    expect(cartServiceMocks.deleteAllCartLinesForUser).not.toHaveBeenCalled();
+    expect(activityBookingMocks.createActivityBookingAfterPayment).not.toHaveBeenCalled();
+    expect(providerNoticeMocks.safeSendProviderBookingPendingNotice).toHaveBeenCalledWith(supabase, "stay-1", "accommodation");
   });
 });

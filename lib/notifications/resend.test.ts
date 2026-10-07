@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { isResendEmailConfigured, sendEmailWithResend } from "./resend";
-import { NotificationDeliveryError } from "./delivery-error";
 
 beforeEach(() => {
   vi.unstubAllEnvs();
@@ -89,7 +88,7 @@ describe("resend transport", () => {
       text: "Test",
     });
 
-    await expect(promise).rejects.toMatchObject<Partial<NotificationDeliveryError>>({
+    await expect(promise).rejects.toMatchObject({
       retryable,
       statusCode: status,
     });

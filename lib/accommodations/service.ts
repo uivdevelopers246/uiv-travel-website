@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/supabase/types/database";
 import { applyLocationPointUpdate, setLocationPointIfValid } from "@/lib/listings/service-helpers";
+import { withAccommodationBookablePrices } from "@/lib/accommodation-calendar/pricing";
 import {
   getCurrentUserIdOrThrow,
   getVendorIdForCurrentUser,
@@ -20,8 +21,6 @@ export type CreateAccommodationInput = {
   bed_count?: number | null;
   bathroom_count?: number | null;
   max_guest_capacity?: number | null;
-  price_min_usd?: number | null;
-  price_max_usd?: number | null;
   check_in_time?: string | null;
   check_out_time?: string | null;
   suitable_for_children?: boolean;
@@ -51,8 +50,6 @@ export type UpdateAccommodationInput = Partial<
     | "bed_count"
     | "bathroom_count"
     | "max_guest_capacity"
-    | "price_min_usd"
-    | "price_max_usd"
     | "check_in_time"
     | "check_out_time"
     | "suitable_for_children"
@@ -125,8 +122,6 @@ function buildCreateInsert(
   if (input.bathroom_count !== undefined) row.bathroom_count = input.bathroom_count;
   if (input.max_guest_capacity !== undefined)
     row.max_guest_capacity = input.max_guest_capacity;
-  if (input.price_min_usd !== undefined) row.price_min_usd = input.price_min_usd;
-  if (input.price_max_usd !== undefined) row.price_max_usd = input.price_max_usd;
   if (input.check_in_time !== undefined) row.check_in_time = input.check_in_time;
   if (input.check_out_time !== undefined) row.check_out_time = input.check_out_time;
   if (input.suitable_for_children !== undefined)
@@ -195,7 +190,8 @@ export async function createAccommodation(
     .eq("id", data.id)
     .single();
   if (refetchError) throw new Error(refetchError.message);
-  return accommodation as Accommodation;
+  const [priced] = await withAccommodationBookablePrices(supabase, [accommodation as Accommodation]);
+  return priced;
 }
 
 export async function listAccommodations(
@@ -213,7 +209,7 @@ export async function listAccommodations(
     .range(offset, offset + limit - 1);
 
   if (error) throw new Error(error.message);
-  return (data ?? []) as unknown as PublicAccommodation[];
+  return withAccommodationBookablePrices(supabase, (data ?? []) as unknown as PublicAccommodation[]);
 }
 
 export async function getAccommodationById(
@@ -228,7 +224,9 @@ export async function getAccommodationById(
     .maybeSingle();
 
   if (error) throw new Error(error.message);
-  return (data ?? null) as PublicAccommodation | null;
+  if (!data) return null;
+  const [priced] = await withAccommodationBookablePrices(supabase, [data as unknown as PublicAccommodation]);
+  return priced;
 }
 
 export async function updateAccommodation(
@@ -248,8 +246,6 @@ export async function updateAccommodation(
   if (input.bathroom_count !== undefined) payload.bathroom_count = input.bathroom_count;
   if (input.max_guest_capacity !== undefined)
     payload.max_guest_capacity = input.max_guest_capacity;
-  if (input.price_min_usd !== undefined) payload.price_min_usd = input.price_min_usd;
-  if (input.price_max_usd !== undefined) payload.price_max_usd = input.price_max_usd;
   if (input.check_in_time !== undefined) payload.check_in_time = input.check_in_time;
   if (input.check_out_time !== undefined) payload.check_out_time = input.check_out_time;
   if (input.suitable_for_children !== undefined)
@@ -291,7 +287,8 @@ export async function updateAccommodation(
       .eq("id", data.id)
       .single();
     if (refetchError) throw new Error(refetchError.message);
-    return accommodation as Accommodation;
+    const [priced] = await withAccommodationBookablePrices(supabase, [accommodation as Accommodation]);
+    return priced;
   }
 
   const vendorId = await getVendorIdForCurrentUser(supabase, userId);
@@ -314,7 +311,8 @@ export async function updateAccommodation(
     .eq("id", data.id)
     .single();
   if (refetchError) throw new Error(refetchError.message);
-  return accommodation as Accommodation;
+  const [priced] = await withAccommodationBookablePrices(supabase, [accommodation as Accommodation]);
+  return priced;
 }
 
 export async function deleteAccommodation(

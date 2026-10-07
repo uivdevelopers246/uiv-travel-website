@@ -1,5 +1,7 @@
 "use client";
 
+import { formatAccommodationNightlyPrice } from "@/components/accommodations/pricing";
+
 import { useState } from "react";
 import Link from "next/link";
 import { accommodationTypes } from "@/lib/accommodations/constants";
@@ -119,7 +121,7 @@ export function ManageAccommodationsClient({
             return (
               <div
                 key={accommodation.id}
-                className="flex items-center gap-6 rounded-lg bg-white p-6 shadow-sm"
+                className="flex flex-wrap items-center gap-4 rounded-lg bg-white p-6 shadow-sm sm:gap-6"
               >
                 <div className="h-24 w-24 flex-shrink-0 overflow-hidden rounded-lg bg-gray-100">
                   <img
@@ -153,22 +155,26 @@ export function ManageAccommodationsClient({
                       "No location set"}
                   </p>
                   <p className="mt-1 text-sm text-gray-500">
-                    {accommodation.price_min_usd
-                      ? `$${accommodation.price_min_usd}${
-                          accommodation.price_max_usd &&
-                          accommodation.price_max_usd !==
-                            accommodation.price_min_usd
-                            ? `-${accommodation.price_max_usd}`
-                            : ""
-                        }/night`
-                      : "Price not set"}{" "}
+                    {formatAccommodationNightlyPrice(accommodation)}{" "}
                     | {typeLabel} | {accommodation.bedroom_count ?? 0}{" "}
                     bed{(accommodation.bedroom_count ?? 0) !== 1 ? "s" : ""} |{" "}
                     {accommodation.max_guest_capacity ?? 0} guests
                   </p>
                 </div>
 
-                <div className="flex flex-shrink-0 items-center gap-2">
+                <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto">
+                  <Link
+                    href={`/my-listings/manage/accommodations/${accommodation.id}/calendar`}
+                    className="rounded-lg bg-[#193059] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#407FC2]"
+                  >
+                    Calendar &amp; prices
+                  </Link>
+                  <Link
+                    href={`/my-listings/bookings?accommodationId=${accommodation.id}`}
+                    className="rounded-lg border border-[#407FC2] px-4 py-2 text-sm font-medium text-[#407FC2] transition-colors hover:bg-blue-50"
+                  >
+                    Bookings
+                  </Link>
                   {accommodation.status !== "published" && (
                     <button
                       onClick={() => updateStatus(accommodation.id, "published")}

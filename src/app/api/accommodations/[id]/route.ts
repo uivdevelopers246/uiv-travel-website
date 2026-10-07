@@ -75,6 +75,10 @@ export async function PATCH(
   }
   const { body } = parsedBody;
 
+  if ("price_min_usd" in body || "price_max_usd" in body) {
+    return badRequest("Prices are managed in Calendar & prices.");
+  }
+
   const updates: UpdateAccommodationInput = {};
 
   if (typeof body?.name === "string") {
@@ -149,50 +153,6 @@ export async function PATCH(
     } else {
       return badRequest("max_guest_capacity must be a positive integer or null");
     }
-  }
-
-  if (typeof body?.price_min_usd !== "undefined") {
-    if (body.price_min_usd === null) updates.price_min_usd = null;
-    else if (
-      typeof body.price_min_usd === "number" &&
-      !Number.isNaN(body.price_min_usd) &&
-      body.price_min_usd >= 0
-    ) {
-      updates.price_min_usd = body.price_min_usd;
-    } else {
-      return badRequest("price_min_usd must be a non-negative number or null");
-    }
-  }
-
-  if (typeof body?.price_max_usd !== "undefined") {
-    if (body.price_max_usd === null) updates.price_max_usd = null;
-    else if (
-      typeof body.price_max_usd === "number" &&
-      !Number.isNaN(body.price_max_usd) &&
-      body.price_max_usd >= 0
-    ) {
-      updates.price_max_usd = body.price_max_usd;
-    } else {
-      return badRequest("price_max_usd must be a non-negative number or null");
-    }
-  }
-
-  const effMin =
-    updates.price_min_usd !== undefined
-      ? updates.price_min_usd
-      : (body.price_min_usd as number | null | undefined);
-  const effMax =
-    updates.price_max_usd !== undefined
-      ? updates.price_max_usd
-      : (body.price_max_usd as number | null | undefined);
-  if (
-    effMin != null &&
-    effMax != null &&
-    typeof effMin === "number" &&
-    typeof effMax === "number" &&
-    effMin > effMax
-  ) {
-    return badRequest("price_min_usd must be less than or equal to price_max_usd");
   }
 
   if (typeof body?.check_in_time !== "undefined") {

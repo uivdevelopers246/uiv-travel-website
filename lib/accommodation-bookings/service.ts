@@ -36,9 +36,9 @@ export type CreateAccommodationBookingAfterSetupInput = {
   /** MVP default: `0` when omitted. */
   discount_cents?: number;
   /** Default: `pending_approval` (M4-C / M4-D). */
-  status?: AccommodationBookingStatus;
-  /** Required when `status` is `pending_approval`. */
-  expires_at?: string | null;
+  status?: "pending_approval";
+  /** Future SLA deadline; a setup hold always requires vendor approval. */
+  expires_at: string;
 };
 
 export type ListAccommodationBookingsOptions = {
@@ -78,6 +78,7 @@ export async function listAccommodationBookings(
 
   const { data, error } = await query
     .order("created_at", { ascending: false })
+    .order("id", { ascending: true })
     .range(offset, offset + limit - 1);
 
   if (error) {
@@ -126,12 +127,12 @@ export async function createAccommodationBookingAfterSetup(
     p_discount_cents: discount_cents,
     p_total_cents: input.total_cents,
     p_status: status,
-    p_expires_at: input.expires_at ?? null,
+    p_expires_at: input.expires_at,
   };
 
   const { data, error } = await supabase.rpc(
     "create_accommodation_booking_after_setup",
-    rpcInput as never,
+    rpcInput,
   );
 
   if (error) {
@@ -324,4 +325,20 @@ export async function confirmAllPendingAccommodationBookingsForOrder(
     confirmedCount += n;
   }
   return confirmedCount;
+}
+
+/** Reopens unpaid stays after failed settlement; vendors must approve the new payment attempt. */
+export async function reopenConfirmedAccommodationBookingsForOrder(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+  expiresAt: string,
+): Promise<AccommodationBooking[]> {
+  const { data, error } = await supabase.rpc(
+    "reopen_confirmed_accommodation_bookings_for_order",
+    { p_order_id: orderId, p_expires_at: expiresAt },
+  );
+  if (error) {
+    throw bookingServiceError("Could not reopen confirmed accommodation bookings for order", error);
+  }
+  return data ?? [];
 }

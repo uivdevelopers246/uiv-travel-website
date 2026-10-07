@@ -8,6 +8,7 @@ import {
   formatCurrencyFromCents,
   formatParticipantsLabel,
   formatSlotDateTime,
+  formatStayDateRange,
 } from "@/lib/utils/formatting";
 import type { BuyerFlowMessage } from "@/lib/orders/buyer-flow";
 import { collectOrderStatusAlerts } from "@/lib/orders/status-alerts";
@@ -175,6 +176,11 @@ type BookingLineProps = {
 };
 
 function BookingLine({ bookingState, showCountdown }: BookingLineProps) {
+  const booking = bookingState.booking;
+  const stay = "accommodation_id" in booking ? booking : null;
+  const activity = "activity_id" in booking ? booking : null;
+  const title = stay?.accommodation_name ?? activity?.activity_title ?? "Booking";
+  const imageUrl = stay?.accommodation_image_url ?? activity?.activity_image_url;
   const countdownLabel = showCountdown
     ? formatCountdownLabel(bookingState.countdown, "Approval window")
     : null;
@@ -184,10 +190,10 @@ function BookingLine({ bookingState, showCountdown }: BookingLineProps) {
       <div className="flex flex-col gap-4">
         <div className="flex min-w-0 flex-col gap-4 sm:flex-row">
           <div className="h-40 w-full shrink-0 overflow-hidden rounded-[22px] bg-[linear-gradient(135deg,#dbe8f6_0%,#8ec7ff_48%,#193059_100%)] shadow-[0_14px_36px_rgba(25,48,89,0.12)] sm:h-28 sm:w-28">
-            {bookingState.booking.activity_image_url ? (
+            {imageUrl ? (
               <img
-                src={bookingState.booking.activity_image_url}
-                alt={bookingState.booking.activity_title}
+                src={imageUrl}
+                alt={title}
                 className="h-full w-full object-cover"
               />
             ) : (
@@ -205,7 +211,7 @@ function BookingLine({ bookingState, showCountdown }: BookingLineProps) {
                 className="min-w-0 flex-1 text-2xl font-bold text-[#193059]"
                 style={{ fontFamily: "var(--font-playfair)" }}
               >
-                {bookingState.booking.activity_title}
+                {title}
               </h3>
               <span
                 className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${getToneClasses(
@@ -234,22 +240,21 @@ function BookingLine({ bookingState, showCountdown }: BookingLineProps) {
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               <div className="rounded-[20px] border border-[#d8e5f2] bg-white px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-                  Slot
+                  {stay ? "Check-in to check-out" : "Slot"}
                 </p>
                 <p className="mt-2 text-sm font-semibold leading-6 text-[#193059]">
-                  {formatSlotDateTime(
-                    bookingState.booking.slot_starts_at,
-                    bookingState.booking.slot_ends_at,
+                  {stay ? formatStayDateRange(stay.check_in, stay.check_out) : formatSlotDateTime(
+                    activity?.slot_starts_at ?? "", activity?.slot_ends_at ?? "",
                   )}
                 </p>
               </div>
 
               <div className="rounded-[20px] border border-[#d8e5f2] bg-white px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-                  Participants
+                  {stay ? "Guests" : "Participants"}
                 </p>
                 <p className="mt-2 text-sm font-semibold leading-6 text-[#193059]">
-                  {formatParticipantsLabel(bookingState.booking.participants)}
+                  {stay ? `${stay.guests} ${stay.guests === 1 ? "guest" : "guests"}` : formatParticipantsLabel(activity?.participants ?? 0)}
                 </p>
               </div>
 
@@ -591,10 +596,10 @@ export function MyBookingsClient({
               );
               const bookingCountLabel = card.isFinalizing
                 ? "Booking items still syncing"
-                : `${card.order.activity_bookings.length} ${
-                    card.order.activity_bookings.length === 1
-                      ? "activity booking"
-                      : "activity bookings"
+                : `${card.bookingStates.length} ${
+                    card.bookingStates.length === 1
+                      ? "booking"
+                      : "bookings"
                   }`;
 
               return (
@@ -654,17 +659,25 @@ export function MyBookingsClient({
 
                         <div className="grid gap-3 rounded-[24px] bg-[#f4f8fc] p-4 text-sm text-slate-600 sm:min-w-[240px]">
                         <div className="flex items-center justify-between gap-4">
-                          <span>Order total</span>
+                          <span>Requested total</span>
                           <span className="font-semibold text-[#193059]">
                             {formatCurrencyFromCents(card.order.total_cents)}
                           </span>
                         </div>
+                        {!card.isFinalizing ? (
+                          <div className="flex items-center justify-between gap-4">
+                            <span>Confirmed total</span>
+                            <span className="font-semibold text-[#193059]">
+                              {formatCurrencyFromCents(card.confirmedTotalCents)}
+                            </span>
+                          </div>
+                        ) : null}
                         <div className="flex items-center justify-between gap-4">
                           <span>Bookings</span>
                           <span className="font-semibold text-[#193059]">
                             {card.isFinalizing
                               ? "Syncing..."
-                              : card.order.activity_bookings.length}
+                              : card.bookingStates.length}
                           </span>
                         </div>
                       </div>
@@ -801,7 +814,7 @@ export function MyBookingsClient({
                     ) : (
                       card.bookingStates.map((bookingState) => (
                         <BookingLine
-                          key={bookingState.booking.id}
+                          key={`${"accommodation_id" in bookingState.booking ? "accommodation" : "activity"}:${bookingState.booking.id}`}
                           bookingState={bookingState}
                           showCountdown={card.pendingApprovalCount > 1}
                         />

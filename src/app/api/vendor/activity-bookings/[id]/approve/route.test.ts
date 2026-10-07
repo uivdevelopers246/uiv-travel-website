@@ -13,7 +13,7 @@ const routeHelperMocks = vi.hoisted(() => ({
     Response.json({ error: message }, { status: 403 }),
   ),
   parseUuidParam: vi.fn(),
-  requireSameOriginPost: vi.fn(() => null),
+  requireSameOriginPost: vi.fn((): Response | null => null),
   requireRole: vi.fn(),
   serverError: vi.fn((message: string) =>
     Response.json({ error: message }, { status: 500 }),

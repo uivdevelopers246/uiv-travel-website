@@ -118,6 +118,12 @@ export async function POST(req: Request) {
     if (guests === null) {
       return badRequest("guests must be a positive integer");
     }
+    const expectedTotal = body.expected_total_cents;
+    if (expectedTotal !== undefined &&
+        (typeof expectedTotal !== "number" || !Number.isSafeInteger(expectedTotal) ||
+          expectedTotal < 0 || expectedTotal > 2_147_483_647)) {
+      return badRequest("expected_total_cents must be a valid amount in cents");
+    }
 
     try {
       const line = await addOrMergeAccommodationLine(supabase, {
@@ -125,6 +131,7 @@ export async function POST(req: Request) {
         check_in: checkIn,
         check_out: checkOut,
         guests,
+        expected_total_cents: expectedTotal,
       });
       return NextResponse.json(line);
     } catch (error: unknown) {

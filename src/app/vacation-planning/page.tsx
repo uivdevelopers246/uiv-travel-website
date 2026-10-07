@@ -2,14 +2,15 @@ import { Header } from "@/components/layout/header";
 import type { AccommodationDisplay } from "@/lib/accommodations/types";
 import type { ActivityDisplay } from "@/lib/activities/types";
 import { createPublicClient } from "@/lib/supabase/public";
+import { withAccommodationBookablePrices } from "@/lib/accommodation-calendar/pricing";
 import { VacationPlanningClient } from "./VacationPlanningClient";
 
-export const revalidate = 300;
+export const dynamic = "force-dynamic";
 
 const VACATION_ACTIVITY_SELECT =
   "id, title, description, location, latitude, longitude, category, duration_hours, price_per_person, max_capacity, image_url, is_featured, vendors(name)" as const;
 const VACATION_ACCOMMODATION_SELECT =
-  "id, name, accommodation_type, latitude, longitude, bedroom_count, bed_count, bathroom_count, max_guest_capacity, price_min_usd, price_max_usd, amenities, address, parish, image_url, is_featured, vendors(name)" as const;
+  "id, name, accommodation_type, latitude, longitude, bedroom_count, bed_count, bathroom_count, max_guest_capacity, amenities, address, parish, image_url, is_featured, vendors(name)" as const;
 
 type VendorPreview = { name: string | null } | null;
 type VacationActivityRow = {
@@ -37,8 +38,6 @@ type VacationAccommodationRow = {
   bed_count: number | null;
   bathroom_count: number | null;
   max_guest_capacity: number | null;
-  price_min_usd: number | null;
-  price_max_usd: number | null;
   amenities: string[];
   address: string | null;
   parish: string | null;
@@ -98,8 +97,7 @@ export default async function VacationPlanningPage() {
     accommodationsQuery,
   ]);
   const activityRows: VacationActivityRow[] = activitiesResult.data ?? [];
-  const accommodationRows: VacationAccommodationRow[] =
-    accommodationsResult.data ?? [];
+  const accommodationRows = await withAccommodationBookablePrices(supabase, accommodationsResult.data ?? []);
   const activities: ActivityDisplay[] = activityRows.map(activity => ({
     id: activity.id,
     title: activity.title,
