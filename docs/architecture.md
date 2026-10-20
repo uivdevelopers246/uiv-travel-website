@@ -87,6 +87,12 @@ Paid **activity** and **accommodation** bookings share cart → Checkout **setup
   4. RLS allows anonymous/authenticated read for rows where `status = 'published'` (or vendor/admin visibility).
   5. Server renders `ActivitiesClient` with the fetched list; client handles filters and role (for “Manage activities” link).
   6. Optional: client calls `GET /api/activities` (e.g. for limit/offset); same server `createClient()` and `listActivities()` from `@/lib/activities/service`; response JSON list of public activities.
+- **Authenticated user generating an activity itinerary**
+  1. Client sends trip dates, activity budget, group size, and categories to `POST /api/itinerary`.
+  2. The route uses the cookie-based Supabase client, requires authentication, parses JSON, and validates preferences.
+  3. `lib/itinerary/retrieve.ts` selects a bounded set of published activities under RLS. Activity slots and date-specific availability are not checked.
+  4. `record_itinerary_generation` atomically enforces the 10-per-rolling-hour per-user limit immediately before the single OpenAI structured-output request.
+  5. The server validates model activity IDs against the candidate set, calculates the estimated total from catalog prices and group size, hydrates activity summaries, and returns a warning that availability is unverified.
 - **Public user browsing accommodations (e.g. vacation planning)**
   1. Pages such as `/vacation-planning` query `accommodations` with `status = 'published'`, joining `vendors(name)` where needed.
   2. RLS allows anon/authenticated read for published rows; vendors and admins see drafts for their listings.
@@ -189,3 +195,13 @@ Paid **activity** and **accommodation** bookings share cart → Checkout **setup
 - **Protected paths:** `protectedPaths` in `lib/supabase/proxy.ts` is empty; auth redirects for anonymous users are not applied globally—server components and API routes enforce access per route. Add paths here if you want proxy-level redirects to login.
 - **ADR link:** Key decisions above can be expanded into ADRs as needed.
 
+
+### Activity itinerary API
+
+`POST /api/itinerary` requires a signed-in Supabase cookie session. Send a JSON object with only `tripStartDate` and `tripEndDate` (valid `YYYY-MM-DD`, inclusive, 1–14 calendar days), `budgetUsd` (positive finite USD activity budget for the entire group/trip), `groupSize` (integer 1–20), and `categories` (non-empty array of existing activity category values). Duplicate categories are normalized. Accommodation costs are excluded.
+
+The response contains `tripStartDate`, `tripEndDate`, `estimatedTotalUsd`, `days: [{ date, theme, activities }]`, and `warnings`. Each activity includes its stable `id`, `title`, `category`, `duration_hours`, `price_per_person`, `location`, and `image_url`. Dates with no recommendations may be omitted. Prices and hydrated details come from the catalog; null duration/capacity remains unknown. Availability is not checked and no bookings or saved itineraries are created.
+
+Retrieval is capped at 30 published activities and excludes unpriced, individually over-budget, and known capacity-incompatible listings. The authenticated user's rolling limit is 10 generations per 60 minutes, recorded atomically after non-empty retrieval and before OpenAI. Provider failures consume a slot. Configure server-only `OPENAI_API_KEY`; generation uses `gpt-4.1-mini` structured output with SDK retries disabled and a 60-second provider timeout.
+
+Errors use `{ error: string }`: 400 for malformed JSON/preferences or no matching activities, 401 for missing authentication, 403 for cross-origin requests, 429 for the generation limit, 503 for missing OpenAI configuration, 502 for provider/invalid-plan errors, and 500 for unexpected failures.

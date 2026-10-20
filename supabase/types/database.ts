@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -34,6 +34,13 @@ export type Database = {
   }
   public: {
     Tables: {
+      itinerary_generations: {
+        Row: { id: string; user_id: string; created_at: string }
+        Insert: { id?: string; user_id: string; created_at?: string }
+        Update: { id?: string; user_id?: string; created_at?: string }
+        Relationships: []
+      }
+
       accommodation_nights: {
         Row: { accommodation_id: string; night: string; price_cents: number | null; is_available: boolean }
         Insert: { accommodation_id: string; night: string; price_cents?: number | null; is_available?: boolean }
@@ -1115,6 +1122,7 @@ export type Database = {
       }
       expire_pending_accommodation_bookings: { Args: never; Returns: Json }
       expire_pending_activity_bookings: { Args: never; Returns: Json }
+      record_itinerary_generation: { Args: never; Returns: boolean }
       is_site_admin: { Args: never; Returns: boolean }
       is_vendor_owner: { Args: { v_id: string }; Returns: boolean }
       is_vendor_user: { Args: never; Returns: boolean }

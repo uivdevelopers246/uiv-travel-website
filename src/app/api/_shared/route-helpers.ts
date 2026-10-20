@@ -35,6 +35,10 @@ export function notFound(message: string) {
   return jsonError(message, 404);
 }
 
+export function tooManyRequests(message: string) {
+  return jsonError(message, 429);
+}
+
 export function serverError(message: string) {
   return jsonError(message, 500);
 }
