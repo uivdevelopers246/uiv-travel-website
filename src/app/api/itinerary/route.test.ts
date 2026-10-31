@@ -171,4 +171,18 @@ describe("POST /api/itinerary", () => {
       error: "Could not create itinerary. Please try again.",
     });
   });
+  it("returns 401 when Supabase rejects the session", async () => {
+    supabase.auth.getUser.mockResolvedValue({ data: { user: null }, error: { message: "Expired token" } });
+    expect((await post()).status).toBe(401);
+    expect(createItinerary).not.toHaveBeenCalled();
+  });
+
+  it("maps authentication infrastructure failures to a generic 500", async () => {
+    supabase.auth.getUser.mockRejectedValue(new Error("internal connection detail"));
+    const response = await post();
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "Could not create itinerary. Please try again." });
+    expect(createItinerary).not.toHaveBeenCalled();
+  });
+
 });

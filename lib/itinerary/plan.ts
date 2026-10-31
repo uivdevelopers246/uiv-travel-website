@@ -61,7 +61,7 @@ export async function generateItineraryPlan(
   let response;
   try {
     response = await client.responses.create({
-      model: "gpt-4.1-mini",
+      model: "gpt-6-luna",
       max_output_tokens: 1200,
       input: [
         {

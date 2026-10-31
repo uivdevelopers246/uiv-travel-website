@@ -82,4 +82,17 @@ describe("validatePrefs", () => {
       validatePrefs({ ...validInput, categories: ["culture", "shopping"] }),
     ).toMatchObject({ ok: false });
   });
+  it.each([1, 20])("accepts group-size boundary %s", (groupSize) => {
+    expect(validatePrefs({ ...validInput, groupSize }).ok).toBe(true);
+  });
+
+  it.each(["2026-02-29", "2026-13-01", "2026-10-14T00:00:00Z", "", null])("rejects invalid end date %s", (tripEndDate) => {
+    expect(validatePrefs({ ...validInput, tripEndDate }).ok).toBe(false);
+  });
+
+  it("accepts leap day and a trip crossing a year boundary", () => {
+    expect(validatePrefs({ ...validInput, tripStartDate: "2028-02-29", tripEndDate: "2028-03-01" }).ok).toBe(true);
+    expect(validatePrefs({ ...validInput, tripStartDate: "2026-12-31", tripEndDate: "2027-01-01" }).ok).toBe(true);
+  });
+
 });

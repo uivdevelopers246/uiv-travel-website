@@ -56,7 +56,7 @@ describe("generateItineraryPlan", () => {
 
     expect(responsesCreate).toHaveBeenCalledTimes(1);
     const request = responsesCreate.mock.calls[0][0];
-    expect(request.model).toBe("gpt-4.1-mini");
+    expect(request.model).toBe("gpt-6-luna");
     expect(request.text.format).toMatchObject({
       type: "json_schema",
       name: "activity_itinerary_plan",
@@ -83,4 +83,15 @@ describe("generateItineraryPlan", () => {
       "OpenAI returned invalid itinerary plan output",
     );
   });
+  it("maps provider errors without leaking details or retrying", async () => {
+    responsesCreate.mockRejectedValue(new Error("provider secret"));
+    await expect(generateItineraryPlan(prefs, candidates, client)).rejects.toThrow("OpenAI could not generate an itinerary plan");
+    expect(responsesCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a completed response without output text", async () => {
+    responsesCreate.mockResolvedValue({ status: "completed", output_text: "" });
+    await expect(generateItineraryPlan(prefs, candidates, client)).rejects.toThrow("OpenAI did not return a completed itinerary plan");
+  });
+
 });

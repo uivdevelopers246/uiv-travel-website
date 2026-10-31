@@ -14,7 +14,9 @@
     "notifications:test": "node --conditions=react-server --import tsx scripts/notifications-test.ts",
     "notifications:drain": "node --import tsx scripts/notifications-drain.ts",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "itinerary:test:smoke": "node --import tsx scripts/itinerary-smoke-test.ts",
+    "itinerary:test:db": "node --import tsx scripts/itinerary-db-test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.8.0",
