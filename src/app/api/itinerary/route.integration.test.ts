@@ -13,7 +13,7 @@ vi.mock("openai", () => ({
 
 const prefs = { tripStartDate: "2026-10-01", tripEndDate: "2026-10-02", budgetUsd: 30.15, groupSize: 3, categories: ["culture"] };
 const candidate = { id: "activity-1", title: "History walk", category: "culture", duration_hours: null, price_per_person: 10.05, max_capacity: null, location: "Bridgetown", image_url: null };
-const draft = { days: [{ date: prefs.tripStartDate, theme: "History", activityIds: [candidate.id] }] };
+const draft = { accommodationId: null, days: [{ date: prefs.tripStartDate, theme: "History", activityIds: [candidate.id] }] };
 const rpc = vi.fn();
 const getUser = vi.fn();
 const limit = vi.fn();
@@ -25,7 +25,7 @@ const query = {
 const supabase = { auth: { getUser }, from: vi.fn(() => query), rpc };
 const calls: string[] = [];
 function post(body: unknown = prefs) {
-  return POST(new Request("http://localhost/api/itinerary", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
+  return POST(new Request("http://localhost/api/itinerary", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "activities", tripStartDate: (body as typeof prefs).tripStartDate, tripEndDate: (body as typeof prefs).tripEndDate, groupSize: (body as typeof prefs).groupSize, activities: { budgetUsd: (body as typeof prefs).budgetUsd, categories: (body as typeof prefs).categories } }) }));
 }
 
 describe("POST /api/itinerary with real orchestration and mocked Supabase/OpenAI", () => {
@@ -45,7 +45,7 @@ describe("POST /api/itinerary with real orchestration and mocked Supabase/OpenAI
   it("records before the single model call and returns catalog details at the exact group budget", async () => {
     const response = await post();
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ estimatedTotalUsd: 30.15, days: [{ date: prefs.tripStartDate, activities: [{ id: candidate.id, title: candidate.title, duration_hours: null }] }], warnings: [expect.stringContaining("availability has not been checked")] });
+    expect(await response.json()).toMatchObject({ estimatedCosts: { activitiesUsd: 30.15, totalUsd: 30.15 }, days: [{ date: prefs.tripStartDate, activities: [{ id: candidate.id, title: candidate.title, duration_hours: null }] }], warnings: [expect.stringContaining("availability has not been checked")] });
     expect(calls).toEqual(["retrieve", "record", "provider"]);
     expect(query.lte).toHaveBeenCalledWith("price_per_person", 10.05);
     expect(constructor).toHaveBeenCalledWith({ apiKey: "test-key", maxRetries: 0, timeout: 60_000 });

@@ -32,3 +32,19 @@ Both the app and smoke-test process must use the same **local** `NEXT_PUBLIC_SUP
 - Real local database rate-limit concurrency and RLS checks passed.
 - Webpack production build passed. Default Turbopack build hit an environment worker-port restriction.
 - After switching generation to `gpt-6-luna`, the authenticated local HTTP request passed: OpenAI completed successfully, the endpoint returned 200 with 3 itinerary days, a $410 estimated group total, an availability warning, and exactly one generation log row. The temporary local test user was removed. The earlier `gpt-4.1-mini` attempt returned `credit_balance_exhausted` / `insufficient_quota`.
+
+The smoke test now sends `mode: "activities"` with nested `activities` preferences and checks `estimatedCosts.totalUsd`. Combined-mode validation, quoted candidate filtering, required-section failures, and accommodation ID hydration are covered by unit tests. Historical live results above predate the combined-mode extension.
+
+## Combined live test and calendar fixtures
+
+The local Supabase seed configuration also runs `supabase/seed-data/itinerary-calendar.sql` after the base seed. Four existing published seed properties receive 30 available nights starting 14 days after UTC today, priced at $125, $175, $250, and $350 per night. Conflicting calendar rows are preserved, including vendor edits and closures. Rerun the calendar fixture alone to refresh future dates without resetting the database; do not reset an existing database just to refresh these rows.
+
+Run a combined request against a local app configured for the same local Supabase instance:
+
+```sh
+npm run itinerary:test:smoke -- http://localhost:3000 activities_and_accommodation
+```
+
+Both smoke modes now use a trip 14–16 days after UTC today. Combined mode requests two nights with separate $1,000 activity and accommodation budgets. It verifies the returned property against a fresh authenticated stay quote, separate budgets, the summed total, and exactly one generation slot. Existing bookings or closed/edited seed nights may legitimately make the requested stay unavailable. The fixture does not overwrite them.
+
+After applying the rolling calendar fixtures, both updated live modes passed with `gpt-6-luna`: activity-only returned HTTP 200 with a $800 group total; combined returned HTTP 200 with a $760 total and a verified two-night accommodation quote. Each response contained three itinerary days and exactly one generation log row. Temporary users and their generation rows were removed after both tests.

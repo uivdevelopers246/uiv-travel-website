@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createClient } from "@/lib/supabase/server";
 import {
-  createItinerary,
+  createCompleteItinerary,
   NoItineraryCandidatesError,
 } from "@/lib/itinerary/service";
 import { POST } from "./route";
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("@/lib/itinerary/service", () => ({
-  createItinerary: vi.fn(),
+  createCompleteItinerary: vi.fn(),
+  NoAccommodationCandidatesError: class NoAccommodationCandidatesError extends Error {},
   NoItineraryCandidatesError: class NoItineraryCandidatesError extends Error {},
 }));
 
@@ -22,13 +23,17 @@ const prefs = {
 const itinerary = {
   tripStartDate: prefs.tripStartDate,
   tripEndDate: prefs.tripEndDate,
-  estimatedTotalUsd: 70,
+  mode: "activities",
+  accommodation: null,
+  estimatedCosts: { activitiesUsd: 70, accommodationUsd: 0, totalUsd: 70 },
   days: [],
   warnings: ["Activity availability has not been checked."],
 };
 const supabase = {
   auth: { getUser: vi.fn() },
 };
+
+const toRequest = (p: typeof prefs) => { const { budgetUsd, categories, ...common } = p; return { ...common, mode: "activities", activities: { budgetUsd, categories } }; };
 
 function post(value: unknown = prefs) {
   return POST(
@@ -38,7 +43,7 @@ function post(value: unknown = prefs) {
         origin: "http://localhost",
         "content-type": "application/json",
       },
-      body: JSON.stringify(value),
+      body: JSON.stringify(value && typeof value === "object" && !Array.isArray(value) ? toRequest(value as typeof prefs) : value),
     }),
   );
 }
@@ -61,7 +66,7 @@ describe("POST /api/itinerary", () => {
     vi.resetAllMocks();
     supabase.auth.getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
     vi.mocked(createClient).mockResolvedValue(supabase as never);
-    vi.mocked(createItinerary).mockResolvedValue(itinerary as never);
+    vi.mocked(createCompleteItinerary).mockResolvedValue(itinerary as never);
   });
 
   it("authenticates, validates preferences, and returns the itinerary", async () => {
@@ -69,7 +74,7 @@ describe("POST /api/itinerary", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(itinerary);
-    expect(createItinerary).toHaveBeenCalledWith(supabase, prefs);
+    expect(createCompleteItinerary).toHaveBeenCalledWith(supabase, toRequest(prefs));
   });
 
   it("returns 401 for an unauthenticated request", async () => {
@@ -78,7 +83,7 @@ describe("POST /api/itinerary", () => {
     const response = await post();
 
     expect(response.status).toBe(401);
-    expect(createItinerary).not.toHaveBeenCalled();
+    expect(createCompleteItinerary).not.toHaveBeenCalled();
   });
 
   it("authenticates only once", async () => {
@@ -88,7 +93,7 @@ describe("POST /api/itinerary", () => {
 
   it.each([null, [], "text"])("rejects a non-object JSON body: %s", async (body) => {
     expect((await post(body)).status).toBe(400);
-    expect(createItinerary).not.toHaveBeenCalled();
+    expect(createCompleteItinerary).not.toHaveBeenCalled();
   });
 
   it("blocks cross-origin requests before authentication", async () => {
@@ -101,7 +106,7 @@ describe("POST /api/itinerary", () => {
 
   it("maps invalid model plans to 502", async () => {
     const { InvalidItineraryPlanError } = await import("@/lib/itinerary/validatePlan");
-    vi.mocked(createItinerary).mockRejectedValue(new InvalidItineraryPlanError("unknown ID"));
+    vi.mocked(createCompleteItinerary).mockRejectedValue(new InvalidItineraryPlanError("unknown ID"));
     expect((await post()).status).toBe(502);
   });
 
@@ -109,18 +114,18 @@ describe("POST /api/itinerary", () => {
     const response = await post({ ...prefs, categories: [] });
 
     expect(response.status).toBe(400);
-    expect(createItinerary).not.toHaveBeenCalled();
+    expect(createCompleteItinerary).not.toHaveBeenCalled();
   });
 
   it("returns 400 for malformed JSON", async () => {
     const response = await postRaw("{");
 
     expect(response.status).toBe(400);
-    expect(createItinerary).not.toHaveBeenCalled();
+    expect(createCompleteItinerary).not.toHaveBeenCalled();
   });
 
   it("returns 400 when no activities match", async () => {
-    vi.mocked(createItinerary).mockRejectedValue(
+    vi.mocked(createCompleteItinerary).mockRejectedValue(
       new NoItineraryCandidatesError(),
     );
 
@@ -131,7 +136,7 @@ describe("POST /api/itinerary", () => {
 
   it("returns 429 when the user has reached the generation limit", async () => {
     const { ItineraryRateLimitError } = await import("@/lib/itinerary/rateLimit");
-    vi.mocked(createItinerary).mockRejectedValue(new ItineraryRateLimitError());
+    vi.mocked(createCompleteItinerary).mockRejectedValue(new ItineraryRateLimitError());
 
     const response = await post();
 
@@ -140,7 +145,7 @@ describe("POST /api/itinerary", () => {
 
   it("returns 503 when the OpenAI key is not configured", async () => {
     const { OpenAIConfigurationError } = await import("@/lib/itinerary/plan");
-    vi.mocked(createItinerary).mockRejectedValue(new OpenAIConfigurationError());
+    vi.mocked(createCompleteItinerary).mockRejectedValue(new OpenAIConfigurationError());
 
     const response = await post();
 
@@ -149,7 +154,7 @@ describe("POST /api/itinerary", () => {
 
   it("returns 502 for an upstream or invalid model plan error", async () => {
     const { ItineraryModelError } = await import("@/lib/itinerary/plan");
-    vi.mocked(createItinerary).mockRejectedValue(
+    vi.mocked(createCompleteItinerary).mockRejectedValue(
       new ItineraryModelError("provider detail should not be exposed"),
     );
 
@@ -162,7 +167,7 @@ describe("POST /api/itinerary", () => {
   });
 
   it("returns a generic 500 for unexpected failures", async () => {
-    vi.mocked(createItinerary).mockRejectedValue(new Error("database secret"));
+    vi.mocked(createCompleteItinerary).mockRejectedValue(new Error("database secret"));
 
     const response = await post();
 
@@ -174,7 +179,7 @@ describe("POST /api/itinerary", () => {
   it("returns 401 when Supabase rejects the session", async () => {
     supabase.auth.getUser.mockResolvedValue({ data: { user: null }, error: { message: "Expired token" } });
     expect((await post()).status).toBe(401);
-    expect(createItinerary).not.toHaveBeenCalled();
+    expect(createCompleteItinerary).not.toHaveBeenCalled();
   });
 
   it("maps authentication infrastructure failures to a generic 500", async () => {
@@ -182,7 +187,18 @@ describe("POST /api/itinerary", () => {
     const response = await post();
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: "Could not create itinerary. Please try again." });
-    expect(createItinerary).not.toHaveBeenCalled();
+    expect(createCompleteItinerary).not.toHaveBeenCalled();
+  });
+
+  it("rejects the old flat API format", async () => {
+    expect((await postRaw(JSON.stringify(prefs))).status).toBe(400);
+    expect(createCompleteItinerary).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when the required accommodation section has no candidates", async () => {
+    const { NoAccommodationCandidatesError } = await import("@/lib/itinerary/service");
+    vi.mocked(createCompleteItinerary).mockRejectedValue(new NoAccommodationCandidatesError());
+    expect((await postRaw(JSON.stringify({ ...toRequest(prefs), mode: "activities_and_accommodation", accommodation: { budgetUsd: 100, checkInDate: prefs.tripStartDate, checkOutDate: prefs.tripEndDate } }))).status).toBe(400);
   });
 
 });

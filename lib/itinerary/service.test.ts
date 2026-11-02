@@ -1,3 +1,5 @@
+import { retrieveStayCandidates } from "./accommodations";
+vi.mock("./accommodations", () => ({ retrieveStayCandidates: vi.fn() }));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/supabase/types/database";
@@ -6,7 +8,8 @@ import { assertAndRecordItineraryGeneration } from "./rateLimit";
 import { retrieveActivityCandidates } from "./retrieve";
 import { generateItineraryPlan } from "./plan";
 import {
-  createItinerary,
+  createCompleteItinerary,
+  NoAccommodationCandidatesError,
   NoItineraryCandidatesError,
 } from "./service";
 
@@ -39,7 +42,10 @@ const candidate: ItineraryActivityCandidate = {
   image_url: null,
 };
 
+const activityRequest = { mode: "activities" as const, tripStartDate: prefs.tripStartDate, tripEndDate: prefs.tripEndDate, groupSize: prefs.groupSize, activities: { budgetUsd: prefs.budgetUsd, categories: prefs.categories } };
+
 const draft = {
+  accommodationId: null,
   days: [
     {
       date: "2026-10-02",
@@ -70,16 +76,16 @@ describe("createItinerary", () => {
       return draft;
     });
 
-    const result = await createItinerary(supabase, prefs);
+    const result = await createCompleteItinerary(supabase, activityRequest);
 
     expect(calls).toEqual(["retrieve", "rate-limit", "plan"]);
-    expect(result.estimatedTotalUsd).toBe(70);
+    expect(result.estimatedCosts.activitiesUsd).toBe(70);
   });
 
   it("consumes a slot when the provider fails without retrying", async () => {
     vi.mocked(retrieveActivityCandidates).mockResolvedValue([candidate]);
     vi.mocked(generateItineraryPlan).mockRejectedValue(new Error("upstream failure"));
-    await expect(createItinerary(supabase, prefs)).rejects.toThrow("upstream failure");
+    await expect(createCompleteItinerary(supabase, activityRequest)).rejects.toThrow("upstream failure");
     expect(assertAndRecordItineraryGeneration).toHaveBeenCalledTimes(1);
     expect(generateItineraryPlan).toHaveBeenCalledTimes(1);
   });
@@ -87,7 +93,7 @@ describe("createItinerary", () => {
   it("does not consume a generation when no candidates match", async () => {
     vi.mocked(retrieveActivityCandidates).mockResolvedValue([]);
 
-    await expect(createItinerary(supabase, prefs)).rejects.toBeInstanceOf(
+    await expect(createCompleteItinerary(supabase, activityRequest)).rejects.toBeInstanceOf(
       NoItineraryCandidatesError,
     );
     expect(assertAndRecordItineraryGeneration).not.toHaveBeenCalled();
@@ -100,9 +106,33 @@ describe("createItinerary", () => {
       new Error("Too many itinerary requests. Try again later."),
     );
 
-    await expect(createItinerary(supabase, prefs)).rejects.toThrow(
+    await expect(createCompleteItinerary(supabase, activityRequest)).rejects.toThrow(
       "Too many itinerary requests. Try again later.",
     );
     expect(generateItineraryPlan).not.toHaveBeenCalled();
   });
+});
+
+describe("combined itineraries", () => {
+ const request = { mode: "activities_and_accommodation" as const, tripStartDate: prefs.tripStartDate, tripEndDate: prefs.tripEndDate, groupSize: 2, activities: { budgetUsd: 150, categories: prefs.categories }, accommodation: { budgetUsd: 300, checkInDate: prefs.tripStartDate, checkOutDate: prefs.tripEndDate } };
+ beforeEach(() => { vi.resetAllMocks(); vi.mocked(retrieveActivityCandidates).mockResolvedValue([candidate]); });
+ it("does not consume a slot when no stays match", async () => {
+  vi.mocked(retrieveStayCandidates).mockResolvedValue([]);
+  await expect(createCompleteItinerary(supabase, request)).rejects.toBeInstanceOf(NoAccommodationCandidatesError);
+  expect(assertAndRecordItineraryGeneration).not.toHaveBeenCalled();
+  expect(generateItineraryPlan).not.toHaveBeenCalled();
+ });
+ it("hydrates the selected stay and adds separate server totals", async () => {
+  const property = { id: "stay", name: "Stay", image_url: null, parish: null, totalCents: 20000 };
+  vi.mocked(retrieveStayCandidates).mockResolvedValue([property]);
+  vi.mocked(generateItineraryPlan).mockResolvedValue({ ...draft, accommodationId: "stay" });
+  const result = await createCompleteItinerary(supabase, request);
+  expect(result.accommodation?.property).toEqual(property);
+  expect(result.estimatedCosts).toEqual({ activitiesUsd: 70, accommodationUsd: 200, totalUsd: 270 });
+ });
+ it.each([null, "unknown", undefined])("rejects invalid stay ID %s", async accommodationId => {
+  vi.mocked(retrieveStayCandidates).mockResolvedValue([{ id: "stay", name: "Stay", image_url: null, parish: null, totalCents: 20000 }]);
+  vi.mocked(generateItineraryPlan).mockResolvedValue({ ...draft, accommodationId });
+  await expect(createCompleteItinerary(supabase, request)).rejects.toThrow("Invalid accommodation selection");
+ });
 });

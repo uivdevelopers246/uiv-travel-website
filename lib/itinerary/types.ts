@@ -37,3 +37,18 @@ export type ItineraryResult = {
     }[];
     warnings: string[];
 };
+export type StayPreferences = { budgetUsd: number; checkInDate: string; checkOutDate: string };
+export type ItineraryRequest = {
+  tripStartDate: string; tripEndDate: string; groupSize: number;
+  activities: { budgetUsd: number; categories: ActivityCategoryValue[] };
+} & ({ mode: "activities"; accommodation?: never } | { mode: "activities_and_accommodation"; accommodation: StayPreferences });
+export type StayCandidate = { id: string; name: string; image_url: string | null; parish: string | null; totalCents: number };
+export type CompleteItineraryResult = Omit<ItineraryResult, "estimatedTotalUsd"> & {
+  estimatedCosts: { activitiesUsd: number; accommodationUsd: number; totalUsd: number };
+} & (
+  | { mode: "activities"; accommodation: null }
+  | {
+      mode: "activities_and_accommodation";
+      accommodation: StayPreferences & { property: StayCandidate };
+    }
+);

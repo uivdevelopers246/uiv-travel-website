@@ -196,12 +196,29 @@ Paid **activity** and **accommodation** bookings share cart → Checkout **setup
 - **ADR link:** Key decisions above can be expanded into ADRs as needed.
 
 
-### Activity itinerary API
+### Itinerary API
 
-`POST /api/itinerary` requires a signed-in Supabase cookie session. Send a JSON object with only `tripStartDate` and `tripEndDate` (valid `YYYY-MM-DD`, inclusive, 1–14 calendar days), `budgetUsd` (positive finite USD activity budget for the entire group/trip), `groupSize` (integer 1–20), and `categories` (non-empty array of existing activity category values). Duplicate categories are normalized. Accommodation costs are excluded.
+`POST /api/itinerary` requires a signed-in Supabase cookie session. The former flat request/response contract is replaced entirely.
 
-The response contains `tripStartDate`, `tripEndDate`, `estimatedTotalUsd`, `days: [{ date, theme, activities }]`, and `warnings`. Each activity includes its stable `id`, `title`, `category`, `duration_hours`, `price_per_person`, `location`, and `image_url`. Dates with no recommendations may be omitted. Prices and hydrated details come from the catalog; null duration/capacity remains unknown. Availability is not checked and no bookings or saved itineraries are created.
+```json
+{
+  "mode": "activities_and_accommodation",
+  "tripStartDate": "2027-02-01",
+  "tripEndDate": "2027-02-05",
+  "groupSize": 2,
+  "activities": { "budgetUsd": 500, "categories": ["culture", "nature"] },
+  "accommodation": { "budgetUsd": 1200, "checkInDate": "2027-02-01", "checkOutDate": "2027-02-05" }
+}
+```
 
-Retrieval is capped at 30 published activities and excludes unpriced, individually over-budget, and known capacity-incompatible listings. The authenticated user's rolling limit is 10 generations per 60 minutes, recorded atomically after non-empty retrieval and before OpenAI. Provider failures consume a slot. Configure server-only `OPENAI_API_KEY`; generation uses `gpt-6-luna` structured output with SDK retries disabled and a 60-second provider timeout.
+For `mode: "activities"`, omit `accommodation`. Unknown fields and modes are rejected. Trip endpoints are inclusive (1–14 days); group size is 1–20. Activity categories must be nonempty existing values. Each positive finite budget covers its section for the whole group, not per person or per night. Stay dates must be valid, inside the trip, with check-out strictly after check-in. Check-out is exclusive: February 1–5 is four nights.
 
-Errors use `{ error: string }`: 400 for malformed JSON/preferences or no matching activities, 401 for missing authentication, 403 for cross-origin requests, 429 for the generation limit, 503 for missing OpenAI configuration, 502 for provider/invalid-plan errors, and 500 for unexpected failures.
+The response contains `mode`, trip dates, `days: [{ date, theme, activities }]`, `accommodation` (null or stay preferences plus hydrated `property`), `estimatedCosts: { activitiesUsd, accommodationUsd, totalUsd }`, and `warnings`. The property includes stable ID, name, image, parish, and server-quoted `totalCents`. Activity summaries retain stable IDs and catalog fields. No itinerary or booking is persisted.
+
+Activity retrieval remains capped at 30 published, priced, budget-compatible candidates. Combined mode additionally retrieves up to 30 published properties with known sufficient capacity, ordered by ID, and quotes each requested stay using `accommodation_stay_quote`. Unavailable or over-budget stays are excluded. The bounded shortlist can miss matches outside its cap. Unknown accommodation capacity is excluded conservatively.
+
+Both sections are required in combined mode: no matching activities or accommodations returns 400 before recording a slot or calling OpenAI. One atomic per-user slot (10 per rolling hour) precedes one `gpt-6-luna` structured-output call using server-only `OPENAI_API_KEY`, no SDK retries, and a 60-second timeout. The model chooses candidate IDs only; the server validates selections and computes prices from catalog/quote data. Missing or unknown property IDs invalidate the entire result. Provider failures consume the slot.
+
+Activity availability is not checked. Stay calendar availability is checked at generation time but does not reserve a property; pricing and availability must be reconfirmed at booking.
+
+Errors use `{ error: string }`: 400 invalid input/no candidates, 401 unauthenticated, 403 cross-origin, 429 generation limit, 503 missing configuration, 502 provider/invalid selections, 500 unexpected failures. No database migration is required for the new modes.
