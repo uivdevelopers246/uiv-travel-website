@@ -34,6 +34,18 @@ Marks a user as site admin. Existence of a row implies admin role.
 | **Important columns** | `created_at` (timestamptz not null default `now()`) |
 | **Conventions** | No updated_at; no status/enum. |
 
+### public.itinerary_generations
+
+Append-only audit/rate-limit log for AI activity-itinerary generation requests.
+
+| Item | Detail |
+|------|--------|
+| **Primary key** | `id` (uuid, default `gen_random_uuid()`) |
+| **Important columns** | `user_id` (uuid, FK to `auth.users(id)` ON DELETE CASCADE), `created_at` (timestamptz, default `now()`) |
+| **Index** | `(user_id, created_at DESC)` supports the rolling-window count. |
+| **RLS / writes** | RLS enabled. Authenticated users may select their own rows. Direct client writes are revoked; `record_itinerary_generation()` inserts through its restricted `SECURITY DEFINER` transaction. |
+| **Retention** | Rows are rate-limit history; no itinerary content is stored. |
+
 ### public.activities
 
 Vendor-owned activity listing (tours, experiences). Can have a text `location` (display only) and an optional PostGIS point for map pins.

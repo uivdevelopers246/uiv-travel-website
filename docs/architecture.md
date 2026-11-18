@@ -35,6 +35,7 @@ UIV Travel is a Barbados-focused travel site where **vendors** list **activities
 | `SUPABASE_SERVICE_ROLE_KEY`                       | **Server-only** (never `NEXT_PUBLIC_*`). Privileged Supabase JWT for `createServiceRoleClient()` — webhook fulfillment and other trusted bypass-RLS paths only; not for normal user requests. In the Supabase Dashboard this value may be labeled the **Secret** API key (replacing legacy **service_role**); it must **not** be the publishable key. |
 | `STRIPE_SECRET_KEY`                               | **Server-only.** Stripe API (`getStripe()` in `@/lib/stripe/server`): Checkout Session, refunds. Restricted keys need at least **Checkout Sessions (write)** and **Charges and Refunds (write)**. See [Booking & checkout (M4)](#booking--checkout-m4-high-level) and `docs/adrs/ADR-M4-B-shopping-cart-and-checkout.md`. |
 | `STRIPE_WEBHOOK_SECRET`                           | **Server-only.** Webhook signing secret (`whsec_…`) for `stripe.webhooks.constructEvent` on `POST /api/webhooks/stripe` (`getStripeWebhookSecret()` in `@/lib/stripe/server`). Must match the Stripe **Test** or **Live** mode and endpoint used to register the webhook (CLI secret ≠ Dashboard production endpoint secret). |
+| `OPENAI_API_KEY`                                  | **Server-only** (never `NEXT_PUBLIC_*`). OpenAI API key used by the AI itinerary builder to generate activity recommendations. |
 | `CRON_SECRET`                                     | **Server-only.** Shared secret for cron routes. The queue worker is `POST /api/cron/notifications`; digest generation is `GET /api/cron/notification-digest`; callers send `Authorization: Bearer <CRON_SECRET>`. |
 | `RESEND_API_KEY`                                  | **Server-only.** Resend API key used by the M6 notification worker to send transactional and digest email from Vercel Functions. |
 | `EMAIL_FROM`                                      | **Server-only.** Verified sender address passed to Resend for notification email. |
@@ -86,6 +87,12 @@ Paid **activity** and **accommodation** bookings share cart → Checkout **setup
   4. RLS allows anonymous/authenticated read for rows where `status = 'published'` (or vendor/admin visibility).
   5. Server renders `ActivitiesClient` with the fetched list; client handles filters and role (for “Manage activities” link).
   6. Optional: client calls `GET /api/activities` (e.g. for limit/offset); same server `createClient()` and `listActivities()` from `@/lib/activities/service`; response JSON list of public activities.
+- **Authenticated user generating an activity itinerary**
+  1. Client sends trip dates, activity budget, group size, and categories to `POST /api/itinerary`.
+  2. The route uses the cookie-based Supabase client, requires authentication, parses JSON, and validates preferences.
+  3. `lib/itinerary/retrieve.ts` selects a bounded set of published activities under RLS. Activity slots and date-specific availability are not checked.
+  4. `record_itinerary_generation` atomically enforces the 10-per-rolling-hour per-user limit immediately before the single OpenAI structured-output request.
+  5. The server validates model activity IDs against the candidate set, calculates the estimated total from catalog prices and group size, hydrates activity summaries, and returns a warning that availability is unverified.
 - **Public user browsing accommodations (e.g. vacation planning)**
   1. Pages such as `/vacation-planning` query `accommodations` with `status = 'published'`, joining `vendors(name)` where needed.
   2. RLS allows anon/authenticated read for published rows; vendors and admins see drafts for their listings.
@@ -188,3 +195,30 @@ Paid **activity** and **accommodation** bookings share cart → Checkout **setup
 - **Protected paths:** `protectedPaths` in `lib/supabase/proxy.ts` is empty; auth redirects for anonymous users are not applied globally—server components and API routes enforce access per route. Add paths here if you want proxy-level redirects to login.
 - **ADR link:** Key decisions above can be expanded into ADRs as needed.
 
+
+### Itinerary API
+
+`POST /api/itinerary` requires a signed-in Supabase cookie session. The former flat request/response contract is replaced entirely.
+
+```json
+{
+  "mode": "activities_and_accommodation",
+  "tripStartDate": "2027-02-01",
+  "tripEndDate": "2027-02-05",
+  "groupSize": 2,
+  "activities": { "budgetUsd": 500, "categories": ["culture", "nature"] },
+  "accommodation": { "budgetUsd": 1200, "checkInDate": "2027-02-01", "checkOutDate": "2027-02-05" }
+}
+```
+
+For `mode: "activities"`, omit `accommodation`. Unknown fields and modes are rejected. Trip endpoints are inclusive (1–14 days); group size is 1–20. Activity categories must be nonempty existing values. Each positive finite budget covers its section for the whole group, not per person or per night. Stay dates must be valid, inside the trip, with check-out strictly after check-in. Check-out is exclusive: February 1–5 is four nights.
+
+The response contains `mode`, trip dates, `days: [{ date, theme, activities }]`, `accommodation` (null or stay preferences plus hydrated `property`), `estimatedCosts: { activitiesUsd, accommodationUsd, totalUsd }`, and `warnings`. The property includes stable ID, name, image, parish, and server-quoted `totalCents`. Activity summaries retain stable IDs and catalog fields. No itinerary or booking is persisted.
+
+Activity retrieval remains capped at 30 published, priced, budget-compatible candidates. Combined mode additionally retrieves up to 30 published properties with known sufficient capacity, ordered by ID, and quotes each requested stay using `accommodation_stay_quote`. Unavailable or over-budget stays are excluded. The bounded shortlist can miss matches outside its cap. Unknown accommodation capacity is excluded conservatively.
+
+Both sections are required in combined mode: no matching activities or accommodations returns 400 before recording a slot or calling OpenAI. One atomic per-user slot (10 per rolling hour) precedes one `gpt-6-luna` structured-output call using server-only `OPENAI_API_KEY`, no SDK retries, and a 60-second timeout. The model chooses candidate IDs only; the server validates selections and computes prices from catalog/quote data. Missing or unknown property IDs invalidate the entire result. Provider failures consume the slot.
+
+Activity availability is not checked. Stay calendar availability is checked at generation time but does not reserve a property; pricing and availability must be reconfirmed at booking.
+
+Errors use `{ error: string }`: 400 invalid input/no candidates, 401 unauthenticated, 403 cross-origin, 429 generation limit, 503 missing configuration, 502 provider/invalid selections, 500 unexpected failures. No database migration is required for the new modes.
