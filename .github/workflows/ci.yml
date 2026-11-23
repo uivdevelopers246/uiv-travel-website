@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [staging, main]
+  pull_request:
+    branches: [staging, main]
+
+permissions:
+  contents: read
+
+# Cancel obsolete checks for the same PR or branch.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  application:
+    name: Application checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Non-production placeholders for module initialization.
+    # Tests should mock external services.
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:55321
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ci-placeholder
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24.x"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Check TypeScript
+        run: npx --no-install tsc --noEmit
+      - name: Run tests
+        run: npm run test:run
+      - name: Build application
+        run: npm run build
+
+  database:
+    name: Database checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24.x"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Start disposable Supabase
+        run: npx --no-install supabase start
+      - name: Rebuild database from migrations
+        run: npx --no-install supabase db reset --local --no-seed
+      # Existing tests use SQL assertions, rather than pgTAP.
+      - name: Run database regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for sql_file in supabase/tests/*.sql; do
+            echo "Running $sql_file"
+            docker exec -i supabase_db_uiv-travel-website \
+              psql -X -U postgres -d postgres \
+              -v ON_ERROR_STOP=1 < "$sql_file"
+          done
+      - name: Stop Supabase
+        if: always()
+        run: npx --no-install supabase stop --no-backup
+
+  dependencies:
+    name: Dependency security
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24.x"
+          cache: npm
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+  semgrep:
+    name: Code security
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    container:
+      image: semgrep/semgrep:latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Scan application code
+        run: >
+          semgrep scan
+          --config=p/javascript
+          --config=p/typescript
+          --config=p/react
+          --error
+          --strict
+          --metrics=off
+          .
+
+  secrets:
+    name: Secret scanning
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Scan Git history for secrets
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/repo" \
+            zricethezav/gitleaks:v8.24.3 \
+            git /repo --redact --verbose
