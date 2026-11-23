@@ -107,6 +107,7 @@ jobs:
           --error
           --strict
           --metrics=off
+          --verbose
           .
 
   secrets:
