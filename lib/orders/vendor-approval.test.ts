@@ -44,7 +44,7 @@ vi.mock("./service", async () => {
 vi.mock("@/lib/activity-bookings/service", async () => {
   const actual =
     await vi.importActual<typeof import("@/lib/activity-bookings/service")>(
-      "@/lib/activity-bookings/service",
+      "@/lib/activity-bookings/service"
     );
   return {
     ...actual,
@@ -58,7 +58,7 @@ vi.mock("@/lib/activity-bookings/service", async () => {
 vi.mock("@/lib/accommodation-bookings/service", async () => {
   const actual =
     await vi.importActual<typeof import("@/lib/accommodation-bookings/service")>(
-      "@/lib/accommodation-bookings/service",
+      "@/lib/accommodation-bookings/service"
     );
   return {
     ...actual,

@@ -359,7 +359,7 @@ export function ActivityFormClient({
             {/* Pricing & Capacity */}
             <section>
               <h2 className="text-lg font-semibold text-slate-900 mb-4 pb-2 border-b">
-                Pricing & Capacity
+                Pricing &amp; Capacity
               </h2>
               <div className="grid gap-4 md:grid-cols-3">
                 <div>

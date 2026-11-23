@@ -24,7 +24,7 @@ vi.mock("./vendor-approval", async () => {
 vi.mock("./status-email-hooks", async () => {
   const actual =
     await vi.importActual<typeof import("./status-email-hooks")>(
-      "./status-email-hooks",
+      "./status-email-hooks"
     );
   return {
     ...actual,
