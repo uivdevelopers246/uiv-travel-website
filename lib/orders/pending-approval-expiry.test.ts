@@ -13,7 +13,7 @@ import * as accommodationBookingsService from "@/lib/accommodation-bookings/serv
 vi.mock("./vendor-approval", async () => {
   const actual =
     await vi.importActual<typeof import("./vendor-approval")>(
-      "./vendor-approval",
+      "./vendor-approval"
     );
   return {
     ...actual,

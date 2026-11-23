@@ -308,7 +308,7 @@ export function ActivityFormClient({
             {/* Location & Category */}
             <section>
               <h2 className="text-lg font-semibold text-slate-900 mb-4 pb-2 border-b">
-                Location & Category
+                Location &amp; Category
               </h2>
               <div className="grid gap-4 md:grid-cols-2">
                 <div>

@@ -590,7 +590,7 @@ export function AccommodationFormClient({
             {/* Policies */}
             <section>
               <h2 className="text-lg font-semibold text-slate-900 mb-4 pb-2 border-b">
-                Policies & Features
+                Policies &amp; Features
               </h2>
               <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
                 <label className="flex items-center gap-2 cursor-pointer">
