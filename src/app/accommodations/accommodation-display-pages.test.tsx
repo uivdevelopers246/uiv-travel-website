@@ -12,7 +12,7 @@ vi.mock("@/components/home/HomeShowcase", () => ({
   HomeShowcase: ({ accommodations }: { accommodations: unknown[] }) => <pre>{JSON.stringify(accommodations)}</pre>,
 }));
 vi.mock("@/app/vacation-planning/VacationPlanningClient", () => ({
-  VacationPlanningClient: ({ accommodations }: { accommodations: unknown[] }) => <pre>{JSON.stringify(accommodations)}</pre>,
+  VacationPlanningClient: ({ accommodations, initialTab, activityLoadFailed, accommodationLoadFailed }: { accommodations: unknown[]; initialTab?: string; activityLoadFailed?: boolean; accommodationLoadFailed?: boolean }) => <div data-initial-tab={initialTab} data-activity-failed={activityLoadFailed} data-accommodation-failed={accommodationLoadFailed}><pre>{JSON.stringify(accommodations)}</pre></div>,
 }));
 vi.mock("./[id]/AccommodationDetailClient", () => ({
   AccommodationDetailClient: ({ accommodation }: { accommodation: unknown }) => <pre>{JSON.stringify(accommodation)}</pre>,
@@ -39,7 +39,7 @@ describe("accommodation display pages", () => {
     expect(vacationDynamic).toBe("force-dynamic");
   });
 
-  it.each([Home, VacationPlanningPage, () => AccommodationDetailPage({ params: Promise.resolve({ id: listing.id }) })])(
+  it.each([Home, () => VacationPlanningPage({ searchParams: Promise.resolve({}) }), () => AccommodationDetailPage({ params: Promise.resolve({ id: listing.id }) })])(
     "replaces legacy prices with the bookable range before rendering %s",
     async (page) => {
       mocks.rpc.mockResolvedValue({ data: [{ accommodation_id: listing.id, price_min_usd: 125.5, price_max_usd: 275 }], error: null });
@@ -51,10 +51,46 @@ describe("accommodation display pages", () => {
     },
   );
 
+  it.each([
+    { tab: "activities", expected: "activities" },
+    { tab: "accommodations", expected: "accommodations" },
+    { tab: "unknown", expected: "accommodations" },
+    { tab: ["activities", "accommodations"], expected: "accommodations" },
+    { tab: undefined, expected: "accommodations" },
+  ])("opens the requested collection for tab=$tab", async ({ tab, expected }) => {
+    mocks.rpc.mockResolvedValue({ data: [], error: null });
+    const html = renderToStaticMarkup(await VacationPlanningPage({ searchParams: Promise.resolve({ tab }) }));
+    expect(html).toContain(`data-initial-tab="${expected}"`);
+  });
+
   it("does not fall back to the legacy listing rate when no nights are bookable", async () => {
     mocks.rpc.mockResolvedValue({ data: [], error: null });
     const html = renderToStaticMarkup(await Home());
     expect(html).toContain("price_min_usd&quot;:null");
     expect(html).not.toContain("9999");
+  });
+
+  it.each([false, true])("keeps accommodations available when the activities query fails (rejection=%s)", async rejected => {
+    const originalFrom = mocks.from.getMockImplementation()!;
+    mocks.from.mockImplementation((table: string) => {
+      if (table !== "activities") return originalFrom(table);
+      const result = rejected ? Promise.reject(new Error("offline")) : Promise.resolve({ data: null, error: { message: "offline" } });
+      const query = Object.assign(result, { select: vi.fn(), eq: vi.fn(), order: vi.fn() });
+      for (const method of [query.select, query.eq, query.order]) method.mockReturnValue(query);
+      return query;
+    });
+    mocks.rpc.mockResolvedValue({ data: [], error: null });
+    const html = renderToStaticMarkup(await VacationPlanningPage({ searchParams: Promise.resolve({}) }));
+    expect(html).toContain('data-activity-failed="true"');
+    expect(html).toContain('data-accommodation-failed="false"');
+    expect(html).toContain("Beach Villa");
+  });
+
+  it("reports a price-load failure instead of misrepresenting accommodation availability", async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { message: "offline" } });
+    const html = renderToStaticMarkup(await VacationPlanningPage({ searchParams: Promise.resolve({}) }));
+    expect(html).toContain('data-accommodation-failed="true"');
+    expect(html).toContain('data-activity-failed="false"');
+    expect(html).not.toContain("Beach Villa");
   });
 });

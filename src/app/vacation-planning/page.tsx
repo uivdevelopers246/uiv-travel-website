@@ -45,7 +45,7 @@ type VacationAccommodationRow = {
   is_featured: boolean;
   vendors?: VendorPreview | VendorPreview[];
 };
-type OrderedQueryResult<T> = Promise<{ data: T[] | null }>;
+type OrderedQueryResult<T> = Promise<{ data: T[] | null; error?: unknown }>;
 type VacationPlanningQueryClient = {
   from(table: "activities"): {
     select(query: typeof VACATION_ACTIVITY_SELECT): {
@@ -79,7 +79,13 @@ function normalizeVendor(
   return vendor ?? null;
 }
 
-export default async function VacationPlanningPage() {
+export default async function VacationPlanningPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string | string[] }>;
+}) {
+  const { tab } = await searchParams;
+  const initialTab = tab === "activities" ? "activities" : "accommodations";
   const supabase = createPublicClient();
   const queryClient = supabase as unknown as VacationPlanningQueryClient;
   const activitiesQuery = queryClient
@@ -92,12 +98,21 @@ export default async function VacationPlanningPage() {
     .select(VACATION_ACCOMMODATION_SELECT)
     .eq("status", "published")
     .order("created_at", { ascending: false });
-  const [activitiesResult, accommodationsResult] = await Promise.all([
+  const [activitiesResult, accommodationsResult] = await Promise.allSettled([
     activitiesQuery,
     accommodationsQuery,
   ]);
-  const activityRows: VacationActivityRow[] = activitiesResult.data ?? [];
-  const accommodationRows = await withAccommodationBookablePrices(supabase, accommodationsResult.data ?? []);
+  const activityLoadFailed = activitiesResult.status === "rejected" || Boolean(activitiesResult.value.error);
+  let accommodationLoadFailed = accommodationsResult.status === "rejected" || Boolean(accommodationsResult.value.error);
+  const activityRows: VacationActivityRow[] = activitiesResult.status === "fulfilled" && !activityLoadFailed ? activitiesResult.value.data ?? [] : [];
+  let accommodationRows: (VacationAccommodationRow & { price_min_usd: number | null; price_max_usd: number | null })[] = [];
+  if (accommodationsResult.status === "fulfilled" && !accommodationLoadFailed) {
+    try {
+      accommodationRows = await withAccommodationBookablePrices(supabase, accommodationsResult.value.data ?? []);
+    } catch {
+      accommodationLoadFailed = true;
+    }
+  }
   const activities: ActivityDisplay[] = activityRows.map(activity => ({
     id: activity.id,
     title: activity.title,
@@ -139,8 +154,12 @@ export default async function VacationPlanningPage() {
     <>
       <Header />
       <VacationPlanningClient
+        key={initialTab}
+        initialTab={initialTab}
         activities={activities}
         accommodations={accommodations}
+        activityLoadFailed={activityLoadFailed}
+        accommodationLoadFailed={accommodationLoadFailed}
       />
     </>
   );

@@ -13,13 +13,12 @@ export function getMapboxToken() {
   return process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN?.trim() ?? "";
 }
 
-export function hasMapboxToken() {
-  return getMapboxToken().length > 0;
-}
-
 export function loadMapboxGl() {
   if (!mapboxPromise) {
-    mapboxPromise = import("mapbox-gl");
+    mapboxPromise = import("mapbox-gl").catch(error => {
+      mapboxPromise = null;
+      throw error;
+    });
   }
 
   return mapboxPromise;

@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import type mapboxgl from "mapbox-gl";
 import { DEFAULT_IMAGE_FALLBACK, getSafeImageUrl } from "@/lib/utils/image";
 import { BARBADOS_CENTER, getMapboxToken, loadMapboxGl, MAPBOX_STYLE_URL } from "./mapbox";
 
@@ -43,10 +42,13 @@ function markerPalette(kind: ListingMapMarker["kind"]) {
 function createPinMarkerElement(marker: ListingMapMarker, palette: ReturnType<typeof markerPalette>) {
   const button = document.createElement("button");
   button.type = "button";
+  button.setAttribute("role", "button");
+  button.className = "rounded-full focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#193059]";
   button.dataset.markerId = marker.id;
   button.setAttribute("aria-label", marker.title);
+  button.setAttribute("aria-pressed", "false");
   button.title = marker.title;
-  button.style.padding = "0";
+  button.style.padding = "4px";
   button.style.margin = "0";
   button.style.border = "0";
   button.style.background = "transparent";
@@ -64,6 +66,7 @@ function createPinMarkerElement(marker: ListingMapMarker, palette: ReturnType<ty
   svg.setAttribute("width", "36");
   svg.setAttribute("height", "46");
   svg.setAttribute("viewBox", "0 0 46 58");
+  svg.setAttribute("aria-hidden", "true");
   svg.style.overflow = "visible";
 
   const outerPath = document.createElementNS(svgNamespace, "path");
@@ -107,21 +110,29 @@ function createPinMarkerElement(marker: ListingMapMarker, palette: ReturnType<ty
 function MapboxUnavailable({
   title,
   description,
+  onRetry,
 }: {
   title: string;
   description: string;
+  onRetry?: () => void;
 }) {
   return (
     <div className="rounded-[28px] border border-[#d8e5f2] bg-[linear-gradient(180deg,#f6fbff_0%,#ebf4fb_100%)] p-6 shadow-[0_18px_55px_rgba(25,48,89,0.08)]">
-      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#407FC2]">
+      <h2 className="text-2xl font-bold text-[#193059]" style={{ fontFamily: "var(--font-playfair)" }}>
         {title}
-      </p>
+      </h2>
       <p className="mt-3 text-lg font-semibold text-[#193059]">
-        Mapbox setup required
+        The map is unavailable right now
       </p>
       <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
-        {description} Add `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` to render the live map and pins.
+        You can still compare listings and use all filters below.
       </p>
+      <p className="mt-3 text-sm leading-7 text-slate-600">{description}</p>
+      {onRetry && (
+        <button type="button" onClick={onRetry} className="mt-4 rounded-full bg-[#193059] px-5 py-3 text-base font-semibold text-white hover:bg-[#2f6da8] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#193059]">
+          Retry map
+        </button>
+      )}
     </div>
   );
 }
@@ -136,13 +147,17 @@ export function ListingMap({ title, description, markers, emptyMessage }: Props)
   const deferredMarkers = useDeferredValue(markers);
   const [selectedId, setSelectedId] = useState<string | null>(markers[0]?.id ?? null);
   const [mapReady, setMapReady] = useState(false);
+  const [mapFailed, setMapFailed] = useState(false);
 
   useEffect(() => {
-    if (!token || !mapContainerRef.current || mapRef.current) {
+    if (!token || mapFailed || !mapContainerRef.current || mapRef.current) {
       return;
     }
 
     let cancelled = false;
+    const startupTimeout = window.setTimeout(() => {
+      if (!cancelled) setMapFailed(true);
+    }, 20000);
 
     void loadMapboxGl().then(mapboxModule => {
       if (cancelled || !mapContainerRef.current) {
@@ -167,14 +182,21 @@ export function ListingMap({ title, description, markers, emptyMessage }: Props)
       );
       map.on("load", () => {
         if (!cancelled) {
+          window.clearTimeout(startupTimeout);
           setMapReady(true);
         }
       });
+      map.on("error", () => {
+        if (!cancelled) setMapFailed(true);
+      });
       mapRef.current = map;
+    }).catch(() => {
+      if (!cancelled) setMapFailed(true);
     });
 
     return () => {
       cancelled = true;
+      window.clearTimeout(startupTimeout);
       setMapReady(false);
       markerRefs.current.forEach(marker => marker.remove());
       markerRefs.current = [];
@@ -182,7 +204,7 @@ export function ListingMap({ title, description, markers, emptyMessage }: Props)
       mapRef.current = null;
       mapboxRef.current = null;
     };
-  }, [token]);
+  }, [token, mapFailed]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -215,6 +237,9 @@ export function ListingMap({ title, description, markers, emptyMessage }: Props)
       });
 
       button.addEventListener("mouseenter", () => {
+        setSelectedId(marker.id);
+      });
+      button.addEventListener("focus", () => {
         setSelectedId(marker.id);
       });
 
@@ -261,46 +286,45 @@ export function ListingMap({ title, description, markers, emptyMessage }: Props)
       const element = marker.getElement() as HTMLButtonElement;
       const visual = element.querySelector('[data-pin-visual="true"]') as HTMLSpanElement | null;
       const isActive = element.dataset.markerId === activeMarkerId;
+      element.setAttribute("aria-pressed", String(isActive));
       if (visual) {
         visual.style.transform = isActive
           ? "translateY(-4px) scale(1.14)"
           : "translateY(0) scale(1)";
       }
     });
-  }, [activeMarkerId]);
+  }, [activeMarkerId, deferredMarkers, mapReady]);
 
-  if (!token) {
-    return <MapboxUnavailable title={title} description={description} />;
+  if (!token || mapFailed) {
+    return <MapboxUnavailable title={title} description={description} onRetry={mapFailed ? () => setMapFailed(false) : undefined} />;
   }
 
   return (
     <section className="rounded-[32px] border border-[#d8e5f2] bg-white p-5 shadow-[0_28px_80px_rgba(25,48,89,0.08)] md:p-6">
       <div className="grid gap-6 xl:grid-cols-[1.08fr_0.92fr]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#407FC2]">
-            {title}
-          </p>
-          <h3
-            className="mt-3 text-2xl font-bold text-[#193059]"
+          <h2
+            className="text-2xl font-bold text-[#193059]"
             style={{ fontFamily: "var(--font-playfair)" }}
           >
-            Explore listings on the map
-          </h3>
+            {title}
+          </h2>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
             {description}
           </p>
 
-          <div className="mt-5 flex flex-wrap gap-2 text-xs font-medium text-slate-600">
-            <span className="rounded-full bg-[#eef5fb] px-3 py-2">
+          <div className="mt-5 flex flex-wrap gap-2 text-sm font-medium text-slate-600">
+            <span role="status" aria-live="polite" aria-atomic="true" className="rounded-full bg-[#eef5fb] px-3 py-2">
               {deferredMarkers.length} mapped {deferredMarkers.length === 1 ? "listing" : "listings"}
             </span>
             <span className="rounded-full bg-[#fff4cc] px-3 py-2 text-[#193059]">
-              Click or hover a pin to preview it
+              Select a pin to preview a listing
             </span>
           </div>
 
           <div className="mt-5 overflow-hidden rounded-[24px] border border-[#d8e5f2]">
-            <div ref={mapContainerRef} className="h-[340px] w-full bg-[#e7f0f7] md:h-[420px]" />
+            <div ref={mapContainerRef} role="region" aria-label={title} className="h-[340px] w-full bg-[#e7f0f7] md:h-[420px]" />
+            {!mapReady && <p role="status" className="p-3 text-sm text-slate-600">Loading map…</p>}
           </div>
         </div>
 
@@ -316,9 +340,9 @@ export function ListingMap({ title, description, markers, emptyMessage }: Props)
               </div>
 
               <div className="flex flex-1 flex-col p-5">
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 break-words">
                   <span
-                    className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${
+                    className={`rounded-full px-3 py-1 text-sm font-semibold uppercase tracking-[0.2em] ${
                       selectedMarker.kind === "activity"
                         ? "bg-[#FBCA1A] text-[#193059]"
                         : "bg-[#193059] text-white"
@@ -327,21 +351,21 @@ export function ListingMap({ title, description, markers, emptyMessage }: Props)
                     {selectedMarker.badge ?? markerPalette(selectedMarker.kind).label}
                   </span>
                   {selectedMarker.locationLabel && (
-                    <span className="text-xs font-medium text-slate-500">
+                    <span className="text-sm font-medium text-slate-500">
                       {selectedMarker.locationLabel}
                     </span>
                   )}
                 </div>
 
-                <h4
-                  className="mt-4 text-2xl font-bold text-[#193059]"
+                <h3
+                  className="mt-4 break-words text-2xl font-bold text-[#193059]"
                   style={{ fontFamily: "var(--font-playfair)" }}
                 >
                   {selectedMarker.title}
-                </h4>
+                </h3>
 
                 {selectedMarker.detailLine && (
-                  <p className="mt-3 text-sm leading-7 text-slate-600">
+                  <p className="mt-3 break-words text-sm leading-7 text-slate-600">
                     {selectedMarker.detailLine}
                   </p>
                 )}
@@ -349,7 +373,8 @@ export function ListingMap({ title, description, markers, emptyMessage }: Props)
                 <div className="mt-auto pt-6">
                   <Link
                     href={selectedMarker.href}
-                    className="inline-flex items-center justify-center rounded-full bg-[#193059] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#407FC2]"
+                    aria-label={`View ${selectedMarker.title}`}
+                    className="inline-flex items-center justify-center rounded-full bg-[#193059] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#2f6da8] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#193059]"
                   >
                     View details
                   </Link>
