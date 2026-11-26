@@ -10,9 +10,6 @@ import { withAccommodationBookablePrices } from "@/lib/accommodation-calendar/pr
 
 export const dynamic = "force-dynamic";
 
-const HERO_TEXT_HIGHLIGHT =
-  "0 0 18px rgba(255,255,255,0.95), 0 0 36px rgba(255,255,255,0.7)";
-
 const HOME_ACTIVITY_SELECT =
   "id, title, description, location, category, duration_hours, price_per_person, max_capacity, image_url, is_featured, vendors(name)" as const;
 const HOME_ACCOMMODATION_SELECT =
@@ -100,10 +97,10 @@ export default async function Home() {
             alt="Rock beach"
             fill
             priority
-            className="object-cover object-top brightness-110 contrast-110"
+            className="object-cover object-top"
           />
         </div>
-        <div className="absolute inset-0 bg-white/10" />
+        <div className="absolute inset-0 bg-[#10223e]/65" />
 
         <div className="relative z-10 mx-auto max-w-4xl px-4 text-center min-[1250px]:mt-19">
           <h1
@@ -112,32 +109,30 @@ export default async function Home() {
           >
             <span className="text-[#FBCA1A]">Your Kind</span>
             <br />
-            <span className="font-bold text-white" style={{ textShadow: "none" }}>
+            <span className="font-bold text-white">
               of Trip
             </span>
           </h1>
 
           <div className="mx-auto inline-flex max-w-3xl flex-col items-center px-5 py-5 sm:px-7">
             <p
-              className="mb-6 max-w-3xl text-lg font-bold leading-relaxed text-[#193059] sm:text-xl md:text-2xl"
+              className="mb-6 max-w-3xl text-lg font-semibold leading-relaxed text-white sm:text-xl md:text-2xl"
               style={{
                 fontFamily: "var(--font-source-sans)",
-                textShadow: HERO_TEXT_HIGHLIGHT,
               }}
             >
-              Combining local insights and AI innovation, UnitedIV redefines how
-              travelers plan and experience Barbados
+              Discover locally hosted stays and experiences to plan your
+              Barbados escape.
             </p>
 
             <Link
-              href="/locallens"
-              className="inline-block rounded-full border-2 border-white/40 px-8 py-4 text-lg font-medium text-[#193059] transition-all hover:border-white/60 hover:bg-white/10 backdrop-blur-sm"
+              href="/vacation-planning"
+              className="inline-block rounded-full bg-[#FBCA1A] px-8 py-4 text-lg font-semibold text-[#193059] transition-colors hover:bg-[#f5c000]"
               style={{
                 fontFamily: "var(--font-playfair)",
-                textShadow: HERO_TEXT_HIGHLIGHT,
               }}
             >
-              Try LocalPin.ai
+              Explore stays and activities
             </Link>
           </div>
         </div>
