@@ -109,11 +109,11 @@ export function AccommodationDetailClient({ accommodation, images, initialSelect
     <>
       <Breadcrumb items={breadcrumbItems} />
 
-      <section className="relative overflow-hidden bg-[linear-gradient(180deg,#eef5fb_0%,#f9fcff_34%,#f4f8fc_100%)] pb-16">
+      <section className="relative overflow-hidden bg-[linear-gradient(180deg,#eef5fb_0%,#f9fcff_34%,#f4f8fc_100%)] pb-8 sm:pb-16">
         <div className="absolute inset-x-0 top-0 h-[520px] bg-[radial-gradient(circle_at_top_left,rgba(64,127,194,0.2),transparent_34%),radial-gradient(circle_at_top_right,rgba(251,202,26,0.14),transparent_26%)]" />
 
-        <div className="relative mx-auto max-w-7xl px-4 pt-8">
-          <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)] xl:grid-rows-[auto_1fr]">
+        <div className="relative mx-auto max-w-7xl px-4 pt-4 sm:pt-8">
+          <div className="grid items-start gap-4 sm:gap-8 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)] xl:grid-rows-[auto_1fr]">
             <div className="min-w-0">
               <ImageGallery
                 images={allImages}
@@ -124,13 +124,13 @@ export function AccommodationDetailClient({ accommodation, images, initialSelect
             </div>
 
             <aside className="min-w-0 xl:col-start-2 xl:row-span-2 xl:row-start-1">
-              <section className="rounded-[28px] border border-white/70 bg-white/92 p-5 shadow-[0_24px_70px_rgba(25,48,89,0.12)] backdrop-blur-sm md:p-6">
+              <section className="rounded-[28px] border border-white/70 bg-white/92 p-4 shadow-[0_24px_70px_rgba(25,48,89,0.12)] backdrop-blur-sm sm:p-5 md:p-6">
                 <div className="inline-flex rounded-full bg-[#193059] px-4 py-1.5 text-sm font-semibold text-white">
                   {typeLabel}
                 </div>
 
                 <h1
-                  className="mt-4 text-[2.25rem] font-bold leading-[0.95] text-[#193059] md:text-[2.8rem]"
+                  className="mt-3 break-words text-[1.75rem] font-bold leading-[1.1] text-[#193059] sm:mt-4 sm:text-[2.25rem] sm:leading-[0.95] md:text-[2.8rem]"
                   style={{ fontFamily: "var(--font-playfair)" }}
                 >
                   {accommodation.name}
@@ -143,84 +143,84 @@ export function AccommodationDetailClient({ accommodation, images, initialSelect
                   </div>
                 )}
 
-                <p className="mt-4 line-clamp-3 text-sm leading-6 text-slate-600">
+                <p className="mt-3 line-clamp-3 text-sm leading-5 sm:mt-4 sm:leading-6 text-slate-600">
                   {stayHighlights[0] ||
                     "A polished Barbados stay designed for relaxed arrival, smooth hosting, and easy trip planning."}
                 </p>
 
-                <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-4 xl:grid-cols-4">
                   {accommodation.bedroom_count !== null && (
-                    <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-3.5 py-3">
-                      <div className="flex items-center gap-2 text-[#407FC2]">
+                    <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-2 py-2 sm:px-3.5 sm:py-3">
+                      <div className="flex items-center gap-2 text-[#407FC2] [&>svg]:hidden sm:[&>svg]:block">
                         <HomeIcon />
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                           Bedrooms
                         </span>
                       </div>
-                      <p className="mt-2 text-xl font-bold text-[#193059]">
+                      <p className="mt-1 text-lg font-bold text-[#193059] sm:mt-2 sm:text-xl">
                         {accommodation.bedroom_count}
                       </p>
                     </div>
                   )}
                   {accommodation.bathroom_count !== null && (
-                    <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-3.5 py-3">
-                      <div className="flex items-center gap-2 text-[#407FC2]">
+                    <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-2 py-2 sm:px-3.5 sm:py-3">
+                      <div className="flex items-center gap-2 text-[#407FC2] [&>svg]:hidden sm:[&>svg]:block">
                         <BathIcon />
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                           Baths
                         </span>
                       </div>
-                      <p className="mt-2 text-xl font-bold text-[#193059]">
+                      <p className="mt-1 text-lg font-bold text-[#193059] sm:mt-2 sm:text-xl">
                         {accommodation.bathroom_count}
                       </p>
                     </div>
                   )}
                   {accommodation.bed_count !== null && (
-                    <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-3.5 py-3">
-                      <div className="flex items-center gap-2 text-[#407FC2]">
+                    <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-2 py-2 sm:px-3.5 sm:py-3">
+                      <div className="flex items-center gap-2 text-[#407FC2] [&>svg]:hidden sm:[&>svg]:block">
                         <BedIcon />
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                           Beds
                         </span>
                       </div>
-                      <p className="mt-2 text-xl font-bold text-[#193059]">
+                      <p className="mt-1 text-lg font-bold text-[#193059] sm:mt-2 sm:text-xl">
                         {accommodation.bed_count}
                       </p>
                     </div>
                   )}
                   {accommodation.max_guest_capacity !== null && (
-                    <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-3.5 py-3">
-                      <div className="flex items-center gap-2 text-[#407FC2]">
+                    <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-2 py-2 sm:px-3.5 sm:py-3">
+                      <div className="flex items-center gap-2 text-[#407FC2] [&>svg]:hidden sm:[&>svg]:block">
                         <UsersIcon />
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                           Guests
                         </span>
                       </div>
-                      <p className="mt-2 text-xl font-bold text-[#193059]">
+                      <p className="mt-1 text-lg font-bold text-[#193059] sm:mt-2 sm:text-xl">
                         {accommodation.max_guest_capacity}
                       </p>
                     </div>
                   )}
                 </div>
 
-                <div className="mt-4 space-y-2.5">
-                  <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-4 py-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                <div className="mt-3 space-y-2 sm:mt-4 sm:space-y-2.5">
+                  <div className="hidden rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-3 py-2.5 sm:block sm:px-4 sm:py-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                       Stay Snapshot
                     </p>
-                    <p className="mt-1.5 text-sm font-semibold leading-6 text-[#193059]">
+                    <p className="mt-1 text-sm font-semibold leading-5 sm:mt-1.5 sm:leading-6 text-[#193059]">
                       {stayHighlights[0] ||
                         "Reach out to the host for exact stay details, arrival preferences, and property questions."}
                     </p>
                   </div>
 
                   {accommodation.amenities && accommodation.amenities.length > 0 && (
-                    <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-4 py-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                    <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-3 py-2.5 sm:px-4 sm:py-3">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                         Amenities
                       </p>
                       <div className="mt-2 flex flex-wrap gap-1.5">
-                        {accommodation.amenities.slice(0, 6).map((amenity) => (
+                        {accommodation.amenities.map((amenity) => (
                           <span
                             key={amenity}
                             className="inline-flex rounded-full border border-[#dbe7f2] bg-white px-2.5 py-1 text-xs font-medium text-[#193059]"
@@ -228,41 +228,36 @@ export function AccommodationDetailClient({ accommodation, images, initialSelect
                             {getAmenityLabel(amenity)}
                           </span>
                         ))}
-                        {accommodation.amenities.length > 6 && (
-                          <span className="inline-flex rounded-full border border-[#dbe7f2] bg-white px-2.5 py-1 text-xs font-medium text-[#193059]">
-                            +{accommodation.amenities.length - 6} more
-                          </span>
-                        )}
                       </div>
                     </div>
                   )}
 
-                  <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-4 py-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                  <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-3 py-2.5 sm:px-4 sm:py-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                       Policies
                     </p>
-                    <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-[#193059]">
+                    <div className="mt-2 grid grid-cols-2 gap-1.5 text-[11px] font-semibold text-[#193059] sm:flex sm:flex-wrap sm:gap-2 sm:text-xs">
                       {policies.map((policy) => (
                         <span
                           key={policy.key}
-                          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 ${
+                          className={`inline-flex items-center gap-1 rounded-xl px-2 py-1 [&>svg]:shrink-0 sm:rounded-full sm:px-2.5 ${
                             policy.value
                               ? "bg-emerald-50 text-emerald-700"
                               : "bg-slate-100 text-slate-500"
                           }`}
                         >
                           {policy.value ? <CheckIcon /> : <XIcon />}
-                          {policy.label}
+                          <span className="min-w-0 break-words">{policy.label}</span>
                         </span>
                       ))}
                     </div>
                   </div>
 
                   {(accommodation.transportation_notes || accommodation.pickup_notes) && (
-                    <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="grid grid-cols-2 gap-2">
                       {accommodation.transportation_notes && (
-                        <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-4 py-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                        <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-3 py-2.5 sm:px-4 sm:py-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                             Transportation
                           </p>
                           <p className="mt-1.5 line-clamp-3 text-sm leading-6 text-[#193059]">
@@ -272,8 +267,8 @@ export function AccommodationDetailClient({ accommodation, images, initialSelect
                       )}
 
                       {accommodation.pickup_notes && (
-                        <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-4 py-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                        <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-3 py-2.5 sm:px-4 sm:py-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                             Pickup Notes
                           </p>
                           <p className="mt-1.5 line-clamp-3 text-sm leading-6 text-[#193059]">
@@ -286,12 +281,12 @@ export function AccommodationDetailClient({ accommodation, images, initialSelect
                 </div>
 
                 {accommodation.vendors && (
-                  <div className="mt-4 rounded-[22px] border border-[#dbe7f2] bg-[#f7fbff] px-4 py-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                  <div className="mt-3 rounded-[22px] sm:mt-4 border border-[#dbe7f2] bg-[#f7fbff] px-3 py-2.5 sm:px-4 sm:py-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                       Hosted By
                     </p>
-                    <div className="mt-2.5 flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-[#407FC2] to-[#193059] text-sm font-bold text-white">
+                    <div className="mt-2 flex items-center gap-2 sm:mt-2.5 sm:gap-3">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full sm:h-10 sm:w-10 bg-gradient-to-br from-[#407FC2] to-[#193059] text-sm font-bold text-white">
                         {accommodation.vendors.name?.charAt(0) || "V"}
                       </div>
                       <div className="min-w-0">
@@ -299,19 +294,19 @@ export function AccommodationDetailClient({ accommodation, images, initialSelect
                           {accommodation.vendors.name || "Vendor"}
                         </p>
                         {accommodation.vendors.contact_email && (
-                          <p className="text-sm text-slate-500">{accommodation.vendors.contact_email}</p>
+                          <p className="break-words text-xs text-slate-500 sm:text-sm">{accommodation.vendors.contact_email}</p>
                         )}
                         {accommodation.vendors.business_phone && (
-                          <p className="text-sm text-slate-500">{accommodation.vendors.business_phone}</p>
+                          <p className="break-words text-xs text-slate-500 sm:text-sm">{accommodation.vendors.business_phone}</p>
                         )}
                       </div>
                     </div>
                   </div>
                 )}
 
-                <div className="mt-4 rounded-[24px] bg-[#193059] p-4 text-white shadow-[0_22px_50px_rgba(25,48,89,0.22)]">
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <div className="rounded-2xl border border-white/12 bg-white/8 px-4 py-3">
+                <div className="mt-3 rounded-[24px] bg-[#193059] p-3 text-white shadow-[0_22px_50px_rgba(25,48,89,0.22)] sm:mt-4 sm:p-4">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="col-span-2 rounded-2xl border border-white/12 bg-white/8 px-3 py-2 sm:col-span-1 sm:px-4 sm:py-3">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/55">
                         Check-in / Check-out
                       </p>
@@ -320,7 +315,7 @@ export function AccommodationDetailClient({ accommodation, images, initialSelect
                       </p>
                     </div>
 
-                    <div className="rounded-2xl border border-white/12 bg-white/8 px-4 py-3">
+                    <div className="hidden rounded-2xl border border-white/12 bg-white/8 px-4 py-3 sm:block">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/55">
                         Best Fit
                       </p>
@@ -332,19 +327,19 @@ export function AccommodationDetailClient({ accommodation, images, initialSelect
                     </div>
                   </div>
 
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-4 sm:gap-3">
                     {accommodation.vendors?.contact_email ? (
                       <a
                         href={`mailto:${accommodation.vendors.contact_email}`}
-                        className="inline-flex items-center justify-center rounded-full border border-white/30 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/10"
+                        className="inline-flex items-center justify-center rounded-full border border-white/30 min-h-11 px-2 py-2 text-xs font-semibold text-white sm:px-5 sm:py-3 sm:text-sm transition-colors hover:bg-white/10"
                       >
-                        Email host a question
+                        Email host
                       </a>
                     ) : (
                       <button
                         type="button"
                         disabled
-                        className="inline-flex items-center justify-center rounded-full bg-slate-300 px-5 py-3 text-sm font-semibold text-white"
+                        className="inline-flex items-center justify-center rounded-full bg-slate-300 min-h-11 px-2 py-2 text-xs font-semibold text-white sm:px-5 sm:py-3 sm:text-sm"
                       >
                         Email unavailable
                       </button>
@@ -353,7 +348,7 @@ export function AccommodationDetailClient({ accommodation, images, initialSelect
                     {accommodation.vendors?.business_phone ? (
                       <a
                         href={formatPhoneHref(accommodation.vendors.business_phone)}
-                        className="inline-flex items-center justify-center rounded-full border border-white/30 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/10"
+                        className="inline-flex items-center justify-center rounded-full border border-white/30 min-h-11 px-2 py-2 text-xs font-semibold text-white sm:px-5 sm:py-3 sm:text-sm transition-colors hover:bg-white/10"
                       >
                         Call host
                       </a>
@@ -361,7 +356,7 @@ export function AccommodationDetailClient({ accommodation, images, initialSelect
                       <button
                         type="button"
                         disabled
-                        className="inline-flex items-center justify-center rounded-full border border-white/20 px-5 py-3 text-sm font-semibold text-white/60"
+                        className="inline-flex items-center justify-center rounded-full border border-white/20 min-h-11 px-2 py-2 text-xs font-semibold text-white sm:px-5 sm:py-3 sm:text-sm/60"
                       >
                         Call unavailable
                       </button>
@@ -374,14 +369,14 @@ export function AccommodationDetailClient({ accommodation, images, initialSelect
             <section
               id="accommodation-booking"
               aria-label="Accommodation booking"
-              className="min-w-0 scroll-mt-28 rounded-[28px] bg-[#193059] p-5 text-white shadow-[0_22px_50px_rgba(25,48,89,0.22)] md:p-6 xl:col-start-1 xl:row-start-2"
+              className="min-w-0 scroll-mt-28 rounded-[28px] bg-[#193059] p-4 text-white shadow-[0_22px_50px_rgba(25,48,89,0.22)] sm:p-5 md:p-6 xl:col-start-1 xl:row-start-2"
             >
               <div className="flex flex-wrap items-end justify-between gap-4">
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/65">
                     Nightly Rate
                   </p>
-                  <p className="mt-1.5 text-[2rem] font-bold leading-none">{formatAccommodationNightlyPrice(accommodation)}</p>
+                  <p className="mt-1 text-2xl font-bold leading-none sm:mt-1.5 sm:text-[2rem]">{formatAccommodationNightlyPrice(accommodation)}</p>
                   <p className="mt-1 text-xs text-white/70">
                     {accommodation.price_min_usd !== null ? "USD for available nights · choose dates for your total" : "The host has no open nights available to request right now"}
                   </p>
@@ -403,7 +398,7 @@ export function AccommodationDetailClient({ accommodation, images, initialSelect
       </section>
 
       {hasValidCoordinates(accommodation.latitude, accommodation.longitude) && (
-        <section className="bg-[#f4f8fc] pb-16">
+        <section className="bg-[#f4f8fc] pb-8 sm:pb-16">
           <div className="container mx-auto max-w-7xl px-4">
             <ListingMap
               title="Stay Map"

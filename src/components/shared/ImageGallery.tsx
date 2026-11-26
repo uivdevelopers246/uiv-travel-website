@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getSafeImageUrl, DEFAULT_IMAGE_FALLBACK } from "@/lib/utils/image";
 
 export type GalleryImage = {
@@ -20,8 +20,26 @@ type Props = {
 export function ImageGallery({ images, title, featuredBadge, typeBadge }: Props) {
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const openerRef = useRef<HTMLButtonElement>(null);
+  const imageCount = Math.max(images.length, 1);
+  const imageIndex = Math.min(selectedImageIndex, imageCount - 1);
 
-  const currentImage = images[selectedImageIndex] || { image_url: null, alt_text: title };
+  useEffect(() => {
+    if (!lightboxOpen) return;
+    const dialog = dialogRef.current;
+    const opener = openerRef.current;
+    dialog?.showModal();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      dialog?.close();
+      document.body.style.overflow = previousOverflow;
+      opener?.focus();
+    };
+  }, [lightboxOpen]);
+
+  const currentImage = images[imageIndex] || { image_url: null, alt_text: title };
   const safeImageUrl = getSafeImageUrl(currentImage.image_url, DEFAULT_IMAGE_FALLBACK);
 
   const nextImage = () => {
@@ -38,11 +56,10 @@ export function ImageGallery({ images, title, featuredBadge, typeBadge }: Props)
 
   return (
     <>
-      <div className="space-y-4">
+      <div className="space-y-2 sm:space-y-4">
         {/* Main Image */}
         <div
-          className="group relative aspect-[16/11] overflow-hidden rounded-[30px] border border-white/50 bg-slate-100 shadow-[0_30px_80px_rgba(25,48,89,0.16)] cursor-pointer"
-          onClick={() => setLightboxOpen(true)}
+          className="group relative aspect-video overflow-hidden rounded-[22px] border border-white/50 bg-slate-100 shadow-[0_30px_80px_rgba(25,48,89,0.16)] cursor-pointer sm:aspect-[16/11] sm:rounded-[30px]"
         >
           <img
             src={safeImageUrl}
@@ -50,6 +67,13 @@ export function ImageGallery({ images, title, featuredBadge, typeBadge }: Props)
             className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
           />
           <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(9,20,43,0.08)_0%,rgba(9,20,43,0.02)_38%,rgba(9,20,43,0.38)_100%)]" />
+          <button
+            type="button"
+            ref={openerRef}
+            aria-label={`Open photos of ${title}`}
+            onClick={() => setLightboxOpen(true)}
+            className="absolute inset-0 rounded-[30px] focus-visible:outline-4 focus-visible:-outline-offset-4 focus-visible:outline-[#FBCA1A]"
+          />
           {featuredBadge && (
             <span className="absolute left-5 top-5 rounded-full bg-[#FBCA1A] px-4 py-1.5 text-sm font-semibold text-[#193059] shadow-[0_12px_24px_rgba(25,48,89,0.16)]">
               Featured
@@ -63,6 +87,8 @@ export function ImageGallery({ images, title, featuredBadge, typeBadge }: Props)
           {images.length > 1 && (
             <>
               <button
+                type="button"
+                aria-label="Previous photo"
                 onClick={(e) => {
                   e.stopPropagation();
                   prevImage();
@@ -72,6 +98,8 @@ export function ImageGallery({ images, title, featuredBadge, typeBadge }: Props)
                 <ChevronLeftIcon />
               </button>
               <button
+                type="button"
+                aria-label="Next photo"
                 onClick={(e) => {
                   e.stopPropagation();
                   nextImage();
@@ -83,7 +111,7 @@ export function ImageGallery({ images, title, featuredBadge, typeBadge }: Props)
             </>
           )}
           <div className="absolute bottom-5 right-5 rounded-full border border-white/20 bg-[#193059]/78 px-3 py-1 text-sm text-white backdrop-blur-sm">
-            {selectedImageIndex + 1} / {images.length}
+            {imageIndex + 1} / {imageCount}
           </div>
         </div>
 
@@ -93,8 +121,11 @@ export function ImageGallery({ images, title, featuredBadge, typeBadge }: Props)
             {images.map((img, index) => (
               <button
                 key={img.id}
+                type="button"
+                aria-label={`Show photo ${index + 1} of ${images.length}`}
+                aria-pressed={index === imageIndex}
                 onClick={() => setSelectedImageIndex(index)}
-                className={`h-[5.5rem] w-[5.5rem] flex-shrink-0 overflow-hidden rounded-2xl border-2 transition ${
+                className={`h-14 w-14 flex-shrink-0 overflow-hidden rounded-xl border-2 transition sm:h-[5.5rem] sm:w-[5.5rem] sm:rounded-2xl ${
                   index === selectedImageIndex
                     ? "border-[#407FC2] shadow-[0_12px_24px_rgba(64,127,194,0.28)] ring-2 ring-[#407FC2]/25"
                     : "border-white/60 shadow-[0_10px_24px_rgba(25,48,89,0.08)] hover:border-[#bfd3e7]"
@@ -113,11 +144,19 @@ export function ImageGallery({ images, title, featuredBadge, typeBadge }: Props)
 
       {/* Lightbox Modal */}
       {lightboxOpen && (
-        <div
-          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
-          onClick={() => setLightboxOpen(false)}
+        <dialog
+          ref={dialogRef}
+          aria-label={`Photos of ${title}`}
+          onCancel={() => setLightboxOpen(false)}
+          onClose={() => setLightboxOpen(false)}
+          className="fixed inset-0 m-0 h-dvh max-h-none w-screen max-w-none border-0 bg-black/90 p-0 text-white open:flex open:items-center open:justify-center backdrop:bg-black/70"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setLightboxOpen(false);
+          }}
         >
           <button
+            type="button"
+            aria-label="Close photos"
             onClick={() => setLightboxOpen(false)}
             className="absolute top-6 right-6 text-white hover:text-gray-300"
           >
@@ -125,6 +164,8 @@ export function ImageGallery({ images, title, featuredBadge, typeBadge }: Props)
           </button>
           {images.length > 1 && (
             <button
+              type="button"
+              aria-label="Previous photo"
               onClick={(e) => {
                 e.stopPropagation();
                 prevImage();
@@ -142,6 +183,8 @@ export function ImageGallery({ images, title, featuredBadge, typeBadge }: Props)
           />
           {images.length > 1 && (
             <button
+              type="button"
+              aria-label="Next photo"
               onClick={(e) => {
                 e.stopPropagation();
                 nextImage();
@@ -152,9 +195,9 @@ export function ImageGallery({ images, title, featuredBadge, typeBadge }: Props)
             </button>
           )}
           <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-black/60 text-white px-4 py-2 rounded-full">
-            {selectedImageIndex + 1} / {images.length}
+            {imageIndex + 1} / {imageCount}
           </div>
-        </div>
+        </dialog>
       )}
     </>
   );

@@ -148,13 +148,13 @@ export function AccommodationBookingForm({
   const inputClass = "mt-1.5 w-full rounded-xl border border-white/25 bg-white px-3 py-2.5 text-sm text-[#193059] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#FBCA1A] disabled:opacity-60";
 
   return (
-    <form onSubmit={addToCart} className="mt-5 border-t border-white/20 pt-4" aria-label="Book your stay">
+    <form onSubmit={addToCart} className="mt-3 border-t border-white/20 pt-3 sm:mt-5 sm:pt-4" aria-label="Book your stay">
       <h2 className="text-lg font-semibold">Book your stay</h2>
       <p className="mt-1 text-xs leading-5 text-white/80">Choose dates to check the host’s available nights and prices. Nightly rates may vary.</p>
       <AccommodationBookingCalendar accommodationId={accommodationId} month={calendarMonth} today={today}
         checkIn={selection.checkIn} checkOut={selection.checkOut} disabled={adding} refreshVersion={retry}
         onMonthChange={setCalendarMonth} onSelect={changeSelection} />
-      <fieldset disabled={adding} className="mt-3 grid min-w-0 gap-3 sm:grid-cols-3">
+      <fieldset disabled={adding} className="mt-3 grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3">
         <legend className="sr-only">Stay dates and guests</legend>
         <label className="min-w-0 text-sm font-medium">
           Check-in
@@ -170,7 +170,7 @@ export function AccommodationBookingForm({
           <input type="date" name="check_out" required min={nextStayDate(selection.checkIn) ?? nextStayDate(today)} value={selection.checkOut}
             onChange={(event) => changeSelection({ checkOut: event.target.value })} className={inputClass} />
         </label>
-        <label className="min-w-0 text-sm font-medium">
+        <label className="col-span-2 min-w-0 text-sm font-medium sm:col-span-1">
           Guests{maxGuests !== null ? ` (up to ${maxGuests})` : ""}
           <input type="number" name="guests" required min={1} max={maxGuests ?? undefined} step={1} value={selection.guests}
             onChange={(event) => changeSelection({ guests: event.target.value })} className={inputClass} />

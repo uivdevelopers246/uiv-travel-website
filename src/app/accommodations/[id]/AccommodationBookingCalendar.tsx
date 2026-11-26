@@ -138,7 +138,7 @@ export function BookingCalendarMonth({
                   aria-pressed={selected || inStay} aria-current={date === today ? "date" : undefined}
                   onClick={() => onSelect(choosingCheckout && date > checkIn
                     ? { checkIn, checkOut: date } : { checkIn: date, checkOut: "" })}
-                  className={`flex min-h-16 w-full min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-0.5 py-2 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#FBCA1A] disabled:cursor-not-allowed ${color}`}>
+                  className={`flex min-h-12 w-full min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg px-0.5 py-1 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#FBCA1A] disabled:cursor-not-allowed sm:min-h-16 sm:gap-1 sm:py-2 ${color}`}>
                   <span className="text-sm font-semibold">{Number(date.slice(8))}</span>
                   <span aria-hidden="true" className="w-full text-[10px] leading-3 tabular-nums [overflow-wrap:anywhere] sm:text-[11px]">
                     {loading || error ? "…" : date === checkOut || checkoutOnly ? "Out" : price === null || date < today ? "—" : formattedPrice}

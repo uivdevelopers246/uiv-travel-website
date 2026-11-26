@@ -192,7 +192,7 @@ function LoadingSlotGroups() {
                 key={slot}
                 className="rounded-[28px] border border-[#e5eef7] bg-[#fbfdff] p-5"
               >
-                <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+                <div className="flex flex-col gap-3 sm:gap-5 xl:flex-row xl:items-center xl:justify-between">
                   <div className="space-y-3">
                     <div className="h-7 w-48 rounded-full bg-[#e7eff7]" />
                     <div className="grid gap-3 sm:grid-cols-2">
@@ -400,11 +400,11 @@ export function ActivityDetailClient({ activity, images }: Props) {
     <>
       <Breadcrumb items={breadcrumbItems} />
 
-      <section className="relative overflow-hidden bg-[linear-gradient(180deg,#eef5fb_0%,#f9fcff_34%,#f4f8fc_100%)] pb-16">
+      <section className="relative overflow-hidden bg-[linear-gradient(180deg,#eef5fb_0%,#f9fcff_34%,#f4f8fc_100%)] pb-8 sm:pb-16">
         <div className="absolute inset-x-0 top-0 h-[520px] bg-[radial-gradient(circle_at_top_left,rgba(64,127,194,0.2),transparent_34%),radial-gradient(circle_at_top_right,rgba(251,202,26,0.14),transparent_26%)]" />
 
-        <div className="relative mx-auto max-w-7xl px-4 pt-8">
-          <div className="grid gap-8 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)]">
+        <div className="relative mx-auto max-w-7xl px-4 pt-4 sm:pt-8">
+          <div className="grid gap-4 sm:gap-8 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)]">
             <div>
               <ImageGallery
                 images={allImages}
@@ -414,7 +414,7 @@ export function ActivityDetailClient({ activity, images }: Props) {
             </div>
 
             <aside>
-              <section className="rounded-[28px] border border-white/70 bg-white/92 p-5 shadow-[0_24px_70px_rgba(25,48,89,0.12)] backdrop-blur-sm md:p-6">
+              <section className="rounded-[28px] border border-white/70 bg-white/92 p-4 shadow-[0_24px_70px_rgba(25,48,89,0.12)] backdrop-blur-sm sm:p-5 md:p-6">
                 <div className="flex flex-wrap items-center gap-3">
                   <span className="inline-flex rounded-full bg-[#407FC2]/10 px-3.5 py-1 text-xs font-semibold text-[#407FC2]">
                     {categoryLabel}
@@ -430,7 +430,7 @@ export function ActivityDetailClient({ activity, images }: Props) {
                 </div>
 
                 <h1
-                  className="mt-4 text-[2.35rem] font-bold leading-[0.95] text-[#193059] md:text-[2.9rem]"
+                  className="mt-3 break-words text-[1.75rem] font-bold leading-[1.1] text-[#193059] sm:mt-4 sm:text-[2.35rem] sm:leading-[0.95] md:text-[2.9rem]"
                   style={{ fontFamily: "var(--font-playfair)" }}
                 >
                   {activity.title}
@@ -443,68 +443,68 @@ export function ActivityDetailClient({ activity, images }: Props) {
                   </div>
                 )}
 
-                <p className="mt-4 line-clamp-3 text-sm leading-6 text-slate-600">
+                <p className="mt-3 line-clamp-3 text-sm leading-5 sm:mt-4 sm:leading-6 text-slate-600">
                   {activity.description ||
                     "A curated Barbados experience designed for easy planning, smooth logistics, and memorable time on the water."}
                 </p>
 
-                <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                <div className="mt-3 grid grid-cols-3 gap-2 sm:mt-4">
                   {activity.duration_hours !== null && (
-                    <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-3.5 py-3">
-                      <div className="flex items-center gap-2 text-[#407FC2]">
+                    <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-2 py-2 sm:px-3.5 sm:py-3">
+                      <div className="flex items-center gap-2 text-[#407FC2] [&>svg]:hidden sm:[&>svg]:block">
                         <ClockIcon />
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                           Duration
                         </span>
                       </div>
-                      <p className="mt-2 text-xl font-bold text-[#193059]">
+                      <p className="mt-1 text-lg font-bold text-[#193059] sm:mt-2 sm:text-xl">
                         {activity.duration_hours} hrs
                       </p>
                     </div>
                   )}
                   {activity.max_capacity !== null && (
-                    <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-3.5 py-3">
-                      <div className="flex items-center gap-2 text-[#407FC2]">
+                    <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-2 py-2 sm:px-3.5 sm:py-3">
+                      <div className="flex items-center gap-2 text-[#407FC2] [&>svg]:hidden sm:[&>svg]:block">
                         <UsersIcon />
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                           Group
                         </span>
                       </div>
-                      <p className="mt-2 text-xl font-bold text-[#193059]">
+                      <p className="mt-1 text-lg font-bold text-[#193059] sm:mt-2 sm:text-xl">
                         {activity.max_capacity}
                       </p>
                     </div>
                   )}
                   {activity.price_per_person !== null && (
-                    <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-3.5 py-3">
-                      <div className="flex items-center gap-2 text-[#407FC2]">
+                    <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-2 py-2 sm:px-3.5 sm:py-3">
+                      <div className="flex items-center gap-2 text-[#407FC2] [&>svg]:hidden sm:[&>svg]:block">
                         <StarIcon />
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                           Price
                         </span>
                       </div>
-                      <p className="mt-2 text-xl font-bold text-[#193059]">
+                      <p className="mt-1 text-lg font-bold text-[#193059] sm:mt-2 sm:text-xl">
                         ${activity.price_per_person}
                       </p>
                     </div>
                   )}
                 </div>
 
-                <div className="mt-4 space-y-2.5">
-                  <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-4 py-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                <div className="hidden space-y-2 sm:mt-4 sm:block sm:space-y-2.5">
+                  <div className="hidden rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-3 py-2.5 sm:block sm:px-4 sm:py-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                       Overview
                     </p>
-                    <p className="mt-1.5 text-sm font-semibold leading-6 text-[#193059]">
+                    <p className="mt-1 text-sm font-semibold leading-5 sm:mt-1.5 sm:leading-6 text-[#193059]">
                       {activity.duration_hours !== null
                         ? `${activity.duration_hours} hour guided experience with same-page booking.`
                         : "Choose a date, set participants, and reserve directly below."}
                     </p>
                   </div>
 
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-4 py-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="hidden rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-3 py-2.5 sm:block sm:px-4 sm:py-3">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                         Group Size
                       </p>
                       <p className="mt-1.5 text-sm font-semibold text-[#193059]">
@@ -514,8 +514,8 @@ export function ActivityDetailClient({ activity, images }: Props) {
                       </p>
                     </div>
 
-                    <div className="rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-4 py-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                    <div className="col-span-2 rounded-2xl border border-[#dbe7f2] bg-[#f7fbff] px-3 py-2.5 sm:col-span-1 sm:px-4 sm:py-3">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                         Booking
                       </p>
                       <p className="mt-1.5 text-sm font-semibold text-[#193059]">
@@ -526,12 +526,12 @@ export function ActivityDetailClient({ activity, images }: Props) {
                 </div>
 
                 {activity.vendors && (
-                  <div className="mt-4 rounded-[22px] border border-[#dbe7f2] bg-[#f7fbff] px-4 py-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                  <div className="mt-3 rounded-[22px] sm:mt-4 border border-[#dbe7f2] bg-[#f7fbff] px-3 py-2.5 sm:px-4 sm:py-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                       Hosted By
                     </p>
-                    <div className="mt-2.5 flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-[#407FC2] to-[#193059] text-sm font-bold text-white">
+                    <div className="mt-2 flex items-center gap-2 sm:mt-2.5 sm:gap-3">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full sm:h-10 sm:w-10 bg-gradient-to-br from-[#407FC2] to-[#193059] text-sm font-bold text-white">
                         {activity.vendors.name?.charAt(0) || "V"}
                       </div>
                       <div className="min-w-0">
@@ -539,10 +539,10 @@ export function ActivityDetailClient({ activity, images }: Props) {
                           {activity.vendors.name || "Vendor"}
                         </p>
                         {activity.vendors.contact_email && (
-                          <p className="text-sm text-slate-500">{activity.vendors.contact_email}</p>
+                          <p className="break-words text-xs text-slate-500 sm:text-sm">{activity.vendors.contact_email}</p>
                         )}
                         {activity.vendors.business_phone && (
-                          <p className="text-sm text-slate-500">{activity.vendors.business_phone}</p>
+                          <p className="break-words text-xs text-slate-500 sm:text-sm">{activity.vendors.business_phone}</p>
                         )}
                       </div>
                     </div>
@@ -555,21 +555,21 @@ export function ActivityDetailClient({ activity, images }: Props) {
 
           <section
             id="activity-availability"
-            className="mt-6 rounded-[36px] border border-[#d9e6f1] bg-[linear-gradient(180deg,#ffffff_0%,#f7fbff_100%)] p-6 shadow-[0_28px_80px_rgba(25,48,89,0.1)] md:p-8"
+            className="mt-4 rounded-[24px] sm:mt-6 sm:rounded-[36px] border border-[#d9e6f1] bg-[linear-gradient(180deg,#ffffff_0%,#f7fbff_100%)] p-4 shadow-[0_28px_80px_rgba(25,48,89,0.1)] sm:p-6 md:p-8"
           >
-            <div className="flex flex-col gap-5">
+            <div className="flex flex-col gap-3 sm:gap-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#407FC2]">
                     Availability
                   </p>
                   <h2
-                    className="mt-3 text-3xl font-bold text-[#193059]"
+                    className="mt-1 text-xl font-bold sm:mt-2 sm:text-2xl text-[#193059] sm:mt-3 sm:text-3xl"
                     style={{ fontFamily: "var(--font-playfair)" }}
                   >
                     Choose your time slot
                   </h2>
-                  <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
+                  <p className="mt-2 hidden max-w-2xl text-sm leading-5 text-slate-600 sm:mt-3 sm:block sm:leading-7">
                     Scan the next bookable departures, set your participant count, and add a slot to your cart when it feels right.
                   </p>
                 </div>
@@ -589,47 +589,52 @@ export function ActivityDetailClient({ activity, images }: Props) {
                 </div>
               </div>
 
-              <div className="grid gap-4 rounded-[30px] border border-[#d8e5f2] bg-white/90 p-5 shadow-[0_18px_45px_rgba(25,48,89,0.06)] xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)]">
-                <div className="grid gap-3 md:grid-cols-3">
-                  <div className="rounded-[24px] border border-[#dbe7f2] bg-[#f7fbff] px-4 py-4">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+              <p className="text-sm font-semibold text-[#193059] sm:hidden">
+                {activity.price_per_person !== null ? `$${activity.price_per_person} / person` : "Price on request"}
+                <span className="mt-1 block text-xs font-normal text-slate-600">Charged only after host approval.</span>
+              </p>
+
+              <div className="hidden gap-3 rounded-[20px] sm:grid sm:gap-4 sm:rounded-[30px] border border-[#d8e5f2] bg-white/90 p-3 shadow-[0_18px_45px_rgba(25,48,89,0.06)] sm:p-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)]">
+                <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3">
+                  <div className="rounded-[24px] border border-[#dbe7f2] bg-[#f7fbff] px-3 py-2.5 sm:px-4 sm:py-4">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                       Next available
                     </p>
-                    <p className="mt-2 text-sm font-semibold leading-6 text-[#193059]">
+                    <p className="mt-1 text-sm font-semibold leading-5 sm:mt-2 sm:leading-6 text-[#193059]">
                       {nextAvailableLabel}
                     </p>
                   </div>
-                  <div className="rounded-[24px] border border-[#dbe7f2] bg-[#f7fbff] px-4 py-4">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                  <div className="hidden rounded-[24px] border border-[#dbe7f2] bg-[#f7fbff] px-3 py-2.5 sm:block sm:px-4 sm:py-4">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                       Max group size
                     </p>
-                    <p className="mt-2 text-sm font-semibold leading-6 text-[#193059]">
+                    <p className="mt-1 text-sm font-semibold leading-5 sm:mt-2 sm:leading-6 text-[#193059]">
                       {maxGroupSize !== null
                         ? `Up to ${maxGroupSize} guests per departure`
                         : "Shared capacity shown per departure"}
                     </p>
                   </div>
-                  <div className="rounded-[24px] border border-[#dbe7f2] bg-[#f7fbff] px-4 py-4">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                  <div className="rounded-[24px] border border-[#dbe7f2] bg-[#f7fbff] px-3 py-2.5 sm:px-4 sm:py-4">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-[11px] sm:tracking-[0.2em]">
                       How booking works
                     </p>
-                    <p className="mt-2 text-sm font-semibold leading-6 text-[#193059]">
+                    <p className="mt-1 text-sm font-semibold leading-5 sm:mt-2 sm:leading-6 text-[#193059]">
                       Add a departure to your cart, save payment details at checkout, and wait for vendor approval before any charge is captured.
                     </p>
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-3 rounded-[26px] bg-[#193059] p-5 text-white shadow-[0_18px_40px_rgba(25,48,89,0.18)]">
+                <div className="flex flex-col gap-3 rounded-[26px] bg-[#193059] p-3 text-white sm:p-5 shadow-[0_18px_40px_rgba(25,48,89,0.18)]">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/65">
                       Price
                     </p>
-                    <p className="mt-2 text-2xl font-bold">
+                    <p className="mt-1 text-xl font-bold sm:mt-2 sm:text-2xl">
                       {activity.price_per_person !== null
                         ? `$${activity.price_per_person} / person`
                         : "Price on request"}
                     </p>
-                    <p className="mt-2 text-sm leading-6 text-white/72">
+                    <p className="mt-1 text-xs leading-5 text-white/80 sm:mt-2 sm:text-sm sm:leading-6">
                       Participant counts stay editable in your cart before checkout.
                     </p>
                   </div>
@@ -652,7 +657,7 @@ export function ActivityDetailClient({ activity, images }: Props) {
             {slotsLoading ? (
               <LoadingSlotGroups />
             ) : slotsError ? (
-              <div className="mt-8 rounded-[30px] border border-rose-200 bg-[linear-gradient(180deg,#fff7f7_0%,#ffffff_100%)] p-6 shadow-[0_18px_45px_rgba(190,24,24,0.08)]">
+              <div className="mt-4 rounded-[24px] sm:mt-8 sm:rounded-[30px] border border-rose-200 bg-[linear-gradient(180deg,#fff7f7_0%,#ffffff_100%)] p-6 shadow-[0_18px_45px_rgba(190,24,24,0.08)]">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-rose-500">
                   Availability unavailable
                 </p>
@@ -662,7 +667,7 @@ export function ActivityDetailClient({ activity, images }: Props) {
                 >
                   We couldn&apos;t load departures right now
                 </h3>
-                <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
+                <p className="mt-2 max-w-2xl text-sm leading-5 sm:mt-3 sm:leading-7 text-slate-600">
                   {slotsError} Retry to pull the latest departures and capacity from the activity schedule.
                 </p>
                 <button
@@ -674,7 +679,7 @@ export function ActivityDetailClient({ activity, images }: Props) {
                 </button>
               </div>
             ) : slotGroups.length === 0 ? (
-              <div className="mt-8 rounded-[30px] border border-[#d8e5f2] bg-white p-8 text-center shadow-[0_18px_45px_rgba(25,48,89,0.06)]">
+              <div className="mt-4 rounded-[24px] sm:mt-8 sm:rounded-[30px] border border-[#d8e5f2] bg-white p-4 text-center sm:p-8 shadow-[0_18px_45px_rgba(25,48,89,0.06)]">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#407FC2]">
                   No departures listed
                 </p>
@@ -684,7 +689,7 @@ export function ActivityDetailClient({ activity, images }: Props) {
                 >
                   No upcoming slots are available right now
                 </h3>
-                <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-slate-600">
+                <p className="mx-auto mt-2 max-w-2xl text-sm leading-5 sm:mt-3 sm:leading-7 text-slate-600">
                   This activity does not have bookable departures on the schedule yet. Check back later or keep browsing other experiences while the host updates availability.
                 </p>
                 <Link
@@ -695,11 +700,11 @@ export function ActivityDetailClient({ activity, images }: Props) {
                 </Link>
               </div>
             ) : (
-              <div id="activity-availability-list" className="mt-8 space-y-6">
+              <div id="activity-availability-list" className="mt-4 space-y-4 sm:mt-8 sm:space-y-6">
                 {slotGroups.map((group) => (
                   <article
                     key={group.key}
-                    className="rounded-[32px] border border-[#d8e5f2] bg-white/92 p-5 shadow-[0_18px_45px_rgba(25,48,89,0.06)] md:p-6"
+                    className="rounded-[32px] border border-[#d8e5f2] bg-white/92 p-4 shadow-[0_18px_45px_rgba(25,48,89,0.06)] sm:p-5 md:p-6"
                   >
                     <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                       <div>
@@ -707,7 +712,7 @@ export function ActivityDetailClient({ activity, images }: Props) {
                           Departure day
                         </p>
                         <h3
-                          className="mt-2 text-2xl font-bold text-[#193059]"
+                          className="mt-1 text-xl font-bold sm:mt-2 sm:text-2xl text-[#193059]"
                           style={{ fontFamily: "var(--font-playfair)" }}
                         >
                           {group.label}
@@ -732,7 +737,7 @@ export function ActivityDetailClient({ activity, images }: Props) {
                       </div>
                     </div>
 
-                    <div className="mt-6 grid gap-4">
+                    <div className="mt-3 grid gap-3 sm:mt-6 sm:gap-4">
                       {group.slots.map((slot) => {
                         const remaining = getRemainingCapacity(slot);
                         const isSoldOut = isSlotSoldOut(slot);
@@ -746,13 +751,13 @@ export function ActivityDetailClient({ activity, images }: Props) {
                         return (
                           <article
                             key={slot.id}
-                            className={`rounded-[28px] border p-5 shadow-[0_18px_45px_rgba(25,48,89,0.06)] ${
+                            className={`rounded-[28px] border p-3 shadow-[0_18px_45px_rgba(25,48,89,0.06)] sm:p-5 ${
                               isSoldOut
                                 ? "border-slate-200 bg-[#f8fafc]"
                                 : "border-[#d8e5f2] bg-white"
                             }`}
                           >
-                            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                            <div className="flex flex-col gap-3 sm:gap-5 lg:flex-row lg:items-center lg:justify-between">
                               <div className="min-w-0 space-y-3">
                                 <div className="flex flex-wrap items-center gap-3">
                                   <p
@@ -775,8 +780,8 @@ export function ActivityDetailClient({ activity, images }: Props) {
                                   </span>
                                 </div>
 
-                                <div className="grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
-                                  <div className="rounded-2xl bg-[#f5f9fc] px-4 py-3">
+                                <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 sm:gap-3 sm:text-sm">
+                                  <div className="rounded-2xl bg-[#f5f9fc] px-3 py-2 sm:px-4 sm:py-3">
                                     <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
                                       Time Window
                                     </span>
@@ -785,7 +790,7 @@ export function ActivityDetailClient({ activity, images }: Props) {
                                     </span>
                                   </div>
 
-                                  <div className="rounded-2xl bg-[#f5f9fc] px-4 py-3">
+                                  <div className="rounded-2xl bg-[#f5f9fc] px-3 py-2 sm:px-4 sm:py-3">
                                     <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
                                       Capacity
                                     </span>
@@ -808,7 +813,7 @@ export function ActivityDetailClient({ activity, images }: Props) {
 
                               <div className="w-full max-w-full lg:max-w-[340px]">
                                 <div
-                                  className={`rounded-[26px] border p-5 ${
+                                  className={`rounded-[20px] border p-3 sm:rounded-[26px] sm:p-5 ${
                                     isSoldOut
                                       ? "border-slate-200 bg-white/70"
                                       : "border-[#dbe7f2] bg-[#fbfdff]"
@@ -884,7 +889,7 @@ export function ActivityDetailClient({ activity, images }: Props) {
       </section>
 
       {hasValidCoordinates(activity.latitude, activity.longitude) && (
-        <section className="bg-[#f4f8fc] pb-16">
+        <section className="bg-[#f4f8fc] pb-8 sm:pb-16">
           <div className="container mx-auto max-w-7xl px-4">
             <ListingMap
               title="Activity Map"
