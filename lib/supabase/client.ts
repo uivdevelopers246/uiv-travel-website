@@ -14,10 +14,7 @@ if (!supabasePublishableKey) {
 
 export function createClient() {
     return createBrowserClient<Database>(
-        supabaseUrl! as string,
-        supabasePublishableKey! as string,
+        supabaseUrl!,
+        supabasePublishableKey!,
     )
 }
-
-export const browserClient = createClient()
-

@@ -234,29 +234,6 @@ export function checkoutCartFingerprint(lines: CartLine[]): string {
   return createHash("sha256").update(JSON.stringify(items)).digest("hex");
 }
 
-/**
- * Optional M4-C path: embedded SetupIntent (e.g. Elements) instead of hosted Checkout setup.
- * Returns the client secret for the client and the SetupIntent id to store on the order if needed.
- */
-export async function createSetupIntentForOrder(input: {
-  order: Order;
-  stripeCustomerId: string;
-}): Promise<{ setupIntentId: string; clientSecret: string | null }> {
-  const stripe = getStripe();
-  const si = await stripe.setupIntents.create({
-    customer: input.stripeCustomerId,
-    usage: "off_session",
-    metadata: {
-      [STRIPE_METADATA_ORDER_ID_KEY]: input.order.id,
-      flow: STRIPE_METADATA_FLOW_M4C_SETUP,
-    },
-  });
-  return {
-    setupIntentId: si.id,
-    clientSecret: si.client_secret,
-  };
-}
-
 export async function createPaymentMethodUpdateSessionForOrder(input: {
   order: Order;
   siteUrl: string;

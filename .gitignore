@@ -45,6 +45,13 @@ project-sc
 /.agents/
 /.cursor/
 /.gstack/
+/.impeccable/
 /.idea/
 /.vscode/
 /.plans/
+
+# local agent instructions and product/design notes
+/AGENTS.md
+/CLAUDE.md
+/DESIGN.md
+/PRODUCT.md

@@ -190,7 +190,7 @@ Unique: `vendors.owner_user_id` (one vendor per user).
 
 ## Migration Workflow
 
-Migrations live under `supabase/migrations/` and are applied in filename order (timestamp prefix). Typical commands: `supabase db push` (apply), `supabase db reset` (reset and re-apply). Seed via `tsx scripts/seed.ts` (separate from migrations).
+Migrations live under `supabase/migrations/` and are applied in filename order (timestamp prefix). Typical commands: `supabase db push` (apply), `supabase db reset --local` (reset the local database and re-apply). Local resets also load `supabase/seed.sql` and `supabase/seed-data/itinerary-calendar.sql`, as configured under `[db.seed]` in `supabase/config.toml`.
 
 **Order (as in repo):**
 

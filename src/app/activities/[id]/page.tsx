@@ -20,7 +20,7 @@ export default async function ActivityDetailPage({ params }: Props) {
   const supabase = await createClient();
 
   // Fetch activity with vendor info
-  const { data: activity, error } = await (supabase as any)
+  const { data: activity, error } = await supabase
     .from("activities")
     .select(
       `
@@ -48,26 +48,25 @@ export default async function ActivityDetailPage({ params }: Props) {
     notFound();
   }
 
-  // Fetch activity images (once migration is applied)
-  // For now, this will return empty array if table doesn't exist
+  // Keep the cover image available if the gallery cannot be loaded.
   let images: { id: string; image_url: string; alt_text: string | null; display_order: number }[] = [];
   try {
     const { data: imageData } = await supabase
-      .from("activity_images" as "activities") // Type assertion until types are regenerated
+      .from("activity_images")
       .select("id, image_url, alt_text, display_order")
-      .eq("activity_id" as "id", id)
+      .eq("activity_id", id)
       .order("display_order", { ascending: true });
-    images = (imageData as unknown as typeof images) ?? [];
+    images = imageData ?? [];
   } catch {
-    // Table may not exist yet
+    // The cover image remains available without the gallery.
   }
 
   return (
     <>
       <Header />
       <ActivityDetailClient 
-        activity={activity as any} 
-        images={images ?? []} 
+        activity={activity}
+        images={images}
       />
     </>
   );

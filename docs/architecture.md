@@ -1,6 +1,6 @@
 ## System Overview
 
-UIV Travel is a Barbados-focused travel site where **vendors** list **activities** (water sports, wildlife, adventure, culture, nature) and **accommodations** (lodging listings). **Public** users browse published activities and accommodations; **admins** manage users and vendors. The app is a single Next.js application using the App Router, with Supabase for auth, Postgres (with PostGIS), and storage. Activity and accommodation map pins use user-provided coordinates via Postgres RPCs (`set_activity_location_point`, `set_accommodation_location_point`); no map UI is present in the repo yet.
+LocalPin is a Barbados-focused travel site where **vendors** list **activities** (water sports, wildlife, adventure, culture, nature) and **accommodations** (lodging listings). **Public** users browse published activities and accommodations; **admins** manage users and vendors. The app is a single Next.js application using the App Router, with Supabase for auth, Postgres (with PostGIS), and storage. Activity and accommodation map pins use user-provided coordinates via Postgres RPCs (`set_activity_location_point`, `set_accommodation_location_point`), with Mapbox maps for discovery and vendor location editing.
 
 ## Tech Stack
 
@@ -11,7 +11,7 @@ UIV Travel is a Barbados-focused travel site where **vendors** list **activities
   - PostGIS extension enabled for `activities.location_point` and `accommodations.location_point`
 - **Styling:** Tailwind CSS v4, Google Fonts (Playfair Display, Source Sans 3)
 - **Testing:** Vitest
-- **Database tooling:** Supabase CLI (`supabase db push`, `supabase db reset`), seed script `scripts/seed.ts`
+- **Database tooling:** Supabase CLI (`supabase db push`, `supabase db reset`); local reset loads `supabase/seed.sql` and `supabase/seed-data/itinerary-calendar.sql` as configured in `supabase/config.toml`.
 
 ## Runtime Environments
 
@@ -112,7 +112,8 @@ Paid **activity** and **accommodation** bookings share cart → Checkout **setup
 
 ## Auth & Authorization Model (High-level)
 
-- **Auth:** Supabase Auth. Email OTP (magic link / OTP). Signup uses `signInWithOtp`; confirmation is handled by `GET /auth/confirm` (verifies `token_hash` and `type`, then redirects). **Next.js 16** uses root **`proxy.ts`** (export `proxy`) instead of `middleware.ts` for the same role: it calls `updateSession` from `lib/supabase/proxy.ts` so Supabase cookies/session refresh run on matched routes. The `config.matcher` in `proxy.ts` defines which paths run through this layer.
+- **Auth:** Supabase Auth with email/password signup and sign-in. `GET /auth/confirm` verifies email token hashes or exchanges PKCE codes, then redirects to a validated local path. **Next.js 16** uses root **`proxy.ts`** (export `proxy`) to call `updateSession` from `lib/supabase/proxy.ts` so Supabase cookies/session refresh run on matched routes. The `config.matcher` in `proxy.ts` defines which paths run through this layer.
+- **Password recovery:** `/auth/forgot-password` requests a recovery email with `resetPasswordForEmail`. The callback is `<site-origin>/auth/confirm?next=%2Fauth%2Freset-password`; `/auth/reset-password` requires a valid authenticated session before updating the password. Open the email in the browser that requested it so the PKCE verifier is available. Invalid or expired callbacks return to the request form. Add this exact callback URL for each deployed origin to **Supabase Authentication → URL Configuration → Redirect URLs**; localhost/127.0.0.1 callbacks are included in `supabase/config.toml`. Hosted project settings and email delivery must be verified separately. Custom recovery email templates should retain `{{ .ConfirmationURL }}`, or point to `/auth/confirm?token_hash={{ .TokenHash }}&type=recovery`.
 - **Roles (application-level):** Derived in app and API via `getUserRole(supabase)` from `@/lib/auth/roles`: **guest** (no user), **user** (authenticated, no vendor/admin), **vendor** (has row in `vendors`), **admin** (has row in `site_admins`). Used for route protection (e.g. manage pages, admin users) and API authorization (e.g. PATCH/DELETE activity, POST status, admin-only `/api/admin/users`, vendor/admin activity and accommodation booking routes under `/api/vendor/*` and `/api/admin/*`).
 - **Protected routes:** Server components (e.g. `/activities/manage`, `/activities/manage/[id]`, `/admin/users`) call `getUserRole()` and redirect or render “Access denied” for guest / non-vendor or non-admin as appropriate. API routes return 401/403 when role is insufficient.
 

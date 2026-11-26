@@ -12,20 +12,4 @@ export type NotificationEventType =
   | "provider_booking_pending"
   | "daily_digest";
 
-export type NotificationStatus =
-  | "pending"
-  | "published"
-  | "processing"
-  | "sent"
-  | "skipped"
-  | "failed";
-
 export type NotificationPayload = Json;
-
-export type NotificationPublishMessage = {
-  notificationId: string;
-  channel: NotificationChannel;
-  eventType: NotificationEventType;
-  userId: string;
-  dedupeKey: string | null;
-};

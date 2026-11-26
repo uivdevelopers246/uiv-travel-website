@@ -9,7 +9,6 @@
     "lint": "eslint",
     "db:migrate": "supabase db push",
     "db:reset": "supabase db reset",
-    "db:seed": "tsx scripts/seed.ts",
     "notifications:check": "node --conditions=react-server --import tsx scripts/notifications-check.ts",
     "notifications:test": "node --conditions=react-server --import tsx scripts/notifications-test.ts",
     "notifications:drain": "node --import tsx scripts/notifications-drain.ts",

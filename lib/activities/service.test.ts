@@ -1,9 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/supabase/types/database";
 import { createActivity, listActivities, updateActivity, deleteActivity, getActivityById } from "./service";
 
 
 function makeMockSupabase() {
-    const query: any = {
+    const query = {
         select: vi.fn().mockReturnThis(),
         order: vi.fn().mockReturnThis(),
         range: vi.fn().mockReturnThis(),
@@ -13,31 +15,31 @@ function makeMockSupabase() {
         then: undefined,
     };
 
-    const supabase: any = {
+    const supabase = {
         from: vi.fn(() => query),
         auth: {
           getUser: vi.fn()
         }
     };
 
-    return { supabase, query }
+    return { supabase: supabase as unknown as SupabaseClient<Database> & typeof supabase, query }
 }
 
 function makeMockSupabaseForCreateActivity() {
-  const activitiesQuery: any = {
+  const activitiesQuery = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       insert: vi.fn().mockReturnThis(),
       single: vi.fn(),
   };
 
-  const vendorsQuery: any = {
+  const vendorsQuery = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       maybeSingle: vi.fn(),
   };
 
-  const supabase: any = {
+  const supabase = {
       from: vi.fn((table: string) => (table === "vendors" ? vendorsQuery : activitiesQuery)),
       auth: {
           getUser: vi.fn().mockResolvedValue({
@@ -48,11 +50,11 @@ function makeMockSupabaseForCreateActivity() {
       rpc: vi.fn().mockResolvedValue({ data: null, error: null}),
   };
 
-  return { supabase, activitiesQuery, vendorsQuery };
+  return { supabase: supabase as unknown as SupabaseClient<Database> & typeof supabase, activitiesQuery, vendorsQuery };
 }
 
 function makeMockSupabaseForUpdateDelete() {
-  const activitiesQuery: any = {
+  const activitiesQuery = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
@@ -60,13 +62,13 @@ function makeMockSupabaseForUpdateDelete() {
     single: vi.fn(),
   };
 
-  const vendorsQuery: any = {
+  const vendorsQuery = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn(),
   };
 
-  const supabase: any = {
+  const supabase = {
     from: vi.fn((table: string) => (table === "vendors" ? vendorsQuery : activitiesQuery)),
     auth: {
       getUser: vi.fn().mockResolvedValue({
@@ -77,7 +79,7 @@ function makeMockSupabaseForUpdateDelete() {
     rpc: vi.fn().mockResolvedValue({ data: null, error: null}),
   };
 
-  return { supabase, activitiesQuery, vendorsQuery };
+  return { supabase: supabase as unknown as SupabaseClient<Database> & typeof supabase, activitiesQuery, vendorsQuery };
 }
 
 describe("activities service", () => {
@@ -208,7 +210,7 @@ describe("activities service", () => {
 
   
   it("createActivity: throws when user is not signed in", async () => {
-    const { supabase, vendorsQuery } = makeMockSupabaseForCreateActivity();
+    const { supabase } = makeMockSupabaseForCreateActivity();
     supabase.auth.getUser.mockResolvedValueOnce({ data: { user: null }, error: null });
 
     await expect(
@@ -656,7 +658,7 @@ it("createActivity: throws when user has no vendor", async () => {
 
 
   it("updateActivity: throws when user is not signed in", async () => {
-    const { supabase, vendorsQuery } = makeMockSupabaseForUpdateDelete();
+    const { supabase } = makeMockSupabaseForUpdateDelete();
     supabase.auth.getUser.mockResolvedValueOnce({ data: { user: null }, error: null });
 
     await expect(

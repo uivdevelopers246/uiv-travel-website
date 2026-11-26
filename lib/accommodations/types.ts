@@ -8,10 +8,6 @@ export type {
   PublicAccommodation,
 } from "./service";
 
-// Import constants for UI components
-import type { accommodationTypes } from "./constants";
-export type AccommodationType = (typeof accommodationTypes)[number]["value"];
-
 /**
  * Accommodation image type for gallery display.
  */
@@ -45,29 +41,6 @@ export type AccommodationDisplay = {
   image_url: string | null;
   is_featured: boolean;
   vendors?: { name: string | null } | null;
-};
-
-/**
- * Extended accommodation type with full details for detail pages.
- */
-export type AccommodationDetail = AccommodationDisplay & {
-  check_in_time: string | null;
-  check_out_time: string | null;
-  suitable_for_children: boolean;
-  wheelchair_accessible: boolean;
-  smoking_allowed: boolean;
-  pets_allowed: boolean;
-  beach_access_or_view: boolean;
-  transportation_provided: boolean;
-  transportation_notes: string | null;
-  pickup_notes: string | null;
-  images?: AccommodationImage[];
-  vendors?: {
-    id: string;
-    name: string | null;
-    contact_email: string | null;
-    business_phone: string | null;
-  } | null;
 };
 
 /** Maximum number of images allowed per accommodation */

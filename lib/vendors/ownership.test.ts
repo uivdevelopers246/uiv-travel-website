@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/supabase/types/database";
 import {
   getCurrentUserIdOrThrow,
   getVendorIdForCurrentUser,
@@ -13,7 +15,7 @@ describe("getCurrentUserIdOrThrow", () => {
           error: null,
         }),
       },
-    } as any;
+    } as unknown as SupabaseClient<Database>;
 
     await expect(getCurrentUserIdOrThrow(supabase)).rejects.toThrow(
       "Unauthorized",
@@ -28,7 +30,7 @@ describe("getCurrentUserIdOrThrow", () => {
           error: null,
         }),
       },
-    } as any;
+    } as unknown as SupabaseClient<Database>;
 
     await expect(getCurrentUserIdOrThrow(supabase)).resolves.toBe("user-abc");
   });
@@ -56,7 +58,7 @@ describe("getVendorIdForCurrentUser", () => {
         }),
       },
       from: vi.fn(),
-    } as any;
+    } as unknown as SupabaseClient<Database>;
 
     await expect(getVendorIdForCurrentUser(supabase)).rejects.toThrow(
       "Unauthorized",
@@ -77,7 +79,7 @@ describe("getVendorIdForCurrentUser", () => {
         }),
       },
       from: vi.fn(() => vendorsQuery),
-    } as any;
+    } as unknown as SupabaseClient<Database>;
 
     const id = await getVendorIdForCurrentUser(supabase);
     expect(id).toBe("vendor-1");
@@ -93,7 +95,7 @@ describe("getVendorIdForCurrentUser", () => {
     const supabase = {
       auth: { getUser },
       from: vi.fn(() => vendorsQuery),
-    } as any;
+    } as unknown as SupabaseClient<Database>;
 
     const id = await getVendorIdForCurrentUser(supabase, "explicit-user");
     expect(id).toBe("vendor-2");
@@ -114,7 +116,7 @@ describe("getVendorIdForCurrentUser", () => {
         }),
       },
       from: vi.fn(() => vendorsQuery),
-    } as any;
+    } as unknown as SupabaseClient<Database>;
 
     await expect(getVendorIdForCurrentUser(supabase)).rejects.toThrow(
       "User is not associated with a vendor",
@@ -134,7 +136,7 @@ describe("getVendorIdForCurrentUser", () => {
         }),
       },
       from: vi.fn(() => vendorsQuery),
-    } as any;
+    } as unknown as SupabaseClient<Database>;
 
     await expect(getVendorIdForCurrentUser(supabase)).rejects.toThrow(
       "database unavailable",

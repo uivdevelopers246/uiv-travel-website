@@ -472,13 +472,6 @@ export async function updateOrderPaidAfterSettlementCapture(
   return data;
 }
 
-export async function updateOrderStatusPaymentPending(
-  supabase: SupabaseClient<Database>,
-  orderId: string,
-): Promise<Order> {
-  return updateOrderStatus(supabase, orderId, "payment_pending");
-}
-
 /**
  * M4-C: first settlement PI created off-session — move to **`payment_pending`** and record attempt **1**.
  * Returns **`null`** if another writer already attached a PI (idempotent loss).

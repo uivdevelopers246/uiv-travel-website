@@ -12,7 +12,7 @@ Supabase project: enable PostGIS, create schemas, seed script.
 Add .env management, secret mapping (Vercel env vars ↔ Supabase).
 
 Basic /api/health route & landing page.
-Deliverables: live preview links on PRs; npm run db:migrate && db:seed.
+Deliverables: live preview links on PRs; npm run db:migrate; local seed data loaded by npm run db:reset -- --local.
 Exit: main deploys green; DB + app spin up locally in <5 min.
 
 Time: full-time 2–3 days | 2 devs part-time 1 week.

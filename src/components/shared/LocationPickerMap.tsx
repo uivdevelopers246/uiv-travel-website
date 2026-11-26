@@ -1,7 +1,6 @@
 "use client";
 
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
-import type mapboxgl from "mapbox-gl";
 import { hasValidCoordinates } from "@/lib/utils/geo";
 import { BARBADOS_CENTER, getMapboxToken, loadMapboxGl, MAPBOX_STYLE_URL } from "./mapbox";
 
@@ -228,8 +227,6 @@ export function LocationPickerMap({
     reverseUrl.searchParams.set("limit", "1");
     reverseUrl.searchParams.set("country", "BB");
 
-    setAddressError(null);
-
     void fetch(reverseUrl.toString(), { signal: controller.signal })
       .then(async response => {
         if (!response.ok) {
@@ -238,6 +235,7 @@ export function LocationPickerMap({
 
         const data = (await response.json()) as MapboxGeocodeResponse;
         const label = getFeatureLabel(data.features?.[0]);
+        setAddressError(null);
 
         if (label && onResolvedSearchValueRef.current) {
           onResolvedSearchValueRef.current(label);

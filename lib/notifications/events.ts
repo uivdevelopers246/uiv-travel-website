@@ -5,7 +5,6 @@ import type {
   NotificationChannel,
   NotificationEventType,
   NotificationPayload,
-  NotificationStatus,
 } from "./types";
 
 export type NotificationEventRow =
@@ -84,19 +83,4 @@ export async function createNotificationEvent(
       error?.message ?? "missing inserted row"
     }`,
   );
-}
-
-export async function updateNotificationEventStatus(
-  supabase: SupabaseClient<Database>,
-  notificationId: string,
-  status: NotificationStatus,
-): Promise<void> {
-  const { error } = await supabase
-    .from("notification_events")
-    .update({ status })
-    .eq("id", notificationId);
-
-  if (error) {
-    throw new Error(`Could not update notification event: ${error.message}`);
-  }
 }

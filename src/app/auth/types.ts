@@ -1,5 +1,3 @@
-export type AuthMode = 'login' | 'signup'
-
 export interface AuthFormState {
   email: string
   password: string

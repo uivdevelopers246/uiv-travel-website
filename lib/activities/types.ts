@@ -42,19 +42,5 @@ export type ActivityDisplay = {
   vendors?: { name: string | null } | null;
 };
 
-/**
- * Extended activity type with full details for detail pages.
- */
-export type ActivityDetail = ActivityDisplay & {
-  rating: number | null;
-  images?: ActivityImage[];
-  vendors?: {
-    id: string;
-    name: string | null;
-    contact_email: string | null;
-    business_phone: string | null;
-  } | null;
-};
-
 /** Maximum number of images allowed per activity */
 export const MAX_ACTIVITY_IMAGES = 20;
