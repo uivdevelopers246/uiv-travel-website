@@ -4,6 +4,8 @@ import { FormEvent, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { AuthFormState } from '../types'
+import Link from 'next/link'
+import { getSafeRedirectPath } from '@/lib/auth/redirect'
 
 export function LoginForm() {
   const router = useRouter()
@@ -22,9 +24,7 @@ export function LoginForm() {
   // Optional: allow redirect param (?redirect=/something)
   // Validate redirect is a safe relative path to prevent open redirect attacks
   const redirectParam = searchParams.get('redirect') ?? '/'
-  const redirectTo = redirectParam.startsWith('/') && !redirectParam.startsWith('//') 
-    ? redirectParam 
-    : '/'
+  const redirectTo = getSafeRedirectPath(redirectParam)
 
   const toMessage = (value: unknown, fallback: string) => {
     if (typeof value === 'string' && value.trim().length > 0) return value
@@ -141,6 +141,10 @@ export function LoginForm() {
           </button>
         </div>
       </div>
+
+      <p className="text-right text-sm">
+        <Link href="/auth/forgot-password" className="font-semibold text-[#407FC2] hover:underline">Forgot password?</Link>
+      </p>
 
       {state.error && (
         <p className="text-sm text-red-600">
