@@ -441,8 +441,8 @@ export function VendorBookingsClient({ initialListingFilter = "" }: { initialLis
         </section>
 
         <section className="rounded-[28px] border border-[#d8e5f2] bg-white p-6 shadow-[0_20px_60px_rgba(25,48,89,0.08)]">
-          <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
-            <label className="grid gap-2 text-sm font-semibold text-[#193059]">
+          <div className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
+            <label className="grid min-w-0 gap-2 text-sm font-semibold text-[#193059]">
               Status
               <select
                 value={statusFilter}
@@ -450,7 +450,7 @@ export function VendorBookingsClient({ initialListingFilter = "" }: { initialLis
                   setStatusFilter(event.target.value as StatusFilterValue);
                   setPage(0);
                 }}
-                className="rounded-2xl border border-[#d8e5f2] bg-[#f8fbfe] px-4 py-3 text-sm font-medium text-[#193059] outline-none transition-colors focus:border-[#407FC2]"
+                className="w-full min-w-0 max-w-full rounded-2xl border border-[#d8e5f2] bg-[#f8fbfe] px-4 py-3 text-sm font-medium text-[#193059] outline-none transition-colors focus:border-[#407FC2]"
               >
                 <option value="pending">Pending</option>
                 <option value="confirmed">Confirmed</option>
@@ -460,7 +460,7 @@ export function VendorBookingsClient({ initialListingFilter = "" }: { initialLis
               </select>
             </label>
 
-            <label className="grid gap-2 text-sm font-semibold text-[#193059]">
+            <label className="grid min-w-0 gap-2 text-sm font-semibold text-[#193059]">
               Listing
               <select
                 value={activityFilter}
@@ -468,7 +468,7 @@ export function VendorBookingsClient({ initialListingFilter = "" }: { initialLis
                   setActivityFilter(event.target.value);
                   setPage(0);
                 }}
-                className="rounded-2xl border border-[#d8e5f2] bg-[#f8fbfe] px-4 py-3 text-sm font-medium text-[#193059] outline-none transition-colors focus:border-[#407FC2]"
+                className="w-full min-w-0 max-w-full rounded-2xl border border-[#d8e5f2] bg-[#f8fbfe] px-4 py-3 text-sm font-medium text-[#193059] outline-none transition-colors focus:border-[#407FC2]"
               >
                 <option value="">All listings</option>
                 <optgroup label="Activities">

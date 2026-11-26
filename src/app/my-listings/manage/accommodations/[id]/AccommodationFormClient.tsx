@@ -49,6 +49,7 @@ type Props = {
   vendorId: string;
   initial?: AccommodationFormData;
   existingImages?: ManagedImage[];
+  canViewBookingRequests?: boolean;
 };
 
 const defaultFormData: AccommodationFormData = {
@@ -124,6 +125,7 @@ export function AccommodationFormClient({
   vendorId,
   initial = defaultFormData,
   existingImages = [],
+  canViewBookingRequests = false,
 }: Props) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
@@ -383,9 +385,9 @@ export function AccommodationFormClient({
               <Link href={`/my-listings/manage/accommodations/${accommodationId}/calendar`} className="rounded-lg bg-[#193059] px-4 py-2 text-sm font-semibold text-white hover:bg-[#407FC2]">
                 Calendar &amp; prices
               </Link>
-              <Link href={`/my-listings/bookings?accommodationId=${accommodationId}`} className="rounded-lg border border-[#407FC2] px-4 py-2 text-sm font-semibold text-[#407FC2] hover:bg-blue-50">
+              {canViewBookingRequests && <Link href={`/my-listings/bookings?accommodationId=${accommodationId}`} className="rounded-lg border border-[#407FC2] px-4 py-2 text-sm font-semibold text-[#407FC2] hover:bg-blue-50">
                 Manage bookings
-              </Link>
+              </Link>}
             </nav>
           )}
 

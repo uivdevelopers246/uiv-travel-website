@@ -91,6 +91,7 @@ export default async function ManageAccommodationEditPage({ params }: PageProps)
       <Header />
       <AccommodationFormClient
         mode="edit"
+        canViewBookingRequests={role === "vendor"}
         accommodationId={accommodation.id}
         vendorId={accommodation.vendor_id}
         initial={{

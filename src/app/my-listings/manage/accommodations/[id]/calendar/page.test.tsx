@@ -42,6 +42,7 @@ describe("host calendar page authorization", () => {
     expect(mocks.vendor).not.toHaveBeenCalled();
     expect(query.eq).not.toHaveBeenCalledWith("vendor_id", expect.anything());
     expect(html).toContain("Calendar editor");
+    expect(html).not.toContain("/my-listings/bookings");
   });
 
   it("does not render the calendar for missing ownership or unauthorized roles", async () => {

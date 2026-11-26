@@ -56,7 +56,7 @@ export default async function AccommodationCalendarPage({
             <h1 className="mt-2 text-3xl font-semibold" style={{ fontFamily: "var(--font-playfair)" }}>{accommodation.name}</h1>
             <p className="mt-2 text-sm text-slate-600">{accommodation.parish ?? accommodation.address ?? "No location set"}</p>
             <nav aria-label="Accommodation management" className="mt-5 flex flex-wrap gap-3">
-              <Link href={`/my-listings/bookings?accommodationId=${id}`} className="rounded-lg bg-[#193059] px-4 py-2 text-sm font-semibold text-white hover:bg-[#407FC2]">Manage bookings</Link>
+              {role === "vendor" && <Link href={`/my-listings/bookings?accommodationId=${id}`} className="rounded-lg bg-[#193059] px-4 py-2 text-sm font-semibold text-white hover:bg-[#407FC2]">Manage bookings</Link>}
               <Link href={`/my-listings/manage/accommodations/${id}`} className="rounded-lg border border-[#407FC2] px-4 py-2 text-sm font-medium text-[#407FC2] hover:bg-blue-50">Edit accommodation</Link>
               <Link href="/my-listings" className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">My listings</Link>
             </nav>

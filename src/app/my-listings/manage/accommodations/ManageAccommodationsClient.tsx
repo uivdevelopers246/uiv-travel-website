@@ -27,11 +27,13 @@ export type Accommodation = {
 type Props = {
   accommodations: Accommodation[];
   onRefresh: () => Promise<void>;
+  canViewBookingRequests?: boolean;
 };
 
 export function ManageAccommodationsClient({
   accommodations,
   onRefresh,
+  canViewBookingRequests = false,
 }: Props) {
   const [pendingId, setPendingId] = useState<string | null>(null);
 
@@ -121,7 +123,7 @@ export function ManageAccommodationsClient({
             return (
               <div
                 key={accommodation.id}
-                className="flex flex-wrap items-center gap-4 rounded-lg bg-white p-6 shadow-sm sm:gap-6"
+                className="flex min-w-0 flex-col items-start gap-4 rounded-lg bg-white p-4 shadow-sm sm:p-6 lg:flex-row lg:items-center lg:gap-6"
               >
                 <div className="h-24 w-24 flex-shrink-0 overflow-hidden rounded-lg bg-gray-100">
                   <img
@@ -134,9 +136,9 @@ export function ManageAccommodationsClient({
                   />
                 </div>
 
-                <div className="min-w-0 flex-1">
-                  <div className="mb-1 flex items-center gap-3">
-                    <h3 className="truncate text-lg font-semibold text-gray-900">
+                <div className="w-full min-w-0 flex-1">
+                  <div className="mb-1 flex flex-wrap items-center gap-3">
+                    <h3 className="min-w-0 break-words text-lg font-semibold text-gray-900">
                       {accommodation.name}
                     </h3>
                     <span
@@ -149,7 +151,7 @@ export function ManageAccommodationsClient({
                       {accommodation.status}
                     </span>
                   </div>
-                  <p className="truncate text-sm text-gray-600">
+                  <p className="break-words text-sm text-gray-600">
                     {accommodation.parish ??
                       accommodation.address ??
                       "No location set"}
@@ -169,12 +171,12 @@ export function ManageAccommodationsClient({
                   >
                     Calendar &amp; prices
                   </Link>
-                  <Link
+                  {canViewBookingRequests && <Link
                     href={`/my-listings/bookings?accommodationId=${accommodation.id}`}
                     className="rounded-lg border border-[#407FC2] px-4 py-2 text-sm font-medium text-[#407FC2] transition-colors hover:bg-blue-50"
                   >
                     Bookings
-                  </Link>
+                  </Link>}
                   {accommodation.status !== "published" && (
                     <button
                       onClick={() => updateStatus(accommodation.id, "published")}

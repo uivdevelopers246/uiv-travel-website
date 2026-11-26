@@ -105,7 +105,7 @@ export function ManageActivitiesClient({ activities, onRefresh }: Props) {
           {activities.map((activity) => (
             <div
               key={activity.id}
-              className="flex items-center gap-6 rounded-lg bg-white p-6 shadow-sm"
+              className="flex min-w-0 flex-col items-start gap-4 rounded-lg bg-white p-4 shadow-sm sm:p-6 lg:flex-row lg:items-center lg:gap-6"
             >
               <div className="h-24 w-24 flex-shrink-0 overflow-hidden rounded-lg bg-gray-100">
                 <img
@@ -115,9 +115,9 @@ export function ManageActivitiesClient({ activities, onRefresh }: Props) {
                 />
               </div>
 
-              <div className="min-w-0 flex-1">
-                <div className="mb-1 flex items-center gap-3">
-                  <h3 className="truncate text-lg font-semibold text-gray-900">
+              <div className="w-full min-w-0 flex-1">
+                <div className="mb-1 flex flex-wrap items-center gap-3">
+                  <h3 className="min-w-0 break-words text-lg font-semibold text-gray-900">
                     {activity.title}
                   </h3>
                   <span
@@ -130,7 +130,7 @@ export function ManageActivitiesClient({ activities, onRefresh }: Props) {
                     {activity.status}
                   </span>
                 </div>
-                <p className="truncate text-sm text-gray-600">
+                <p className="break-words text-sm text-gray-600">
                   {activity.location ?? "No location set"}
                 </p>
                 <p className="mt-1 text-sm text-gray-500">
@@ -141,7 +141,7 @@ export function ManageActivitiesClient({ activities, onRefresh }: Props) {
                 </p>
               </div>
 
-              <div className="flex flex-shrink-0 items-center gap-2">
+              <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:shrink-0">
                 {activity.status !== "published" && (
                   <button
                     onClick={() => updateStatus(activity.id, "published")}

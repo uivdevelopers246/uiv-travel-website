@@ -155,7 +155,7 @@ export function MyListingsClient() {
         </div>
 
         {/* Tab Buttons */}
-        <div className="flex gap-4 mb-8">
+        <div className="mb-8 flex flex-wrap gap-3">
           <button
             onClick={() => setActiveTab("activities")}
             className={`px-6 py-3 text-sm font-semibold rounded-lg transition-all duration-300 ${
@@ -190,6 +190,7 @@ export function MyListingsClient() {
           <ManageAccommodationsClient
             accommodations={accommodations}
             onRefresh={loadData}
+            canViewBookingRequests={role === "vendor"}
           />
         )}
       </div>
